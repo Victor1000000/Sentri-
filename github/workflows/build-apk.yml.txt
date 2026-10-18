@@ -1,0 +1,93 @@
+name: Build Sentri APK
+
+# Needs sentri.zip at the top of the repo. Run: Actions > Build Sentri APK > Run workflow.
+on:
+  workflow_dispatch:
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Unpack the code
+        run: unzip -q sentri.zip -d code
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate Android scaffolding, keep our own sources
+        working-directory: code/mobile
+        run: |
+          cp -R android/app/src/main /tmp/our_main
+          flutter create . --org ng.sentri --project-name sentri --platforms=android
+          rm -rf android/app/src/main && cp -R /tmp/our_main android/app/src/main
+
+      - name: Patch Gradle (minSdk 26, core library desugaring)
+        working-directory: code/mobile
+        run: |
+          python3 - <<'PY'
+          import os, re
+          kts, groovy = 'android/app/build.gradle.kts', 'android/app/build.gradle'
+          path = kts if os.path.exists(kts) else groovy
+          s = open(path).read()
+          s = re.sub(r'flutter\.minSdkVersion', '26', s)
+          if path == kts:
+              if 'isCoreLibraryDesugaringEnabled' not in s:
+                  s = s.replace('compileOptions {', 'compileOptions {\n        isCoreLibraryDesugaringEnabled = true', 1)
+              if 'coreLibraryDesugaring(' not in s:
+                  s += '\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n}\n'
+          else:
+              if 'coreLibraryDesugaringEnabled' not in s:
+                  s = s.replace('compileOptions {', 'compileOptions {\n        coreLibraryDesugaringEnabled true', 1)
+              if 'coreLibraryDesugaring ' not in s:
+                  s += "\ndependencies {\n    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'\n}\n"
+          open(path, 'w').write(s)
+          PY
+
+      - name: Get packages
+        working-directory: code/mobile
+        run: flutter pub get
+
+      - name: Analyze
+        working-directory: code/mobile
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings 2>&1 | tee ../../analyze.log
+        continue-on-error: true
+
+      - name: Unit tests
+        working-directory: code/mobile
+        run: flutter test 2>&1 | tee ../../test.log
+        continue-on-error: true
+
+      - name: Build the APK
+        working-directory: code/mobile
+        run: |
+          set -o pipefail
+          flutter build apk --release \
+            --dart-define=API_BASE_URL=${{ secrets.API_BASE_URL || 'https://api.example.invalid' }} \
+            2>&1 | tee ../../build.log
+
+      - name: Upload APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sentri-apk
+          path: code/mobile/build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs
+          path: |
+            analyze.log
+            test.log
+            build.log
