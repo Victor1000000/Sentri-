@@ -1,0 +1,63 @@
+name: Apply Telegram sign-up patch
+
+# One-time helper. Needs sentri-telegram-signup.patch at the top of the repo.
+# Run it by hand: Actions > Apply Telegram sign-up patch > Run workflow.
+# It applies the patch, runs the backend checks, and only if they pass it pushes the result to main
+# and starts the APK build.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply the patch
+        run: |
+          set -o pipefail
+          test -f sentri-telegram-signup.patch || { echo "::error::sentri-telegram-signup.patch is not at the top of the repo"; exit 1; }
+          git apply --check sentri-telegram-signup.patch 2>&1 | tee "$RUNNER_TEMP/apply.log" || { echo "::error::The patch does not fit the current code: $(head -c 600 "$RUNNER_TEMP/apply.log" | tr '\n' ' ')"; exit 1; }
+          git apply sentri-telegram-signup.patch
+          git status --short
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Backend install, type check and tests
+        working-directory: backend
+        run: |
+          set -o pipefail
+          { npm install --no-audit --no-fund --no-package-lock \
+            && npx tsc --noEmit \
+            && npx vitest run --exclude test/pg.integration.test.ts; } 2>&1 | tee "$RUNNER_TEMP/check.log"
+
+      - name: Show the problem on the run page
+        if: failure()
+        run: |
+          python3 - <<'PY'
+          import os
+          p = os.path.join(os.environ['RUNNER_TEMP'], 'check.log')
+          t = open(p, errors='replace').read()[-3500:] if os.path.exists(p) else 'no log'
+          print('::error title=backend check::' + t.replace('%', '%25').replace('\r', '').replace('\n', '%0A'))
+          PY
+
+      - name: Commit and push to main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -q sentri-telegram-signup.patch
+          git add -A
+          git commit -q -m "Sign-up codes through a Telegram bot; fix backend type errors"
+          git push origin HEAD:main
+
+      - name: Start the APK build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run sentri-apk.yml --ref main
