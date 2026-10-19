@@ -30,7 +30,8 @@ jobs:
         run: |
           cp -R android/app/src/main /tmp/our_main
           flutter create . --org ng.sentri --project-name sentri --platforms=android
-          rm -rf android/app/src/main && cp -R /tmp/our_main android/app/src/main
+          cp -R /tmp/our_main/. android/app/src/main/
+          rm -f test/widget_test.dart
 
       - name: Patch Gradle (minSdk 26, core library desugaring)
         run: |
