@@ -1,0 +1,129 @@
+name: Build Sentri APK
+
+# Runs on every push to main, or by hand: Actions > Build Sentri APK > Run workflow.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate Android scaffolding, keep our own sources
+        run: |
+          cp -R android/app/src/main /tmp/our_main
+          flutter create . --org ng.sentri --project-name sentri --platforms=android
+          rm -rf android/app/src/main && cp -R /tmp/our_main android/app/src/main
+
+      - name: Patch Gradle (minSdk 26, core library desugaring)
+        run: |
+          python3 - <<'PY'
+          import os, re
+          kts, groovy = 'android/app/build.gradle.kts', 'android/app/build.gradle'
+          path = kts if os.path.exists(kts) else groovy
+          s = open(path).read()
+          s = re.sub(r'flutter\.minSdkVersion', '26', s)
+          if path == kts:
+              if 'isCoreLibraryDesugaringEnabled' not in s:
+                  s = s.replace('compileOptions {', 'compileOptions {\n        isCoreLibraryDesugaringEnabled = true', 1)
+              if 'coreLibraryDesugaring(' not in s:
+                  s += '\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n}\n'
+          else:
+              if 'coreLibraryDesugaringEnabled' not in s:
+                  s = s.replace('compileOptions {', 'compileOptions {\n        coreLibraryDesugaringEnabled true', 1)
+              if 'coreLibraryDesugaring ' not in s:
+                  s += "\ndependencies {\n    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'\n}\n"
+          open(path, 'w').write(s)
+          PY
+
+      - name: Get packages
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings 2>&1 | tee "$GITHUB_WORKSPACE/analyze.log"
+        continue-on-error: true
+
+      - name: Unit tests
+        run: flutter test 2>&1 | tee "$GITHUB_WORKSPACE/test.log"
+        continue-on-error: true
+
+      - name: Build the APK (release, then debug as fallback)
+        run: |
+          set +e
+          DEFINE="--dart-define=API_BASE_URL=${{ secrets.API_BASE_URL || 'https://api.example.invalid' }}"
+          flutter build apk --release --no-shrink $DEFINE 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
+          if [ "${PIPESTATUS[0]}" -ne 0 ]; then
+            echo "::warning::Release build failed, trying a debug build instead"
+            flutter build apk --debug $DEFINE 2>&1 | tee "$GITHUB_WORKSPACE/build-debug.log"
+            exit "${PIPESTATUS[0]}"
+          fi
+
+      - name: Upload APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sentri-apk
+          path: mobile/build/app/outputs/flutter-apk/*.apk
+
+      - name: Show errors on the run page
+        if: always()
+        working-directory: .
+        run: |
+          python3 - <<'PY'
+          import os, re
+          W = os.environ.get('GITHUB_WORKSPACE', '.')
+          def read(n):
+              p = os.path.join(W, n)
+              return open(p, errors='replace').read().splitlines() if os.path.exists(p) else []
+          def emit(title, lines):
+              text = '\n'.join(lines)[-3500:]
+              text = text.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+              print(f'::error title={title}::{text}')
+          pat = re.compile(r'(error|Error:|FAILURE|What went wrong|Execution failed|Could not|Missing class|Unresolved|^e: |Exception)')
+          for name in ('build.log', 'build-debug.log'):
+              L = read(name)
+              if not L:
+                  continue
+              seen, uniq = set(), []
+              for l in (x for x in L if pat.search(x)):
+                  if l not in seen:
+                      seen.add(l); uniq.append(l)
+              emit(f'{name} matches', uniq[:40])
+              emit(f'{name} last lines', L[-35:])
+          T = read('test.log')
+          idx = next((i for i, l in enumerate(T) if '[E]' in l), None)
+          if idx is not None:
+              emit('failing test', T[idx:idx + 30])
+          A = [l for l in read('analyze.log') if ' error ' in l]
+          if A:
+              emit('analyzer errors', A[:30])
+          PY
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs
+          path: |
+            analyze.log
+            test.log
+            build.log
+            build-debug.log
+          if-no-files-found: ignore

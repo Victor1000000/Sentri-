@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="a11y_description">Lets Sentri notice the volume-button gesture (up, down, up, down) so you can start an emergency alert when your phone is locked. It only sees volume key presses. It cannot read your screen.</string>
+    <string name="tile_label">Sentri alert</string>
+    <string name="protection_channel">Protection status</string>
+    <string name="protection_on">Sentri protection is on</string>
+    <string name="alert_channel">Alert screen</string>
+    <string name="alert_open">Sentri</string>
+</resources>

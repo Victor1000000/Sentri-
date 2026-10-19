@@ -1,0 +1,101 @@
+name: Build Sentri APK
+
+# Phone-friendly setup: upload ONE file named sentri.zip to the top of the repository, then run this by hand:
+# Actions tab > Build Sentri APK > Run workflow. No folders to upload.
+on:
+  workflow_dispatch:
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unpack the code
+        run: unzip -q sentri.zip -d code
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install and test the server
+        working-directory: code/backend
+        run: |
+          npm install --no-audit --no-fund 2>&1 | tail -5
+          npx tsc --noEmit 2>&1 | tee ../../typecheck.log
+          npx vitest run --exclude test/pg.integration.test.ts 2>&1 | tee ../../backend-tests.log
+      - name: Keep the logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-logs
+          path: |
+            typecheck.log
+            backend-tests.log
+
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Unpack the code
+        run: unzip -q sentri.zip -d code
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Add the Android project files Flutter generates
+        working-directory: code/mobile
+        run: flutter create . --org ng.sentri --project-name sentri --platforms=android
+
+      - name: Set minimum Android version to 26
+        working-directory: code/mobile
+        run: |
+          for f in android/app/build.gradle android/app/build.gradle.kts; do
+            [ -f "$f" ] && sed -i 's/flutter\.minSdkVersion/26/g' "$f" || true
+          done
+
+      - name: Get packages
+        working-directory: code/mobile
+        run: flutter pub get
+
+      - name: Check the code
+        working-directory: code/mobile
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings 2>&1 | tee ../../analyze.log
+        continue-on-error: true
+
+      - name: Run the tests
+        working-directory: code/mobile
+        run: flutter test 2>&1 | tee ../../test.log
+        continue-on-error: true
+
+      - name: Build the APK
+        working-directory: code/mobile
+        run: |
+          set -o pipefail
+          flutter build apk --release \
+            --dart-define=API_BASE_URL=${{ secrets.API_BASE_URL || 'https://api.example.invalid' }} \
+            2>&1 | tee ../../build.log
+
+      - name: Keep the APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sentri-apk
+          path: code/mobile/build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Keep the logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-logs
+          path: |
+            analyze.log
+            test.log
+            build.log
