@@ -113,11 +113,13 @@ class FakeApi implements SentriApi {
   }
 
   String? devCode;
+  Uri? telegramUrl;
   int otpRequests = 0;
   @override
-  Future<String?> requestOtp(String phone) async {
+  Future<OtpRequest> requestOtp(String phone) async {
     otpRequests++;
-    return devCode;
+    _check();
+    return OtpRequest(devCode: devCode, telegramUrl: telegramUrl);
   }
   @override
   Future<SignInResult> verifyOtp({

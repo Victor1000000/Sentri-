@@ -99,9 +99,19 @@ class ContactStatus {
   }
 }
 
+/// The server's answer to "send me a sign-up code".
+class OtpRequest {
+  const OtpRequest({this.devCode, this.telegramUrl});
+
+  /// Only when the server runs in dev echo mode (mock SMS): the code itself, so sign-up can be tried without a text.
+  final String? devCode;
+
+  /// Telegram mode: the link that opens the login bot. The code then comes from the bot, not from a text message.
+  final Uri? telegramUrl;
+}
+
 abstract class SentriApi {
-  /// Returns the code only when the server runs in dev echo mode (mock SMS), so sign-up can be tried without a text.
-  Future<String?> requestOtp(String phone);
+  Future<OtpRequest> requestOtp(String phone);
   Future<SignInResult> verifyOtp({
     required String phone,
     required String code,
@@ -269,14 +279,25 @@ class HttpSentriApi implements SentriApi {
   }
 
   @override
-  Future<String?> requestOtp(String phone) async {
+  Future<OtpRequest> requestOtp(String phone) async {
     final r = await _call('POST', '/v1/auth/otp/request', body: {'phone': phone}, auth: false);
     try {
       final j = jsonDecode(r.body);
-      return j is Map ? j['devCode'] as String? : null;
+      if (j is! Map) return const OtpRequest();
+      return OtpRequest(devCode: j['devCode'] as String?, telegramUrl: _telegramLink(j['telegramUrl']));
     } catch (_) {
-      return null;
+      return const OtpRequest();
     }
+  }
+
+  /// Accepts only a plain https link to t.me. Anything else the server sends is ignored, so a wrong or tampered
+  /// answer can never make the app open some other address.
+  static Uri? _telegramLink(Object? v) {
+    if (v is! String) return null;
+    final u = Uri.tryParse(v);
+    if (u == null || u.scheme != 'https' || u.host != 't.me' || u.userInfo.isNotEmpty) return null;
+    if (u.hasPort && u.port != 443) return null;
+    return u;
   }
 
   @override

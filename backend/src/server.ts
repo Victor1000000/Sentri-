@@ -41,6 +41,10 @@ import { SosEngine } from './modules/sos/engine.js';
 import { MemorySosStore } from './modules/sos/memory-store.js';
 import { PgSosStore } from './modules/sos/pg-store.js';
 import { BullScheduler, createRedis, engineJobHandler } from './queue/bull-scheduler.js';
+import { TelegramBotApi } from './modules/telegram/api.js';
+import { TelegramLoginBot } from './modules/telegram/bot.js';
+import { registerTelegramRoutes } from './modules/telegram/routes.js';
+import { deriveWebhookSecret } from './modules/telegram/secret.js';
 import { MockSmsProvider, type SmsProvider } from './providers/sms/SmsProvider.js';
 import { TermiiSmsProvider } from './providers/sms/TermiiProvider.js';
 import type { AuditSink, Scheduler, SosStore } from './domain/types.js';
@@ -223,8 +227,26 @@ if (env.ADMIN_JWT_SECRET) {
   log.info({}, 'admin API enabled');
 }
 
+// Sign-up codes through Telegram (OTP_PROVIDER=telegram). Only the code goes this way; SOS alerts never use the bot.
+const telegramApi = env.OTP_PROVIDER === 'telegram' ? new TelegramBotApi(env.TELEGRAM_BOT_TOKEN!) : undefined;
+// Unless TELEGRAM_WEBHOOK_SECRET is set, the webhook secret is derived from TOKEN_SECRET.
+const telegramSecret = env.TELEGRAM_WEBHOOK_SECRET ?? deriveWebhookSecret(env.TOKEN_SECRET);
+if (telegramApi) {
+  registerTelegramRoutes(app, {
+    bot: new TelegramLoginBot({
+      api: telegramApi,
+      otp,
+      defaultCountryCode: env.DEFAULT_COUNTRY_CODE,
+      chatLimiter: new FixedWindowLimiter(30, 60_000, clock),
+      log,
+    }),
+    secret: telegramSecret,
+  });
+}
+
 registerAuthRoutes(app, {
   otp,
+  telegramLoginUrl: telegramApi ? `https://t.me/${env.TELEGRAM_BOT_USERNAME!}?start=login` : undefined,
   devLastCode:
     env.OTP_DEV_ECHO && sms instanceof MockSmsProvider
       ? () => /\b(\d{6})\b/.exec(sms.sent.at(-1)?.text ?? '')?.[1] ?? null
@@ -276,6 +298,15 @@ retention?.start();
 
 await app.listen({ port: env.PORT, host: '0.0.0.0' });
 log.info({ port: env.PORT, store: env.STORE }, 'sentri backend listening');
+
+// Tell Telegram where to deliver bot messages. Best effort: if it fails the server still runs, and the failure is logged.
+if (telegramApi) {
+  const hook = `${env.PUBLIC_BASE_URL.replace(/\/+$/, '')}/v1/telegram/webhook`;
+  telegramApi.setWebhook(hook, telegramSecret).then(
+    () => log.info({}, 'telegram webhook set'),
+    (e) => log.error({ err: e instanceof Error ? e.message : 'unknown' }, 'telegram webhook not set'),
+  );
+}
 
 // Graceful shutdown: stop taking requests, then let queue workers and the pool finish.
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {

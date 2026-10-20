@@ -5,6 +5,9 @@ const bool = z
   .default('false')
   .transform((v) => v === 'true');
 
+/** Hosting dashboards often leave a variable set but empty. Treat that as "not set". */
+const blankIsUnset = (v: unknown) => (v === '' ? undefined : v);
+
 /** All configuration comes from the environment. No secrets live in code. */
 export const EnvSchema = z
   .object({
@@ -29,6 +32,11 @@ export const EnvSchema = z
     FCM_SERVICE_ACCOUNT_B64: z.string().optional(),
     GEOCODER: z.enum(['none', 'nominatim']).default('none'),
     NOMINATIM_URL: z.string().url().optional(),
+    /** Sign-up codes: 'sms' sends a text, 'telegram' sends the code through the Telegram bot. SOS alerts always use SMS_PROVIDER, never the bot. */
+    OTP_PROVIDER: z.enum(['sms', 'telegram']).default('sms'),
+    TELEGRAM_BOT_TOKEN: z.preprocess(blankIsUnset, z.string().regex(/^\d{5,}:[A-Za-z0-9_-]{20,}$/).optional()),
+    TELEGRAM_BOT_USERNAME: z.preprocess(blankIsUnset, z.string().regex(/^[A-Za-z][A-Za-z0-9_]{4,31}$/).optional()),
+    TELEGRAM_WEBHOOK_SECRET: z.preprocess(blankIsUnset, z.string().regex(/^[A-Za-z0-9_-]{16,256}$/).optional()),
     SMS_PROVIDER: z.enum(['mock', 'termii']).default('mock'),
     TERMII_API_KEY: z.string().optional(),
     TERMII_SENDER_ID: z.string().optional(),
@@ -81,6 +89,12 @@ export const EnvSchema = z
     if (v.PUSH_PROVIDER === 'fcm' && !v.FCM_SERVICE_ACCOUNT_B64) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['FCM_SERVICE_ACCOUNT_B64'], message: 'required when PUSH_PROVIDER=fcm' });
     }
+    if (v.OTP_PROVIDER === 'telegram') {
+      for (const k of ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_BOT_USERNAME'] as const) {
+        if (!v[k]) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [k], message: `${k} is required when OTP_PROVIDER=telegram` });
+      }
+      if (v.OTP_DEV_ECHO) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['OTP_DEV_ECHO'], message: 'OTP_DEV_ECHO cannot be used with OTP_PROVIDER=telegram' });
+    }
     if (v.SMS_PROVIDER === 'termii' && (!v.TERMII_API_KEY || !v.TERMII_SENDER_ID)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -92,7 +106,9 @@ export const EnvSchema = z
 export type Env = z.infer<typeof EnvSchema>;
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Env {
-  const parsed = EnvSchema.safeParse(env);
+  // On Render the public address is provided as RENDER_EXTERNAL_URL, so PUBLIC_BASE_URL need not be set by hand.
+  const publicBase = env.PUBLIC_BASE_URL || env.RENDER_EXTERNAL_URL;
+  const parsed = EnvSchema.safeParse(publicBase ? { ...env, PUBLIC_BASE_URL: publicBase } : env);
   if (!parsed.success) {
     // Print which variables are wrong, never their values.
     const problems = parsed.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`);

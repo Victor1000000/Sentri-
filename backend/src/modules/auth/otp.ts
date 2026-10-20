@@ -52,23 +52,36 @@ export class OtpService {
     return this.fc.blindIndex(`otp|${id}|${code}`);
   }
 
-  async request(phone: string): Promise<OtpRequestResult> {
+  /**
+   * Creates a fresh code for `phone` and hands it to `deliver` (SMS, Telegram, ...).
+   * Same checks every time: at most N codes per hour per number, and the spend guard when the delivery costs money
+   * (`costKobo` > 0; free channels like Telegram pass 0 and never touch the SMS budget).
+   * If delivery fails the reservation is returned.
+   */
+  async issue(phone: string, deliver: (code: string) => Promise<void>, costKobo: number = this.opts.smsCostKobo): Promise<OtpRequestResult> {
     const now = this.clock();
     const phoneHmac = this.fc.blindIndex(phone);
     if ((await this.store.countSince(phoneHmac, now - 3_600_000)) >= this.opts.maxRequestsPerHour) return 'rate_limited';
     // Guards against SMS-pumping fraud: OTP texts are routine spend and never touch the emergency reserve.
-    if (!this.budget.tryReserve('otp', this.opts.smsCostKobo, false)) return 'budget_exhausted';
+    if (costKobo > 0 && !this.budget.tryReserve('otp', costKobo, false)) return 'budget_exhausted';
 
     const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
     const id = this.newId();
     await this.store.create({ id, phoneHmac, codeHash: this.hashCode(id, code), createdAt: now, expiresAt: now + this.opts.ttlMs });
     try {
-      await this.sms.send({ to: phone, text: `Sentri code: ${code}. Valid for 5 minutes. Never share it.` });
+      await deliver(code);
       return 'sent';
     } catch {
-      this.budget.refund('otp', this.opts.smsCostKobo);
+      if (costKobo > 0) this.budget.refund('otp', costKobo);
       return 'send_failed';
     }
+  }
+
+  /** Sends the code by SMS. */
+  async request(phone: string): Promise<OtpRequestResult> {
+    return this.issue(phone, async (code) => {
+      await this.sms.send({ to: phone, text: `Sentri code: ${code}. Valid for 5 minutes. Never share it.` });
+    });
   }
 
   /** True only for the latest, unexpired, unconsumed challenge with the right code. */

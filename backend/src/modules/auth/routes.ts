@@ -25,6 +25,11 @@ export interface AuthRouteDeps {
   otp: OtpService;
   /** Dev only (OTP_DEV_ECHO with the mock SMS provider): the code just "sent", so sign-up can be tried with no SMS. */
   devLastCode?: () => string | null;
+  /**
+   * Telegram mode: the link that opens the login bot. When set, /otp/request sends nothing itself and answers with this
+   * link; the person gets their code from the bot.
+   */
+  telegramLoginUrl?: string;
   users: UserRepo;
   jwtSecret: string;
   pinPepper: Buffer;
@@ -54,6 +59,7 @@ export function registerAuthRoutes(app: FastifyInstance, d: AuthRouteDeps): void
     const { phone: raw } = z.object({ phone: z.string().min(6).max(24) }).parse(req.body);
     const phone = normalizePhone(raw, d.defaultCountryCode);
     if (!phone) return reply.code(400).send({ error: 'invalid_phone' });
+    if (d.telegramLoginUrl) return reply.code(202).send({ ok: true, telegramUrl: d.telegramLoginUrl });
     const result = await d.otp.request(phone);
     // Same answer whether or not the number has an account, so this can't be used to probe who has one.
     if (result === 'rate_limited') return reply.code(429).send({ error: 'rate_limited' });

@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/crypto/device_keys.dart';
 import '../../core/i18n/i18n.dart';
@@ -28,7 +29,11 @@ class OnboardingController extends ChangeNotifier {
     required this.bridge,
     this.countryCode = '234',
     this.platform = 'android',
-  });
+    Future<bool> Function(Uri url)? openLink,
+  }) : openLink = openLink ?? _launchExternal;
+
+  /// Opens a link in another app (Telegram, or the browser if Telegram is not installed).
+  static Future<bool> _launchExternal(Uri url) => launchUrl(url, mode: LaunchMode.externalApplication);
 
   final SentriApi api;
   final I18n i18n;
@@ -41,6 +46,9 @@ class OnboardingController extends ChangeNotifier {
   final String countryCode;
   final String platform;
 
+  /// How links are opened. Replaced in tests.
+  final Future<bool> Function(Uri url) openLink;
+
   OnboardingStep step = OnboardingStep.language;
   bool busy = false;
 
@@ -50,6 +58,9 @@ class OnboardingController extends ChangeNotifier {
 
   /// Set only when the server is in dev echo mode: the code to type, so sign-up can be tried with no SMS.
   String? devCode;
+
+  /// Telegram mode: the link to the login bot. When set, the code comes from the bot, not from a text message.
+  Uri? telegramUrl;
 
   /// Earliest moment another code may be requested (30 s after the last one).
   DateTime resendAt = DateTime.fromMillisecondsSinceEpoch(0);
@@ -81,6 +92,8 @@ class OnboardingController extends ChangeNotifier {
       case OnboardingStep.phone:
         _go(OnboardingStep.language);
       case OnboardingStep.otp:
+        devCode = null;
+        telegramUrl = null;
         _go(OnboardingStep.phone);
       default:
         break;
@@ -117,19 +130,38 @@ class OnboardingController extends ChangeNotifier {
       return;
     }
     await _run(() async {
-      devCode = await api.requestOtp(p);
+      final r = await api.requestOtp(p);
+      devCode = r.devCode;
+      telegramUrl = r.telegramUrl;
       phone = p;
       resendAt = DateTime.now().add(const Duration(seconds: 30));
       _go(OnboardingStep.otp);
+      // Show the code screen first, then hand over to Telegram. If Telegram cannot be opened the person is
+      // still on the code screen, where the "Open Telegram" button tries again.
+      await openTelegram();
     }, failKey: 'otp.send_failed');
+  }
+
+  /// Opens the login bot in Telegram. Does nothing outside Telegram mode and never throws.
+  Future<void> openTelegram() async {
+    final url = telegramUrl;
+    if (url == null) return;
+    try {
+      await openLink(url);
+    } catch (_) {
+      // Telegram missing or the link blocked: the Open Telegram button lets the person try again.
+    }
   }
 
   /// Asks for a fresh code for the same number. Allowed 30 seconds after the last one.
   Future<void> resendCode() async {
     if (DateTime.now().isBefore(resendAt)) return;
     await _run(() async {
-      devCode = await api.requestOtp(phone);
+      final r = await api.requestOtp(phone);
+      devCode = r.devCode;
+      telegramUrl = r.telegramUrl;
       resendAt = DateTime.now().add(const Duration(seconds: 30));
+      await openTelegram();
     }, failKey: 'otp.send_failed');
   }
 

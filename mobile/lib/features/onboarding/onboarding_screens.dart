@@ -174,11 +174,18 @@ class _OtpStepState extends State<_OtpStep> {
   }
 
   @override
-  Widget build(BuildContext context) => Column(
+  Widget build(BuildContext context) {
+    // Telegram mode: the code comes from the login bot, so there is no text message and no resend timer.
+    final telegram = widget.c.telegramUrl != null;
+    return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _title(context, widget.i18n.t('otp.title')),
-          Text(widget.i18n.t('otp.sent_to', {'phone': widget.c.phone})),
+          Text(widget.i18n.t(telegram ? 'otp.telegram_sent' : 'otp.sent_to', {'phone': widget.c.phone})),
+          if (telegram) ...[
+            const SizedBox(height: 6),
+            Text(widget.i18n.t('otp.telegram_hint'), style: const TextStyle(fontSize: 13)),
+          ],
           const SizedBox(height: 16),
           PillField(
             controller: _ctl,
@@ -206,12 +213,19 @@ class _OtpStepState extends State<_OtpStep> {
             label: widget.i18n.t('otp.verify'),
           ),
           const SizedBox(height: 6),
-          TextButton(
-            onPressed: widget.c.busy || _wait > 0 ? null : () => unawaited(widget.c.resendCode()),
-            child: Text(_wait > 0 ? widget.i18n.t('otp.resend_in', {'s': '$_wait'}) : widget.i18n.t('otp.resend')),
-          ),
+          if (telegram)
+            TextButton(
+              onPressed: widget.c.busy ? null : () => unawaited(widget.c.openTelegram()),
+              child: Text(widget.i18n.t('otp.open_telegram')),
+            )
+          else
+            TextButton(
+              onPressed: widget.c.busy || _wait > 0 ? null : () => unawaited(widget.c.resendCode()),
+              child: Text(_wait > 0 ? widget.i18n.t('otp.resend_in', {'s': '$_wait'}) : widget.i18n.t('otp.resend')),
+            ),
         ],
       );
+  }
 }
 
 class _ContactsStep extends StatefulWidget {

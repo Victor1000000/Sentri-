@@ -34,13 +34,15 @@ const StartBody = Geo.partial().extend({
 });
 
 export function buildApp(d: AppDeps): FastifyInstance {
+  const hops = d.trustProxyHops && d.trustProxyHops > 0 ? d.trustProxyHops : 0;
   // Request logging is off: URLs can carry ids that should not reach logs.
   const app = Fastify({
     logger: d.logger ?? false,
     disableRequestLogging: true,
     bodyLimit: 4096,
-    // A number trusts exactly that many proxies, so a caller cannot invent an IP by sending their own X-Forwarded-For.
-    trustProxy: d.trustProxyHops && d.trustProxyHops > 0 ? d.trustProxyHops : false,
+    // Trust exactly that many proxies, so a caller cannot invent an IP by sending their own X-Forwarded-For.
+    // (A function, because the plain-number form is no longer accepted by Fastify's types.)
+    trustProxy: hops > 0 ? (_addr: string, hop: number) => hop < hops : false,
     // Slow-loris and oversized-header guards.
     connectionTimeout: 30_000,
     requestTimeout: 30_000,
