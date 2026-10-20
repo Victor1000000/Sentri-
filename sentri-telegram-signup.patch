@@ -1,5 +1,5 @@
 diff --git a/backend/.env.example b/backend/.env.example
-index c1eb468..5e45124 100644
+index c1eb468..c1de3d8 100644
 --- a/backend/.env.example
 +++ b/backend/.env.example
 @@ -31,7 +31,16 @@ PIN_MAX_ATTEMPTS=5
@@ -13,7 +13,7 @@ index c1eb468..5e45124 100644
 +# Set these in your hosting dashboard, never commit a real token.
 +TELEGRAM_BOT_TOKEN=
 +TELEGRAM_BOT_USERNAME=
-+# Any random 16-256 characters from A-Z a-z 0-9 _ -  (for example: openssl rand -hex 16)
++# Optional. Leave empty and a secret is derived from TOKEN_SECRET. If you set one: 16-256 characters from A-Z a-z 0-9 _ -
 +TELEGRAM_WEBHOOK_SECRET=
 +
 +# SMS for SOS alerts (mock | termii). With mock, alerts are only logged, never delivered.
@@ -30,16 +30,17 @@ index c1eb468..5e45124 100644
  OTP_DEV_ECHO=false
  
 diff --git a/backend/README.md b/backend/README.md
-index e541c9e..a5de4c2 100644
+index e541c9e..ad1fd23 100644
 --- a/backend/README.md
 +++ b/backend/README.md
-@@ -33,6 +33,18 @@ onboarding endpoints, BullMQ scheduler, encrypted phone numbers at rest, hash-ch
+@@ -33,7 +33,29 @@ onboarding endpoints, BullMQ scheduler, encrypted phone numbers at rest, hash-ch
  
  Keys (publicKey, boxPublicKey) are base64 of 32 raw bytes.
  
 +## Sign-up codes through Telegram (free alternative to SMS)
-+Set `OTP_PROVIDER=telegram` plus `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME` and `TELEGRAM_WEBHOOK_SECRET`
++Set `OTP_PROVIDER=telegram` plus `TELEGRAM_BOT_TOKEN` and `TELEGRAM_BOT_USERNAME`
 +(create the bot with @BotFather; the server registers its webhook at `PUBLIC_BASE_URL/v1/telegram/webhook` on start).
++`TELEGRAM_WEBHOOK_SECRET` is optional: when it is not set, a secret is derived from `TOKEN_SECRET`.
 +
 +1. `POST /v1/auth/otp/request {phone}` sends nothing and answers `202 {ok:true, telegramUrl:"https://t.me/<bot>?start=login"}`. The app opens that link.
 +2. In Telegram the person taps Start, then "Share my number".
@@ -52,6 +53,16 @@ index e541c9e..a5de4c2 100644
  ## Not yet verified
  PgSosStore, PgAudit, PgDirectory, PgUserRepo and BullScheduler have no automated tests yet: they need a live
  Postgres/Redis. Run the app against `docker compose` once and exercise the sign-up flow above before trusting them.
+ EOF
++
++## Private test deploy on Render (free)
++`render.yaml` at the repo root is a Render Blueprint. In Render choose **New > Blueprint**, pick this repo, and enter the two Telegram values it asks for.
++Render generates `TOKEN_SECRET` and `PIN_PEPPER`, and the server uses Render's own address (`RENDER_EXTERNAL_URL`) as `PUBLIC_BASE_URL`.
++It runs in development mode with `STORE=memory` and `SMS_PROVIDER=mock`, which is for private testing only:
++- a free Render service sleeps after 15 minutes without traffic and forgets everything held in memory (accounts, contacts, PINs), so people have to sign up again;
++- SOS alerts are only logged, never delivered.
++
++For real use: `NODE_ENV=production`, `STORE=postgres`, a real `SMS_PROVIDER`, and an always-on instance.
 diff --git a/backend/src/app.ts b/backend/src/app.ts
 index 70046fe..de9be0d 100644
 --- a/backend/src/app.ts
@@ -75,7 +86,7 @@ index 70046fe..de9be0d 100644
      connectionTimeout: 30_000,
      requestTimeout: 30_000,
 diff --git a/backend/src/config/env.ts b/backend/src/config/env.ts
-index 8c4302d..89528da 100644
+index 8c4302d..c2c4534 100644
 --- a/backend/src/config/env.ts
 +++ b/backend/src/config/env.ts
 @@ -5,6 +5,9 @@ const bool = z
@@ -105,7 +116,7 @@ index 8c4302d..89528da 100644
        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['FCM_SERVICE_ACCOUNT_B64'], message: 'required when PUSH_PROVIDER=fcm' });
      }
 +    if (v.OTP_PROVIDER === 'telegram') {
-+      for (const k of ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_BOT_USERNAME', 'TELEGRAM_WEBHOOK_SECRET'] as const) {
++      for (const k of ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_BOT_USERNAME'] as const) {
 +        if (!v[k]) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [k], message: `${k} is required when OTP_PROVIDER=telegram` });
 +      }
 +      if (v.OTP_DEV_ECHO) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['OTP_DEV_ECHO'], message: 'OTP_DEV_ECHO cannot be used with OTP_PROVIDER=telegram' });
@@ -113,6 +124,17 @@ index 8c4302d..89528da 100644
      if (v.SMS_PROVIDER === 'termii' && (!v.TERMII_API_KEY || !v.TERMII_SENDER_ID)) {
        ctx.addIssue({
          code: z.ZodIssueCode.custom,
+@@ -92,7 +106,9 @@ export const EnvSchema = z
+ export type Env = z.infer<typeof EnvSchema>;
+ 
+ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Env {
+-  const parsed = EnvSchema.safeParse(env);
++  // On Render the public address is provided as RENDER_EXTERNAL_URL, so PUBLIC_BASE_URL need not be set by hand.
++  const publicBase = env.PUBLIC_BASE_URL || env.RENDER_EXTERNAL_URL;
++  const parsed = EnvSchema.safeParse(publicBase ? { ...env, PUBLIC_BASE_URL: publicBase } : env);
+   if (!parsed.success) {
+     // Print which variables are wrong, never their values.
+     const problems = parsed.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`);
 diff --git a/backend/src/modules/auth/otp.ts b/backend/src/modules/auth/otp.ts
 index eaba577..b10a3e1 100644
 --- a/backend/src/modules/auth/otp.ts
@@ -390,26 +412,44 @@ index 0000000..7a0a036
 +    return reply.code(200).send({ ok: true });
 +  });
 +}
+diff --git a/backend/src/modules/telegram/secret.ts b/backend/src/modules/telegram/secret.ts
+new file mode 100644
+index 0000000..00d1333
+--- /dev/null
++++ b/backend/src/modules/telegram/secret.ts
+@@ -0,0 +1,9 @@
++import { createHmac } from 'node:crypto';
++
++/**
++ * A stable secret for the Telegram webhook, made from TOKEN_SECRET, so nobody has to invent one by hand.
++ * 43 characters of A-Z a-z 0-9 _ -, which is what Telegram accepts. Same TOKEN_SECRET gives the same value after a restart.
++ */
++export function deriveWebhookSecret(tokenSecret: string): string {
++  return createHmac('sha256', tokenSecret).update('sentri:telegram-webhook').digest('base64url');
++}
 diff --git a/backend/src/server.ts b/backend/src/server.ts
-index 43a0719..44269ad 100644
+index 43a0719..c899397 100644
 --- a/backend/src/server.ts
 +++ b/backend/src/server.ts
-@@ -41,6 +41,9 @@ import { SosEngine } from './modules/sos/engine.js';
+@@ -41,6 +41,10 @@ import { SosEngine } from './modules/sos/engine.js';
  import { MemorySosStore } from './modules/sos/memory-store.js';
  import { PgSosStore } from './modules/sos/pg-store.js';
  import { BullScheduler, createRedis, engineJobHandler } from './queue/bull-scheduler.js';
 +import { TelegramBotApi } from './modules/telegram/api.js';
 +import { TelegramLoginBot } from './modules/telegram/bot.js';
 +import { registerTelegramRoutes } from './modules/telegram/routes.js';
++import { deriveWebhookSecret } from './modules/telegram/secret.js';
  import { MockSmsProvider, type SmsProvider } from './providers/sms/SmsProvider.js';
  import { TermiiSmsProvider } from './providers/sms/TermiiProvider.js';
  import type { AuditSink, Scheduler, SosStore } from './domain/types.js';
-@@ -223,8 +226,24 @@ if (env.ADMIN_JWT_SECRET) {
+@@ -223,8 +227,26 @@ if (env.ADMIN_JWT_SECRET) {
    log.info({}, 'admin API enabled');
  }
  
 +// Sign-up codes through Telegram (OTP_PROVIDER=telegram). Only the code goes this way; SOS alerts never use the bot.
 +const telegramApi = env.OTP_PROVIDER === 'telegram' ? new TelegramBotApi(env.TELEGRAM_BOT_TOKEN!) : undefined;
++// Unless TELEGRAM_WEBHOOK_SECRET is set, the webhook secret is derived from TOKEN_SECRET.
++const telegramSecret = env.TELEGRAM_WEBHOOK_SECRET ?? deriveWebhookSecret(env.TOKEN_SECRET);
 +if (telegramApi) {
 +  registerTelegramRoutes(app, {
 +    bot: new TelegramLoginBot({
@@ -419,7 +459,7 @@ index 43a0719..44269ad 100644
 +      chatLimiter: new FixedWindowLimiter(30, 60_000, clock),
 +      log,
 +    }),
-+    secret: env.TELEGRAM_WEBHOOK_SECRET!,
++    secret: telegramSecret,
 +  });
 +}
 +
@@ -429,14 +469,14 @@ index 43a0719..44269ad 100644
    devLastCode:
      env.OTP_DEV_ECHO && sms instanceof MockSmsProvider
        ? () => /\b(\d{6})\b/.exec(sms.sent.at(-1)?.text ?? '')?.[1] ?? null
-@@ -277,6 +296,15 @@ retention?.start();
+@@ -277,6 +299,15 @@ retention?.start();
  await app.listen({ port: env.PORT, host: '0.0.0.0' });
  log.info({ port: env.PORT, store: env.STORE }, 'sentri backend listening');
  
 +// Tell Telegram where to deliver bot messages. Best effort: if it fails the server still runs, and the failure is logged.
 +if (telegramApi) {
 +  const hook = `${env.PUBLIC_BASE_URL.replace(/\/+$/, '')}/v1/telegram/webhook`;
-+  telegramApi.setWebhook(hook, env.TELEGRAM_WEBHOOK_SECRET!).then(
++  telegramApi.setWebhook(hook, telegramSecret).then(
 +    () => log.info({}, 'telegram webhook set'),
 +    (e) => log.error({ err: e instanceof Error ? e.message : 'unknown' }, 'telegram webhook not set'),
 +  );
@@ -447,13 +487,13 @@ index 43a0719..44269ad 100644
    process.on(sig, async () => {
 diff --git a/backend/test/telegram.test.ts b/backend/test/telegram.test.ts
 new file mode 100644
-index 0000000..eab883b
+index 0000000..d993ee9
 --- /dev/null
 +++ b/backend/test/telegram.test.ts
-@@ -0,0 +1,416 @@
+@@ -0,0 +1,515 @@
 +import { describe, expect, it } from 'vitest';
 +import { buildApp } from '../src/app.js';
-+import { EnvSchema } from '../src/config/env.js';
++import { EnvSchema, loadConfig } from '../src/config/env.js';
 +import { FieldCrypto } from '../src/lib/field-crypto.js';
 +import { FixedWindowLimiter } from '../src/lib/rate-limit.js';
 +import { MemoryUserRepo } from '../src/modules/auth/memory-user-repo.js';
@@ -463,6 +503,7 @@ index 0000000..eab883b
 +import { TelegramBotApi, type ShareButton, type TelegramApi } from '../src/modules/telegram/api.js';
 +import { TelegramLoginBot } from '../src/modules/telegram/bot.js';
 +import { registerTelegramRoutes } from '../src/modules/telegram/routes.js';
++import { deriveWebhookSecret } from '../src/modules/telegram/secret.js';
 +import { MockSmsProvider } from '../src/providers/sms/SmsProvider.js';
 +import { PEPPER, harness } from './helpers.js';
 +
@@ -826,7 +867,7 @@ index 0000000..eab883b
 +    expect(EnvSchema.safeParse({ ...dev, ...tg }).success).toBe(true);
 +  });
 +
-+  it.each(['TELEGRAM_BOT_TOKEN', 'TELEGRAM_BOT_USERNAME', 'TELEGRAM_WEBHOOK_SECRET'])('needs %s in Telegram mode', (k) => {
++  it.each(['TELEGRAM_BOT_TOKEN', 'TELEGRAM_BOT_USERNAME'])('needs %s in Telegram mode', (k) => {
 +    const env: Record<string, string> = { ...dev, ...tg };
 +    delete env[k];
 +    expect(EnvSchema.safeParse(env).success).toBe(false);
@@ -842,6 +883,17 @@ index 0000000..eab883b
 +    ['webhook secret with a space', { TELEGRAM_WEBHOOK_SECRET: 'has a space in it 1234' }],
 +  ])('refuses a %s', (_n, over) => {
 +    expect(EnvSchema.safeParse({ ...dev, ...tg, ...over }).success).toBe(false);
++  });
++
++  it('does not need a webhook secret, because one is derived', () => {
++    const env: Record<string, string> = { ...dev, ...tg };
++    delete env.TELEGRAM_WEBHOOK_SECRET;
++    expect(EnvSchema.safeParse(env).success).toBe(true);
++    expect(EnvSchema.safeParse({ ...env, TELEGRAM_WEBHOOK_SECRET: '' }).success).toBe(true);
++  });
++
++  it('still checks a webhook secret when one is given', () => {
++    expect(EnvSchema.safeParse({ ...dev, ...tg, TELEGRAM_WEBHOOK_SECRET: 'short' }).success).toBe(false);
 +  });
 +
 +  it('refuses the dev code echo in Telegram mode', () => {
@@ -865,6 +917,93 @@ index 0000000..eab883b
 +    };
 +    expect(EnvSchema.safeParse(prod).success).toBe(true);
 +    expect(EnvSchema.safeParse({ ...prod, SMS_PROVIDER: 'mock' }).success).toBe(false); // alerts still need a real provider
++  });
++});
++
++describe('derived webhook secret', () => {
++  it('has the shape Telegram accepts', () => {
++    const v = deriveWebhookSecret('t'.repeat(32));
++    expect(v).toHaveLength(43);
++    expect(v).toMatch(/^[A-Za-z0-9_-]{16,256}$/);
++  });
++
++  it('is the same every time for the same TOKEN_SECRET, so a restart does not break the webhook', () => {
++    expect(deriveWebhookSecret('t'.repeat(32))).toBe(deriveWebhookSecret('t'.repeat(32)));
++  });
++
++  it('differs for another TOKEN_SECRET and never equals it', () => {
++    expect(deriveWebhookSecret('a'.repeat(32))).not.toBe(deriveWebhookSecret('b'.repeat(32)));
++    expect(deriveWebhookSecret('a'.repeat(32))).not.toBe('a'.repeat(32));
++  });
++
++  it('is accepted by the settings when used as TELEGRAM_WEBHOOK_SECRET', () => {
++    const secret = deriveWebhookSecret('t'.repeat(32));
++    const r = EnvSchema.safeParse({
++      PUBLIC_BASE_URL: 'https://api.example.com',
++      TOKEN_SECRET: 't'.repeat(32),
++      PIN_PEPPER: 'p'.repeat(32),
++      OTP_PROVIDER: 'telegram',
++      TELEGRAM_BOT_TOKEN: TOKEN,
++      TELEGRAM_BOT_USERNAME: 'sentri_login_bot',
++      TELEGRAM_WEBHOOK_SECRET: secret,
++    });
++    expect(r.success).toBe(true);
++  });
++});
++
++describe('public address on Render', () => {
++  const base = { TOKEN_SECRET: 't'.repeat(32), PIN_PEPPER: 'p'.repeat(32) };
++
++  it("uses Render's own address when PUBLIC_BASE_URL is not set", () => {
++    expect(loadConfig({ ...base, RENDER_EXTERNAL_URL: 'https://sentri-api.onrender.com' }).PUBLIC_BASE_URL).toBe('https://sentri-api.onrender.com');
++  });
++
++  it('prefers PUBLIC_BASE_URL when it is set', () => {
++    const c = loadConfig({ ...base, PUBLIC_BASE_URL: 'https://api.example.com', RENDER_EXTERNAL_URL: 'https://sentri-api.onrender.com' });
++    expect(c.PUBLIC_BASE_URL).toBe('https://api.example.com');
++  });
++
++  it('falls back to Render when PUBLIC_BASE_URL is empty', () => {
++    expect(loadConfig({ ...base, PUBLIC_BASE_URL: '', RENDER_EXTERNAL_URL: 'https://sentri-api.onrender.com' }).PUBLIC_BASE_URL).toBe('https://sentri-api.onrender.com');
++  });
++
++  it('still refuses to start with no public address at all', () => {
++    expect(() => loadConfig({ ...base })).toThrow(/PUBLIC_BASE_URL/);
++  });
++});
++
++describe('the Render Blueprint settings', () => {
++  // Exactly what render.yaml sets, plus what Render adds (generated base64 secrets, its own address and port).
++  const render = {
++    NODE_ENV: 'development',
++    STORE: 'memory',
++    OTP_PROVIDER: 'telegram',
++    SMS_PROVIDER: 'mock',
++    TRUST_PROXY_HOPS: '1',
++    TOKEN_SECRET: 'kQ3+9vXc/7Zl2mPq8RtYb1nVwE5uHjAsDfGhKlMn0Pw=',
++    PIN_PEPPER: 'Zx8/Qw3+Er5TyUi7OpAs9DfGhJk1LzXcVbNm2QwErTy=',
++    TELEGRAM_BOT_TOKEN: TOKEN,
++    TELEGRAM_BOT_USERNAME: 'sentri_login_bot',
++    RENDER_EXTERNAL_URL: 'https://sentri-api.onrender.com',
++    PORT: '10000',
++  };
++
++  it('start the server in Telegram mode with Render\'s own address', () => {
++    const c = loadConfig(render);
++    expect(c.OTP_PROVIDER).toBe('telegram');
++    expect(c.STORE).toBe('memory');
++    expect(c.PUBLIC_BASE_URL).toBe('https://sentri-api.onrender.com');
++    expect(c.PORT).toBe(10000);
++    expect(c.TRUST_PROXY_HOPS).toBe(1);
++    expect(c.TELEGRAM_WEBHOOK_SECRET).toBeUndefined();
++  });
++
++  it('give a webhook secret Telegram accepts, even from base64 secrets with + / =', () => {
++    expect(deriveWebhookSecret(loadConfig(render).TOKEN_SECRET)).toMatch(/^[A-Za-z0-9_-]{16,256}$/);
++  });
++
++  it('would not start in production mode, which is why the Blueprint uses development', () => {
++    expect(() => loadConfig({ ...render, NODE_ENV: 'production' })).toThrow();
 +  });
 +});
 diff --git a/mobile/assets/i18n/en.json b/mobile/assets/i18n/en.json
@@ -1411,3 +1550,42 @@ index 0000000..f65f228
 +    });
 +  });
 +}
+diff --git a/render.yaml b/render.yaml
+new file mode 100644
+index 0000000..6a1e433
+--- /dev/null
++++ b/render.yaml
+@@ -0,0 +1,33 @@
++# Render Blueprint: deploys the Sentri backend as a private TEST server (free plan, data kept in memory).
++# Sign-up codes go through the Telegram bot. SOS alerts are only logged (SMS_PROVIDER=mock): do not rely on this for real alerts.
++services:
++  - type: web
++    name: sentri-api
++    runtime: docker
++    plan: free
++    region: frankfurt
++    dockerfilePath: ./Dockerfile.backend
++    dockerContext: .
++    healthCheckPath: /healthz
++    autoDeploy: true
++    envVars:
++      - key: NODE_ENV
++        value: development
++      - key: STORE
++        value: memory
++      - key: OTP_PROVIDER
++        value: telegram
++      - key: SMS_PROVIDER
++        value: mock
++      - key: TRUST_PROXY_HOPS
++        value: "1"
++      # Made by Render once and kept. The Telegram webhook secret is derived from TOKEN_SECRET.
++      - key: TOKEN_SECRET
++        generateValue: true
++      - key: PIN_PEPPER
++        generateValue: true
++      # Render asks for these two when you create the Blueprint. They come from @BotFather.
++      - key: TELEGRAM_BOT_TOKEN
++        sync: false
++      - key: TELEGRAM_BOT_USERNAME
++        sync: false
