@@ -1,0 +1,23 @@
+name: Keep the test server awake
+
+# Render's free plan puts a server to sleep after 15 minutes without traffic, and a sleeping server forgets everything
+# it holds in memory. This pings it every 10 minutes. It does nothing until the API_BASE_URL secret is set.
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Ping the server
+        env:
+          URL: ${{ secrets.API_BASE_URL }}
+        run: |
+          if [ -z "$URL" ]; then
+            echo "API_BASE_URL is not set yet, nothing to ping."
+            exit 0
+          fi
+          curl -fsS -m 90 --retry 2 "$URL/healthz" > /dev/null && echo "server answered" || echo "::warning::the server did not answer"
