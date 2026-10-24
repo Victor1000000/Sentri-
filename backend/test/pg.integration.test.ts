@@ -466,4 +466,68 @@ describe.skipIf(!URL_)('PostgreSQL integration', () => {
       expect((await pool.query("SELECT count(*)::int AS n FROM admins WHERE email = 'c@x.ng'")).rows[0].n).toBe(1);
     });
   });
+  describe('hostile input against the real tables', () => {
+    const HOSTILE = [
+      "' OR '1'='1",
+      "'; DROP TABLE users; --",
+      '" OR ""="',
+      "') UNION SELECT phone_enc FROM users --",
+      '1; SELECT pg_sleep(10)--',
+      'a\u0000b',
+      '<script>alert(1)</script>',
+      '${7*7}',
+      '😀'.repeat(20),
+      '__proto__',
+      'x'.repeat(3000),
+    ];
+    const tableCount = async () =>
+      (await pool.query("SELECT count(*)::int AS n FROM information_schema.tables WHERE table_schema = 'public'")).rows[0].n as number;
+
+    it('hostile text in a phone number or a name is stored as ordinary data and changes nothing else', async () => {
+      const before = await tableCount();
+      const ids: string[] = [];
+      for (const v of HOSTILE) {
+        const id = await newUser(v);
+        ids.push(id);
+        await repo.updateProfile(id, { name: v });
+        expect(await repo.getPhone(id)).toBe(v); // comes back exactly as given
+      }
+      expect(new Set(ids).size).toBe(HOSTILE.length); // "' OR '1'='1" did not match everyone: each is its own person
+      expect((await pool.query('SELECT count(*)::int AS n FROM users')).rows[0].n).toBe(HOSTILE.length);
+      expect(await tableCount()).toBe(before); // nothing dropped, nothing created
+    });
+
+    it('hostile text in an inbox name round-trips as text', async () => {
+      const inbox = new PgInbox(pool, fc);
+      const from = await newUser('+2348000000011');
+      const to = await newUser('+2348000000012');
+      for (const v of HOSTILE) {
+        const item = await inbox.upsert({
+          id: randomUUID(), userId: to, fromUserId: from, fromName: v, kind: 'low_battery', sosId: null, locale: 'en',
+          createdAt: now, updatedAt: now, purgeAfter: now + DAY,
+        } as never);
+        expect(item.fromName).toBe(v);
+      }
+      expect((await inbox.list(to, 100)).map((x) => x.fromName).sort()).toEqual([...HOSTILE].sort());
+    });
+
+    it('a SOS update accepts only its own column names, never inherited or invented ones', async () => {
+      const u = await newUser('+2348000000013');
+      const e = event(u);
+      await store.createEventIfNoActive(e);
+      for (const key of ['constructor', '__proto__', 'toString', 'state; DROP TABLE users; --', 'nope']) {
+        const patch = JSON.parse(`{${JSON.stringify(key)}: 1}`) as never;
+        await expect(store.updateEvent(e.id, patch)).rejects.toThrow(/unknown SosEvent field/);
+        await expect(store.transition(e.id, ['active'], patch)).rejects.toThrow(/unknown SosEvent field/);
+      }
+      expect((await store.getEvent(e.id))?.state).toBe('active'); // untouched
+    });
+
+    it('a malformed id or a NUL character is refused by the database with a "data exception" the server turns into a 400', async () => {
+      for (const bad of ['not-a-uuid', "' OR '1'='1", 'a\u0000b', '']) {
+        await expect(store.getEvent(bad)).rejects.toMatchObject({ code: expect.stringMatching(/^22/) });
+      }
+      expect(await store.getEvent(randomUUID())).toBeNull(); // a well-formed id that does not exist is just "not found"
+    });
+  });
 });

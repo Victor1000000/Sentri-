@@ -87,6 +87,17 @@ class OnboardingController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// The server no longer knows this phone (for example after the server was reset). Protection cannot work until
+  /// the person signs in again, so say so plainly and start sign-in at the phone number.
+  Future<void> sessionExpired() async {
+    await settings.update(onboarded: false);
+    devCode = null;
+    telegramUrl = null;
+    _go(OnboardingStep.phone);
+    errorKey = 'auth.session_ended';
+    notifyListeners();
+  }
+
   void back() {
     switch (step) {
       case OnboardingStep.phone:
@@ -125,7 +136,7 @@ class OnboardingController extends ChangeNotifier {
   Future<void> submitPhone(String raw) async {
     final p = normalizePhone(raw, countryCode: countryCode);
     if (p == null) {
-      errorKey = 'common.error';
+      errorKey = 'phone.invalid';
       notifyListeners();
       return;
     }
@@ -166,12 +177,19 @@ class OnboardingController extends ChangeNotifier {
   }
 
   Future<void> submitCode(String code) async {
+    final c = code.trim();
+    // The server checks this too. Stopping an obvious mistake here saves a round trip and says what is wrong.
+    if (!RegExp(r'^\d{6}$').hasMatch(c)) {
+      errorKey = 'otp.format';
+      notifyListeners();
+      return;
+    }
     await _run(() async {
       final keys = await DeviceKeys.loadOrCreate(keyStore);
       try {
         await api.verifyOtp(
           phone: phone,
-          code: code.trim(),
+          code: c,
           platform: platform,
           publicKey: keys.publicKeyB64,
           boxPublicKey: keys.boxPublicKeyB64,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
-import { EnvSchema, loadConfig } from '../src/config/env.js';
+import { EnvSchema, loadConfig, toHexKey } from '../src/config/env.js';
 import { FieldCrypto } from '../src/lib/field-crypto.js';
 import { FixedWindowLimiter } from '../src/lib/rate-limit.js';
 import { MemoryUserRepo } from '../src/modules/auth/memory-user-repo.js';
@@ -511,5 +511,45 @@ describe('the Render Blueprint settings', () => {
 
   it('would not start in production mode, which is why the Blueprint uses development', () => {
     expect(() => loadConfig({ ...render, NODE_ENV: 'production' })).toThrow();
+  });
+});
+
+describe('secrets from a hosting dashboard', () => {
+  const dev = { PUBLIC_BASE_URL: 'https://api.example.com', TOKEN_SECRET: 't'.repeat(32), PIN_PEPPER: 'p'.repeat(32) };
+  const live = {
+    ...dev,
+    STORE: 'postgres',
+    DATABASE_URL: 'postgres://u:p@db/sentri',
+    REDIS_URL: 'redis://r:6379',
+    JWT_SECRET: 'Hj7+Lk2/Mn9PqRs4TuVw6XyZa8BcDe0FgHi1JkLmNoP=',
+  };
+  const b64 = 'Qa1+Ws2/Ed3RfTg4YhUj5IkOl6PzXc7VbNm8AsDf9Gh=';
+
+  it('accepts 32-byte keys as hex or as base64, and hands them on as hex', () => {
+    const hex = 'ab'.repeat(32);
+    expect(toHexKey(hex)).toBe(hex);
+    expect(toHexKey(hex.toUpperCase())).toBe(hex);
+    expect(toHexKey(b64)).toBe(Buffer.from(b64, 'base64').toString('hex'));
+    expect(toHexKey(b64.replace(/\+/g, '-').replace(/\//g, '_'))).toBe(Buffer.from(b64, 'base64').toString('hex')); // base64url
+    expect(toHexKey(b64.replace(/=$/, ''))).toBe(Buffer.from(b64, 'base64').toString('hex')); // no padding
+  });
+
+  it('refuses anything that is not exactly 32 bytes', () => {
+    for (const bad of ['', 'short', 'zz'.repeat(32), 'ab'.repeat(31), 'ab'.repeat(33), 'A'.repeat(42), 'A'.repeat(45), `${b64}!`]) {
+      expect(toHexKey(bad), bad).toBeNull();
+    }
+  });
+
+  it('starts on the permanent database with Render-style base64 secrets', () => {
+    const c = loadConfig({ ...live, DATA_KEY: b64, PHONE_HMAC_KEY: 'Zz9+Yy8/Xx7WwVv6UuTt5SsRr4QqPp3OoNn2MmLl1Kk=' });
+    expect(c.STORE).toBe('postgres');
+    expect(c.DATA_KEY).toMatch(/^[0-9a-f]{64}$/);
+    expect(c.PHONE_HMAC_KEY).toMatch(/^[0-9a-f]{64}$/);
+    expect(c.DATA_KEY).not.toBe(c.PHONE_HMAC_KEY);
+  });
+
+  it('refuses the permanent database without its keys, or with a bad key', () => {
+    expect(() => loadConfig({ ...live })).toThrow(/DATA_KEY/);
+    expect(() => loadConfig({ ...live, DATA_KEY: 'nope', PHONE_HMAC_KEY: b64 })).toThrow(/DATA_KEY/);
   });
 });

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show TextInputFormatter;
 
 import '../i18n/i18n.dart';
 import '../theme.dart';
@@ -324,13 +325,17 @@ class OutlinePill extends StatelessWidget {
 
 /// Pill input with a thick outline and an optional label above it.
 class PillField extends StatelessWidget {
-  const PillField({super.key, required this.controller, this.label, this.hint, this.keyboardType, this.obscure = false, this.maxLength, this.autofillHints, this.noAutofill = false, this.focusNode});
+  const PillField({super.key, required this.controller, this.label, this.hint, this.keyboardType, this.obscure = false, this.maxLength, this.autofillHints, this.noAutofill = false, this.focusNode, this.inputFormatters});
   final TextEditingController controller;
   final String? label, hint;
   final TextInputType? keyboardType;
   final bool obscure;
   final int? maxLength;
   final Iterable<String>? autofillHints;
+
+  /// Keeps typing to what the field accepts (a certain kind of character, a maximum length), so an obvious
+  /// mistake is stopped before it is sent. Every value is still checked again before the app uses it.
+  final List<TextInputFormatter>? inputFormatters;
 
   /// Switches the phone's autofill off for this box. Used where several boxes sit together and each must
   /// be typed on its own (emergency contacts), so autofill can't fill them all with one number.
@@ -348,6 +353,7 @@ class PillField extends StatelessWidget {
         keyboardType: keyboardType,
         obscureText: obscure,
         maxLength: maxLength,
+        inputFormatters: inputFormatters,
         autofillHints: noAutofill ? const <String>[] : autofillHints,
         enableSuggestions: !noAutofill,
         autocorrect: !noAutofill,

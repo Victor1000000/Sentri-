@@ -59,7 +59,7 @@ class _CommandTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final warn = Theme.of(context).brightness == Brightness.dark ? const Color(0xFFE3A13A) : const Color(0xFFA8650A);
+    final official = c.verified || c.npfListed;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       child: Column(
@@ -68,29 +68,27 @@ class _CommandTile extends StatelessWidget {
           Row(
             children: [
               Expanded(child: Text(c.state, style: Theme.of(context).textTheme.titleMedium)),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(99),
-                  border: Border.all(color: c.verified ? cs.tertiary : warn),
+              if (official)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(99),
+                    border: Border.all(color: cs.tertiary),
+                  ),
+                  child: Text(
+                    i18n.t(c.verified ? 'police.verified' : 'police.listed'),
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: cs.tertiary),
+                  ),
                 ),
-                child: Text(
-                  i18n.t(c.verified ? 'police.verified' : (c.npfListed ? 'police.listed' : 'police.unverified')),
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: c.verified ? cs.tertiary : warn),
-                ),
-              ),
             ],
           ),
-          const SizedBox(height: 4),
-          Text(
-            '${i18n.t('police.commissioner')}: ${c.commissioner ?? i18n.t('police.to_confirm')}',
-            style: TextStyle(fontSize: 13, fontWeight: c.commissioner != null ? FontWeight.w600 : FontWeight.w400, color: c.commissioner != null ? cs.onSurface : cs.outline),
-          ),
-          if (c.commissioner != null && c.commissionerAsOf != null)
+          if (c.commissioner != null) ...[
+            const SizedBox(height: 4),
             Text(
-              '${i18n.t('police.reported')} ${c.commissionerAsOf}, ${i18n.t('police.unconfirmed')}',
-              style: TextStyle(fontSize: 11, color: cs.outline),
+              '${i18n.t('police.commissioner')}: ${c.commissioner}',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: cs.onSurface),
             ),
+          ],
           const SizedBox(height: 6),
           for (final l in c.lines)
             SelectableText(l, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, fontFeatures: [FontFeature.tabularFigures()])),

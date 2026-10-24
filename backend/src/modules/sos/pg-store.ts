@@ -54,7 +54,8 @@ function setClause(patch: Partial<SosEvent>, firstParam: number): { sql: string;
   const values: unknown[] = [];
   for (const [k, v] of Object.entries(patch) as [keyof SosEvent, unknown][]) {
     if (v === undefined) continue;
-    const col = COLS[k];
+    // Own keys of the fixed map only, so a key like "constructor" or "__proto__" can never become SQL.
+    const col = Object.hasOwn(COLS, k) ? COLS[k] : undefined;
     if (!col) throw new Error(`unknown SosEvent field: ${String(k)}`);
     values.push(k === 'lastGeo' ? JSON.stringify(v) : v);
     parts.push(`${col} = $${firstParam + values.length - 1}`);

@@ -308,6 +308,9 @@ if (telegramApi) {
   );
 }
 
+// A promise nobody was waiting for failed (a push provider hiccup, say). Record it and keep serving.
+process.on('unhandledRejection', (reason) => log.error({ err: reason instanceof Error ? reason.message : 'unknown' }, 'unhandled rejection'));
+
 // Graceful shutdown: stop taking requests, then let queue workers and the pool finish.
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {
   process.on(sig, async () => {

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:sensors_plus/sensors_plus.dart';
 
@@ -42,6 +43,7 @@ class AppServices {
     required this.location,
     required this.inbox,
     required this.share,
+    required this.waking,
   });
 
   final KeyValueStore store;
@@ -58,6 +60,9 @@ class AppServices {
   final LocationSource location;
   final InboxController inbox;
   final ShareController share;
+
+  /// True while the app waits for a sleeping server to wake up.
+  final ValueListenable<bool> waking;
 
   /// The police directory, loaded once; the SOS screen and alert screens use it to show who to call.
   final Future<PoliceDirectory> police = rootBundle.loadString('assets/directory/police_directory.json').then(PoliceDirectory.parse);
@@ -77,7 +82,8 @@ class AppServices {
     final i18n = I18n();
     await i18n.init(settings.language);
 
-    final api = HttpSentriApi(baseUrl: AppConfig.safeApiBaseUrl, session: session);
+    final httpApi = HttpSentriApi(baseUrl: AppConfig.safeApiBaseUrl, session: session);
+    final SentriApi api = httpApi;
     final bridge = MethodChannelBridge();
     final vault = LocalPinVault(store);
     final contacts = ContactStore(store);
@@ -121,6 +127,8 @@ class AppServices {
       countryCode: AppConfig.defaultCountryCode,
       platform: Platform.isIOS ? 'ios' : 'android',
     );
+    // If the server says it no longer knows this phone, start sign-in again instead of failing quietly.
+    httpApi.onSessionExpired = () => unawaited(onboarding.sessionExpired());
     await onboarding.resume();
 
     final s = AppServices._(
@@ -138,7 +146,10 @@ class AppServices {
       location: location,
       inbox: inbox,
       share: share,
+      waking: httpApi.waking,
     );
+    // Start waking a sleeping server now, so it is ready by the time the person taps anything.
+    unawaited(httpApi.prewarm());
     await s._start();
     return s;
   }
@@ -152,6 +163,8 @@ class AppServices {
     _net = Connectivity().onConnectivityChanged.listen((r) {
       if (r.any((c) => c != ConnectivityResult.none)) {
         sos.networkRestored();
+        final a = api;
+        if (a is HttpSentriApi) unawaited(a.prewarm());
         unawaited(inbox.refresh());
       }
     });

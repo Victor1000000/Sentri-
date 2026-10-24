@@ -5,6 +5,29 @@ const bool = z
   .default('false')
   .transform((v) => v === 'true');
 
+/**
+ * Turns a 32-byte secret into 64 hex characters. Accepts hex as it is, or base64 / base64url (what a hosting
+ * dashboard's "generate a random value" makes). Returns null for anything else.
+ */
+export function toHexKey(value: string): string | null {
+  const v = value.trim();
+  if (/^[0-9a-fA-F]{64}$/.test(v)) return v.toLowerCase();
+  if (/^[A-Za-z0-9+/_-]{43}=?$/.test(v)) {
+    const bytes = Buffer.from(v.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+    if (bytes.length === 32) return bytes.toString('hex');
+  }
+  return null;
+}
+
+const key32 = z.string().transform((v, ctx) => {
+  const hex = toHexKey(v);
+  if (!hex) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'must be 32 bytes: 64 hex characters, or base64' });
+    return z.NEVER;
+  }
+  return hex;
+});
+
 /** Hosting dashboards often leave a variable set but empty. Treat that as "not set". */
 const blankIsUnset = (v: unknown) => (v === '' ? undefined : v);
 
@@ -60,8 +83,8 @@ export const EnvSchema = z
     REDIS_URL: z.string().optional(),
     JWT_SECRET: z.string().min(32).optional(),
     /** 64 hex chars each (openssl rand -hex 32). Keep in a secret manager, never in the database. */
-    DATA_KEY: z.string().regex(/^[0-9a-fA-F]{64}$/).optional(),
-    PHONE_HMAC_KEY: z.string().regex(/^[0-9a-fA-F]{64}$/).optional(),
+    DATA_KEY: key32.optional(),
+    PHONE_HMAC_KEY: key32.optional(),
     DEFAULT_COUNTRY_CODE: z.string().regex(/^\d{1,3}$/).default('234'),
     /**
      * How many reverse proxies sit in front of the server (hosting platforms usually add 1). Rate limits use the

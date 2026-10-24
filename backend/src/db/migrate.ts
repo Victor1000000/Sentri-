@@ -5,7 +5,18 @@ import pg from 'pg';
 export function createPool(databaseUrl: string): pg.Pool {
   // bigint columns hold epoch-ms values, which fit safely in a JS number.
   pg.types.setTypeParser(20, (v) => Number(v));
-  return new pg.Pool({ connectionString: databaseUrl, max: 10 });
+  const pool = new pg.Pool({
+    connectionString: databaseUrl,
+    max: 10,
+    connectionTimeoutMillis: 10_000,
+    idleTimeoutMillis: 30_000,
+    // A request that runs far longer than any real one is stuck; stop it instead of piling up connections.
+    statement_timeout: 20_000,
+  });
+  // The database can restart (maintenance, a failover). An idle connection that drops then emits an error, and an
+  // unhandled one would stop the whole server. The pool replaces the connection by itself; just note it.
+  pool.on('error', (err) => console.error('database connection dropped:', err instanceof Error ? err.message : 'unknown'));
+  return pool;
 }
 
 /** Applies *.sql files in order, each in its own transaction, recording what ran. */

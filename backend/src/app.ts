@@ -67,8 +67,11 @@ export function buildApp(d: AppDeps): FastifyInstance {
 
   app.setErrorHandler((err, _req, reply) => {
     if (err instanceof z.ZodError) return reply.code(400).send({ error: 'bad_request' });
-    const code = (err as { statusCode?: number }).statusCode;
-    if (code && code < 500) return reply.code(code).send({ error: 'bad_request' });
+    const e = err as { statusCode?: number; code?: unknown };
+    if (e.statusCode && e.statusCode < 500) return reply.code(e.statusCode).send({ error: 'bad_request' });
+    // PostgreSQL class 22 is "data exception": the database refused a value the caller sent (a malformed id, a
+    // NUL character, a number out of range). That is a bad request, not a server fault.
+    if (typeof e.code === 'string' && /^22[0-9A-Z]{3}$/.test(e.code)) return reply.code(400).send({ error: 'bad_request' });
     return reply.code(500).send({ error: 'internal' });
   });
 

@@ -3,9 +3,11 @@ import 'package:flutter/material.dart';
 import 'core/theme.dart';
 import 'core/widgets/brand.dart';
 import 'core/widgets/glass.dart';
+import 'core/widgets/waking_banner.dart';
 import 'package:flutter/services.dart' show rootBundle;
 
 import 'features/home/home_screen.dart';
+import 'features/location/place_lookup.dart';
 import 'features/map/map_screen.dart';
 import 'features/police/police_directory.dart';
 import 'features/police/police_screen.dart';
@@ -85,20 +87,36 @@ class _RootState extends State<_Root> {
   Widget build(BuildContext context) {
     final s = widget.services;
     if (_splash) return const SplashView();
-    return ListenableBuilder(
-      listenable: Listenable.merge([s.sos, s.onboarding, s.settings, s.i18n]),
-      builder: (context, _) {
-        final onboarded = s.settings.onboarded && s.onboarding.step == OnboardingStep.done;
-        if (!onboarded) {
-          return OnboardingFlow(c: s.onboarding, i18n: s.i18n, bridge: s.bridge);
-        }
-        return Stack(
-          children: [
-            _Tabs(services: s),
-            if (s.sos.phase != SosPhase.idle) Positioned.fill(child: SosScreen(sos: s.sos, i18n: s.i18n, police: s.police)),
-          ],
-        );
-      },
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: ListenableBuilder(
+            listenable: Listenable.merge([s.sos, s.onboarding, s.settings, s.i18n]),
+            builder: (context, _) {
+              final onboarded = s.settings.onboarded && s.onboarding.step == OnboardingStep.done;
+              if (!onboarded) {
+                return OnboardingFlow(c: s.onboarding, i18n: s.i18n, bridge: s.bridge);
+              }
+              return Stack(
+                children: [
+                  _Tabs(services: s),
+                  if (s.sos.phase != SosPhase.idle) Positioned.fill(child: SosScreen(sos: s.sos, i18n: s.i18n, police: s.police)),
+                ],
+              );
+            },
+          ),
+        ),
+        // While a sleeping server wakes up, say so: the wait is not a fault.
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          child: ListenableBuilder(
+            listenable: s.i18n,
+            builder: (context, _) => WakingBanner(waking: s.waking, message: s.i18n.t('net.waking')),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -131,7 +149,7 @@ class _TabsState extends State<_Tabs> {
     final s = widget.services;
     final t = s.i18n.t;
     final body = switch (_tab) {
-      1 => MapScreen(location: s.location, api: s.api, i18n: s.i18n, onPlace: (p) => _state = p?.state),
+      1 => MapScreen(location: s.location, api: s.api, i18n: s.i18n, placeLookup: const DevicePlaceLookup(), onPlace: (p) => _state = p?.state),
       2 => PoliceScreen(directory: _directory, i18n: s.i18n, currentState: _state),
       _ => HomeScreen(sos: s.sos, settings: s.settings, i18n: s.i18n, bridge: s.bridge, api: s.api, inbox: s.inbox, share: s.share, police: s.police),
     };

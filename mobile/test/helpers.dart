@@ -129,12 +129,27 @@ class FakeApi implements SentriApi {
     required String publicKey,
     required String boxPublicKey,
     required String locale,
-  }) async =>
-      const SignInResult(userId: 'u', isNew: true);
+  }) async {
+    verifyCalls++;
+    verifyRequests.add((phone: phone, code: code));
+    return const SignInResult(userId: 'u', isNew: true);
+  }
+
+  /// How often the app asked the server to check a sign-up code, and with what.
+  int verifyCalls = 0;
+  final List<({String phone, String code})> verifyRequests = [];
+
   @override
-  Future<void> saveContacts(List<({String phone, String locale})> contacts) async {}
+  Future<void> saveContacts(List<({String phone, String locale})> contacts) async {
+    contactsSaved.add([for (final c in contacts) c.phone]);
+  }
+  final List<List<String>> contactsSaved = [];
+
   @override
-  Future<void> savePins({required String cancelPin, required String duressPin}) async {}
+  Future<void> savePins({required String cancelPin, required String duressPin}) async {
+    pinsSaved++;
+  }
+  int pinsSaved = 0;
   @override
   Future<void> saveProfile({String? locale, bool? dataSaver, String? name}) async {}
   List<ContactStatus> contactStatuses = const [
@@ -213,6 +228,8 @@ class FakeLocation implements LocationSource {
   Future<GeoFix?> fix({required bool highAccuracy, required Duration timeout}) async => current;
   @override
   Future<GeoFix?> lastKnown() async => current;
+  @override
+  Future<GeoFix?> preciseFix({Duration timeout = const Duration(seconds: 20)}) async => current;
 }
 
 class FakeBattery implements BatterySource {

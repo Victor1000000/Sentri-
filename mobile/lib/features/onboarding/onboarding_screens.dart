@@ -1,12 +1,23 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/i18n/i18n.dart';
 import '../../core/widgets/brand.dart';
 import 'onboarding_controller.dart';
 import 'permissions_panel.dart';
 import '../../core/platform/native_bridge.dart';
+
+/// Typing a phone number: only characters a number can contain, and no more than a number needs.
+/// The number is normalised and checked again before anything is sent.
+final _phoneFormatters = <TextInputFormatter>[
+  FilteringTextInputFormatter.allow(RegExp(r'[0-9+\-\s().]')),
+  LengthLimitingTextInputFormatter(24),
+];
+
+/// The code and the PINs are digits only. Their length is checked again before anything is sent.
+final _digitFormatters = <TextInputFormatter>[FilteringTextInputFormatter.digitsOnly];
 
 /// The sign-up screens. One widget per step, switched by [OnboardingController.step].
 class OnboardingFlow extends StatelessWidget {
@@ -132,6 +143,7 @@ class _PhoneStepState extends State<_PhoneStep> {
             label: widget.i18n.t('phone.title'),
             keyboardType: TextInputType.phone,
             autofillHints: const [AutofillHints.telephoneNumber],
+            inputFormatters: _phoneFormatters,
             hint: '0803 123 4567',
           ),
           const SizedBox(height: 16),
@@ -193,6 +205,7 @@ class _OtpStepState extends State<_OtpStep> {
             keyboardType: TextInputType.number,
             maxLength: 6,
             obscure: true,
+            inputFormatters: _digitFormatters,
             autofillHints: const [AutofillHints.oneTimeCode],
           ),
           if (widget.c.devCode != null) ...[
@@ -295,7 +308,7 @@ class _ContactsStepState extends State<_ContactsStep> {
           for (var i = 0; i < _ctls.length; i++)
             Padding(
               padding: const EdgeInsets.only(bottom: 10),
-              child: PillField(key: ObjectKey(_ctls[i]), controller: _ctls[i], focusNode: _focus[i], noAutofill: true, keyboardType: TextInputType.phone, hint: widget.i18n.t('contacts.phone_hint')),
+              child: PillField(key: ObjectKey(_ctls[i]), controller: _ctls[i], focusNode: _focus[i], noAutofill: true, keyboardType: TextInputType.phone, inputFormatters: _phoneFormatters, hint: widget.i18n.t('contacts.phone_hint')),
             ),
           if (_ctls.length < 5)
             OutlinePill(
@@ -338,7 +351,7 @@ class _PinsStepState extends State<_PinsStep> {
   Widget _field(BuildContext context, TextEditingController c, String label, String? help) => Padding(
         padding: const EdgeInsets.only(bottom: 16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          PillField(controller: c, label: label, keyboardType: TextInputType.number, obscure: true, maxLength: 8),
+          PillField(controller: c, label: label, keyboardType: TextInputType.number, obscure: true, maxLength: 8, inputFormatters: _digitFormatters),
           if (help != null) Padding(padding: const EdgeInsets.only(left: 8, top: 4), child: Text(help, style: Theme.of(context).textTheme.bodySmall)),
         ]),
       );

@@ -10,6 +10,12 @@ services:
     dockerContext: .
     healthCheckPath: /healthz
     autoDeploy: true
+    # Redeploy only when the server's own files change. An app-only update then leaves the running server alone
+    # (on the free plan a restart clears everything the server holds in memory).
+    buildFilter:
+      paths:
+        - backend/**
+        - Dockerfile.backend
     envVars:
       - key: NODE_ENV
         value: development

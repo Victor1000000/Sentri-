@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:http/http.dart' as http;
 
 import '../storage/key_value_store.dart';
@@ -58,11 +59,14 @@ class SignInResult {
 /// Everything the app needs from the backend. A fake implements this in tests.
 /// A named place for a position. Every field may be missing.
 class Place {
-  const Place({this.street, this.area, this.lga, this.state, required this.label});
+  const Place({this.street, this.area, this.lga, this.state, this.landmark, required this.label});
   final String? street;
   final String? area;
   final String? lga;
   final String? state;
+
+  /// A named building or business close by, when the phone's place lookup knows one.
+  final String? landmark;
   final String label;
 
   static Place? fromJson(Object? j) {
@@ -194,34 +198,86 @@ class Session {
   }
 }
 
+/// How a token refresh ended. "Rejected" means the server said it does not know this session; "unavailable" means
+/// it could not be asked (offline, or the server was busy), which says nothing about the session itself.
+enum _Refreshed { ok, rejected, unavailable }
+
 class HttpSentriApi implements SentriApi {
   HttpSentriApi({
     required this.baseUrl,
     required this.session,
     http.Client? client,
     this.timeout = const Duration(seconds: 8),
+    this.patientTimeout = const Duration(seconds: 20),
+    this.wakeBudget = const Duration(seconds: 70),
+    this.wakeProbe = const Duration(seconds: 10),
+    this.wakePause = const Duration(seconds: 3),
+    this.onSessionExpired,
   }) : _http = client ?? http.Client();
 
   final String baseUrl;
   final Session session;
   final http.Client _http;
+
+  /// Time allowed for an emergency request (an alert, a location update). Short, so the phone keeps the alert and retries.
   final Duration timeout;
 
-  Future<http.Response> _once(String method, String path, Object? body, bool auth) async {
+  /// Time allowed for an ordinary request. Longer, because a server that has been idle can be slow to answer.
+  final Duration patientTimeout;
+
+  /// How long an ordinary request waits for a sleeping server to wake up before it gives up.
+  final Duration wakeBudget;
+
+  /// How long each "are you awake?" check may take, and how long to pause between checks.
+  final Duration wakeProbe;
+  final Duration wakePause;
+
+  /// Called once when the server has said it no longer knows this phone's session (for example after a server reset).
+  void Function()? onSessionExpired;
+
+  /// True while the app is waiting for a sleeping server to wake up, so the screen can say so.
+  final ValueNotifier<bool> waking = ValueNotifier<bool>(false);
+
+  Future<http.Response> _once(String method, String path, Object? body, bool auth, [Duration? limit]) async {
+    final t = limit ?? timeout;
     final req = http.Request(method, Uri.parse('$baseUrl$path'));
     req.headers['content-type'] = 'application/json';
     if (auth && session.accessToken != null) req.headers['authorization'] = 'Bearer ${session.accessToken}';
     if (body != null) req.body = jsonEncode(body);
-    final streamed = await _http.send(req).timeout(timeout);
-    return http.Response.fromStream(streamed).timeout(timeout);
+    final streamed = await _http.send(req).timeout(t);
+    return http.Response.fromStream(streamed).timeout(t);
   }
 
-  Future<http.Response> _call(String method, String path, {Object? body, bool auth = true}) async {
+  /// [patient] false is for emergencies (an alert, a PIN, a location update): fail fast and let the phone keep the
+  /// alert and retry. Everything else is patient: it waits longer, and if the server is asleep it waits for it to wake.
+  Future<http.Response> _call(String method, String path, {Object? body, bool auth = true, bool patient = true}) async {
     try {
-      var res = await _once(method, path, body, auth);
-      if (res.statusCode == 401 && auth && await _refresh()) {
-        res = await _once(method, path, body, auth);
+      return await _attempt(method, path, body, auth, patient);
+    } on ApiUnreachable catch (e) {
+      // No connection at all (offline, no DNS) is reported at once. Only a slow answer, or the hosting
+      // platform's own "not ready" reply, means a sleeping server worth waiting for.
+      final slow = e.cause is TimeoutException || e.cause is String;
+      if (!patient || !slow) rethrow;
+      if (!await _wake()) rethrow;
+      return _attempt(method, path, body, auth, patient);
+    }
+  }
+
+  Future<http.Response> _attempt(String method, String path, Object? body, bool auth, bool patient) async {
+    final limit = patient ? patientTimeout : timeout;
+    try {
+      var res = await _once(method, path, body, auth, limit);
+      if (res.statusCode == 401 && auth) {
+        final r = await _refresh();
+        if (r == _Refreshed.ok) {
+          res = await _once(method, path, body, auth, limit);
+        } else if (r == _Refreshed.rejected && patient) {
+          unawaited(_expire());
+        } else if (r == _Refreshed.unavailable && patient) {
+          throw ApiUnreachable('could not check the session');
+        }
       }
+      if (patient && const {502, 503, 504}.contains(res.statusCode)) throw ApiUnreachable('server answered ${res.statusCode}');
       if (res.statusCode >= 400) throw ApiHttpError(res.statusCode, _errorCode(res));
       return res;
     } on TimeoutException catch (e) {
@@ -232,6 +288,53 @@ class HttpSentriApi implements SentriApi {
       throw ApiUnreachable(e);
     } on HandshakeException catch (e) {
       throw ApiUnreachable(e);
+    }
+  }
+
+  /// The server said it does not know this session: forget it and let the app start sign-in again.
+  Future<void> _expire() async {
+    if (!session.signedIn) return;
+    await session.clear();
+    onSessionExpired?.call();
+  }
+
+  /// A server that has been idle can take up to a minute to start. Checks on it until it answers or [wakeBudget]
+  /// runs out. One check at a time, however many requests are waiting.
+  Future<bool>? _waking;
+  Future<bool> _wake() => _waking ??= _doWake().whenComplete(() => _waking = null);
+
+  Future<bool> _doWake() async {
+    waking.value = true;
+    try {
+      final end = DateTime.now().add(wakeBudget);
+      while (DateTime.now().isBefore(end)) {
+        try {
+          final streamed = await _http.send(http.Request('GET', Uri.parse('$baseUrl/healthz'))).timeout(wakeProbe);
+          final res = await http.Response.fromStream(streamed).timeout(wakeProbe);
+          if (res.statusCode == 200) return true;
+        } on TimeoutException {
+          // still starting up
+        } on SocketException {
+          return false; // the phone itself is offline
+        } on HandshakeException {
+          return false;
+        } on http.ClientException {
+          // the connection dropped while the server was starting: ask again
+        }
+        await Future<void>.delayed(wakePause);
+      }
+      return false;
+    } finally {
+      waking.value = false;
+    }
+  }
+
+  /// Wakes the server in the background so the first real request does not have to wait. Never throws.
+  Future<void> prewarm() async {
+    try {
+      await _wake();
+    } catch (_) {
+      // best effort
     }
   }
 
@@ -246,32 +349,38 @@ class HttpSentriApi implements SentriApi {
   Map<String, dynamic> _json(http.Response r) => r.body.isEmpty ? {} : jsonDecode(r.body) as Map<String, dynamic>;
 
   /// Swaps the refresh token for a new pair. One refresh at a time.
-  Future<bool>? _refreshing;
-  Future<bool> _refresh() => _refreshing ??= _doRefresh().whenComplete(() => _refreshing = null);
+  Future<_Refreshed>? _refreshing;
+  Future<_Refreshed> _refresh() => _refreshing ??= _doRefresh().whenComplete(() => _refreshing = null);
 
-  Future<bool> _doRefresh() async {
-    if (!session.signedIn) return false;
+  Future<_Refreshed> _doRefresh() async {
+    if (!session.signedIn) return _Refreshed.rejected;
     try {
       final res = await _once('POST', '/v1/auth/refresh', {'deviceId': session.deviceId, 'refreshToken': session.refreshToken}, false);
-      if (res.statusCode != 200) return false;
-      final j = _json(res);
-      session.accessToken = j['accessToken'] as String;
-      session.refreshToken = j['refreshToken'] as String;
-      await session.save();
-      return true;
+      if (res.statusCode == 200) {
+        final j = _json(res);
+        session.accessToken = j['accessToken'] as String;
+        session.refreshToken = j['refreshToken'] as String;
+        await session.save();
+        return _Refreshed.ok;
+      }
+      return const {400, 401, 403, 404}.contains(res.statusCode) ? _Refreshed.rejected : _Refreshed.unavailable;
     } on TimeoutException {
-      return false;
+      return _Refreshed.unavailable;
     } on SocketException {
-      return false;
+      return _Refreshed.unavailable;
+    } on HandshakeException {
+      return _Refreshed.unavailable;
     } on http.ClientException {
-      return false;
+      return _Refreshed.unavailable;
+    } catch (_) {
+      return _Refreshed.unavailable; // an answer the app cannot read
     }
   }
 
   @override
   Future<Place?> reverseGeocode(double lat, double lon) async {
     try {
-      final res = await _call('GET', '/v1/geo/reverse?lat=$lat&lon=$lon');
+      final res = await _call('GET', '/v1/geo/reverse?lat=$lat&lon=$lon', patient: false);
       return Place.fromJson(_json(res)['place']);
     } on ApiHttpError {
       return null; // 404 when the server has no geocoder, 429 when asked too often
@@ -360,19 +469,19 @@ class HttpSentriApi implements SentriApi {
 
   @override
   Future<SosStartResult> startSos({required String trigger, GeoFix? geo}) async {
-    final j = _json(await _call('POST', '/v1/sos', body: {'trigger': trigger, ...?geo?.toJson()}));
+    final j = _json(await _call('POST', '/v1/sos', body: {'trigger': trigger, ...?geo?.toJson()}, patient: false));
     return SosStartResult(j['sosId'] as String, j['state'] as String);
   }
 
   @override
   Future<String> sendLocation(String sosId, GeoFix geo) async {
-    final j = _json(await _call('POST', '/v1/sos/$sosId/location', body: geo.toJson()));
+    final j = _json(await _call('POST', '/v1/sos/$sosId/location', body: geo.toJson(), patient: false));
     return j['state'] as String? ?? 'active';
   }
 
   @override
   Future<PinResult> submitPin(String? sosId, String pin) async {
-    final j = _json(await _call('POST', '/v1/sos/${sosId ?? 'current'}/pin', body: {'pin': pin}));
+    final j = _json(await _call('POST', '/v1/sos/${sosId ?? 'current'}/pin', body: {'pin': pin}, patient: false));
     switch (j['result']) {
       case 'cancelled':
         return PinResult.cancelled;
@@ -385,7 +494,7 @@ class HttpSentriApi implements SentriApi {
 
   @override
   Future<void> lowBattery(GeoFix? geo) async {
-    await _call('POST', '/v1/alerts/low-battery', body: {...?geo?.toJson()});
+    await _call('POST', '/v1/alerts/low-battery', body: {...?geo?.toJson()}, patient: false);
   }
 
   // ---- inbox ----
@@ -396,7 +505,7 @@ class HttpSentriApi implements SentriApi {
   @override
   Future<InboxDetail?> inboxItem(String id) async {
     try {
-      return InboxDetail.fromJson(_json(await _call('GET', '/v1/inbox/${Uri.encodeComponent(id)}')));
+      return InboxDetail.fromJson(_json(await _call('GET', '/v1/inbox/${Uri.encodeComponent(id)}', patient: false)));
     } on ApiHttpError catch (e) {
       if (e.status == 404) return null;
       rethrow;
@@ -405,7 +514,7 @@ class HttpSentriApi implements SentriApi {
 
   @override
   Future<String> respondToAlert(String id) async {
-    final j = _json(await _call('POST', '/v1/inbox/${Uri.encodeComponent(id)}/respond'));
+    final j = _json(await _call('POST', '/v1/inbox/${Uri.encodeComponent(id)}/respond', patient: false));
     return j['result'] as String? ?? 'ok';
   }
 
@@ -440,7 +549,7 @@ class HttpSentriApi implements SentriApi {
 
   @override
   Future<void> updateShare(String id, GeoFix geo) async {
-    await _call('PUT', '/v1/shares/${Uri.encodeComponent(id)}/location', body: geo.toJson());
+    await _call('PUT', '/v1/shares/${Uri.encodeComponent(id)}/location', body: geo.toJson(), patient: false);
   }
 
   @override

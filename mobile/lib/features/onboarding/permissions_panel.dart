@@ -59,12 +59,26 @@ class _PermissionsPanelState extends State<PermissionsPanel> with WidgetsBinding
     await _refresh();
   }
 
+  /// One permission: its name on the left, and either "On" or a button on the right.
+  /// The button gets its own width. The app's buttons are full-width by default, and a full-width button inside
+  /// a list row squeezes the name into a column of single letters.
   Widget _row(String key, bool on, Future<void> Function() action) {
-    return ListTile(
-      title: Text(widget.i18n.t(key)),
-      trailing: on
-          ? Chip(label: Text(widget.i18n.t('perm.on')))
-          : FilledButton(onPressed: () => unawaited(action()), child: Text(widget.i18n.t('perm.turn_on'))),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        children: [
+          Expanded(child: Text(widget.i18n.t(key))),
+          const SizedBox(width: 12),
+          if (on)
+            Chip(label: Text(widget.i18n.t('perm.on')))
+          else
+            FilledButton(
+              style: FilledButton.styleFrom(minimumSize: const Size(96, 44), padding: const EdgeInsets.symmetric(horizontal: 20)),
+              onPressed: () => unawaited(action()),
+              child: Text(widget.i18n.t('perm.turn_on')),
+            ),
+        ],
+      ),
     );
   }
 

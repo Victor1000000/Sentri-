@@ -1,0 +1,73 @@
+# Render Blueprint for the PERMANENT Sentri server: it remembers everything (accounts, contacts, alerts, shares).
+# Use it instead of render.yaml: in Render choose New > Blueprint, and set "Blueprint Path" to render.live.yaml.
+#
+# Costs about $23 a month: web service (starter) + Postgres (basic-256mb) + Key Value / Redis (starter).
+# NOT YET TRIED ON RENDER. If Render rejects a field, its error message names it; fix that line.
+#
+# NEVER delete or regenerate DATA_KEY, PHONE_HMAC_KEY or TOKEN_SECRET once real people have signed up:
+# stored phone numbers and names can no longer be read without them.
+#
+# After it is live, in the Key Value instance's settings set the eviction policy to "noeviction" (the job queue needs it).
+databases:
+  - name: sentri-db
+    plan: basic-256mb
+    postgresMajorVersion: "16"
+    ipAllowList: []
+
+services:
+  - type: keyvalue
+    name: sentri-redis
+    plan: starter
+    ipAllowList: []
+
+  - type: web
+    name: sentri-api-live
+    runtime: docker
+    plan: starter
+    region: frankfurt
+    dockerfilePath: ./Dockerfile.backend
+    dockerContext: .
+    healthCheckPath: /healthz
+    autoDeploy: true
+    buildFilter:
+      paths:
+        - backend/**
+        - Dockerfile.backend
+    envVars:
+      # development, not production: production refuses SMS_PROVIDER=mock, and there is no SMS provider yet.
+      # Storage is fully permanent either way.
+      - key: NODE_ENV
+        value: development
+      - key: STORE
+        value: postgres
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sentri-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: sentri-redis
+          property: connectionString
+      - key: OTP_PROVIDER
+        value: telegram
+      - key: SMS_PROVIDER
+        value: mock
+      - key: TRUST_PROXY_HOPS
+        value: "1"
+      # Random 256-bit values made once by Render and kept. The server accepts them as base64.
+      - key: TOKEN_SECRET
+        generateValue: true
+      - key: JWT_SECRET
+        generateValue: true
+      - key: PIN_PEPPER
+        generateValue: true
+      - key: DATA_KEY
+        generateValue: true
+      - key: PHONE_HMAC_KEY
+        generateValue: true
+      # Render asks for these two when the Blueprint is created. They come from @BotFather.
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_BOT_USERNAME
+        sync: false

@@ -13,10 +13,11 @@ import 'helpers.dart';
 
 final _bot = Uri.parse('https://t.me/sentri_login_bot?start=login');
 
-({OnboardingController c, FakeApi api, List<Uri> opened}) _rig({Future<bool> Function(Uri url)? open}) {
+({OnboardingController c, FakeApi api, List<Uri> opened, AppSettings settings}) _rig({Future<bool> Function(Uri url)? open}) {
   final store = MemoryKeyValueStore();
   final api = FakeApi();
   final opened = <Uri>[];
+  final settings = AppSettings(store);
   final c = OnboardingController(
     api: api,
     i18n: I18n(loader: (_) async => '{}'),
@@ -24,7 +25,7 @@ final _bot = Uri.parse('https://t.me/sentri_login_bot?start=login');
     keyStore: store,
     vault: LocalPinVault(store, iterations: 1),
     contacts: ContactStore(store),
-    settings: AppSettings(store),
+    settings: settings,
     bridge: FakeBridge(),
     openLink: open ??
         (url) async {
@@ -32,7 +33,7 @@ final _bot = Uri.parse('https://t.me/sentri_login_bot?start=login');
           return true;
         },
   );
-  return (c: c, api: api, opened: opened);
+  return (c: c, api: api, opened: opened, settings: settings);
 }
 
 void main() {
@@ -90,12 +91,24 @@ void main() {
       expect(r.c.telegramUrl, isNull);
     });
 
+    test('a session the server no longer knows sends the person back to sign in, with a clear message', () async {
+      final r = _rig();
+      r.api.telegramUrl = _bot;
+      await r.c.submitPhone('08031234567');
+      await r.settings.update(onboarded: true);
+      await r.c.sessionExpired();
+      expect(r.c.step, OnboardingStep.phone);
+      expect(r.c.errorKey, 'auth.session_ended');
+      expect(r.c.telegramUrl, isNull);
+      expect(r.settings.onboarded, isFalse);
+    });
+
     test('a bad number asks the server for nothing and opens nothing', () async {
       final r = _rig();
       r.api.telegramUrl = _bot;
       await r.c.submitPhone('abc');
       expect(r.c.step, isNot(OnboardingStep.otp));
-      expect(r.c.errorKey, 'common.error');
+      expect(r.c.errorKey, 'phone.invalid');
       expect(r.api.otpRequests, 0);
       expect(r.opened, isEmpty);
     });
@@ -121,6 +134,107 @@ void main() {
       expect(r.c.telegramUrl, isNull);
       expect(r.c.devCode, '123456');
       expect(r.opened, isEmpty);
+    });
+  });
+
+  // The server checks every one of these again. Stopping an obvious mistake on the phone saves a round trip and
+  // tells the person what is wrong in their own language.
+  group('obvious mistakes are stopped before anything is sent', () {
+    test('a code shorter than six digits never reaches the server', () async {
+      final r = _rig();
+      await r.c.submitCode('12345');
+      expect(r.c.errorKey, 'otp.format');
+      expect(r.api.verifyCalls, 0);
+      expect(r.c.busy, isFalse);
+    });
+
+    test('a code with letters never reaches the server', () async {
+      final r = _rig();
+      await r.c.submitCode('12ab56');
+      expect(r.c.errorKey, 'otp.format');
+      expect(r.api.verifyCalls, 0);
+    });
+
+    test('an empty code is refused', () async {
+      final r = _rig();
+      await r.c.submitCode('   ');
+      expect(r.c.errorKey, 'otp.format');
+      expect(r.api.verifyCalls, 0);
+    });
+
+    test('a good code, typed with spaces round it, is sent as six digits', () async {
+      final r = _rig();
+      await r.c.submitCode(' 123456 ');
+      expect(r.c.errorKey, isNull);
+      expect(r.api.verifyCalls, 1);
+      expect(r.api.verifyRequests.single.code, '123456');
+      expect(r.c.step, OnboardingStep.contacts);
+    });
+
+    test('a PIN of three digits is refused and nothing is saved', () async {
+      final r = _rig();
+      await r.c.submitPins('123', '123');
+      expect(r.c.errorKey, 'pins.format');
+      expect(r.api.pinsSaved, 0);
+    });
+
+    test('a PIN of nine digits is refused', () async {
+      final r = _rig();
+      await r.c.submitPins('123456789', '123456789');
+      expect(r.c.errorKey, 'pins.format');
+      expect(r.api.pinsSaved, 0);
+    });
+
+    test('a PIN with letters is refused', () async {
+      final r = _rig();
+      await r.c.submitPins('12ab', '12ab');
+      expect(r.c.errorKey, 'pins.format');
+      expect(r.api.pinsSaved, 0);
+    });
+
+    test('a confirm PIN that does not match is refused', () async {
+      final r = _rig();
+      await r.c.submitPins('1234', '4321');
+      expect(r.c.errorKey, 'pins.mismatch');
+      expect(r.api.pinsSaved, 0);
+    });
+
+    test('a good PIN is saved on the phone and on the server, then setup moves on', () async {
+      final r = _rig();
+      await r.c.submitPins('1234', '1234');
+      expect(r.c.errorKey, isNull);
+      expect(r.api.pinsSaved, 1);
+      expect(await r.c.vault.isSet, isTrue);
+      expect(r.c.step, OnboardingStep.permissions);
+    });
+
+    test('two contacts are refused: at least three are needed', () async {
+      final r = _rig();
+      await r.c.submitContacts(['08031111111', '08032222222']);
+      expect(r.c.errorKey, 'contacts.need_more');
+      expect(r.api.contactsSaved, isEmpty);
+    });
+
+    test('a contact number that is not a number is refused', () async {
+      final r = _rig();
+      await r.c.submitContacts(['08031111111', '08032222222', 'not a number']);
+      expect(r.c.errorKey, 'contacts.invalid');
+      expect(r.api.contactsSaved, isEmpty);
+    });
+
+    test('the same number twice is refused', () async {
+      final r = _rig();
+      await r.c.submitContacts(['08031111111', '08031111111', '08032222222']);
+      expect(r.c.errorKey, 'contacts.invalid');
+      expect(r.api.contactsSaved, isEmpty);
+    });
+
+    test('three different numbers are saved in the international form', () async {
+      final r = _rig();
+      await r.c.submitContacts(['08031111111', '0803 222 2222', '08033333333']);
+      expect(r.c.errorKey, isNull);
+      expect(r.api.contactsSaved.single, ['+2348031111111', '+2348032222222', '+2348033333333']);
+      expect(r.c.step, OnboardingStep.pins);
     });
   });
 
@@ -185,8 +299,8 @@ void main() {
 
     test('reports a server error as an error', () async {
       await expectLater(
-        ask('{"error":"try_later"}', status: 503),
-        throwsA(isA<ApiHttpError>().having((e) => e.status, 'status', 503)),
+        ask('{"error":"try_later"}', status: 500),
+        throwsA(isA<ApiHttpError>().having((e) => e.status, 'status', 500)),
       );
     });
 

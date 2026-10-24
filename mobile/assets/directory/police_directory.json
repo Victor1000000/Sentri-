@@ -1,5 +1,5 @@
 {
-  "_note": "NOT TESTED. Every state's lines match the 'Police Emergency Numbers' list the Nigeria Police Force published (npf.gov.ng/polcontact.php, reposted on the NPF's official Facebook page; the post is undated and the NPF page itself could not be opened to check for newer numbers). npfListed=true means the number is on that list. verified stays false until someone has called the line and the command confirmed it; set verified=true with verifiedAt only then. Lagos also shows 767/112, the Lagos State emergency line, which is not on the NPF list. Commissioner names are filled only where two news reports agree (Aug 2026).",
+  "_note": "NOT TESTED. Every state's lines match the 'Police Emergency Numbers' list the Nigeria Police Force published (npf.gov.ng/polcontact.php, reposted on the NPF's official Facebook page; the post is undated and the NPF page itself could not be opened to check for newer numbers). npfListed=true means the number is on that list. verified stays false until someone has called the line and the command confirmed it; set verified=true with verifiedAt only then. Lagos also shows 767/112, the Lagos State emergency line, which is not on the NPF list. Commissioner names are filled only where two news reports agree (Aug 2026). Lagos: the first three lines are the Lagos State Command control room numbers published on the Command's own site (lagos.npf.gov.ng, in the header of every page and in its 2023-2025 press releases); the older NPF list lines follow, and the 767/112 text line is last so the call buttons only ever show dialable numbers.",
   "source": "https://www.pulse.ng/story/nigeria-emergency-numbers-state-directory-2026062213515128457",
   "commands": [
     {
@@ -270,9 +270,12 @@
     {
       "state": "Lagos",
       "lines": [
-        "767 or 112 (toll-free)",
+        "08063299264",
+        "08065154338",
+        "09129229576",
         "07055462708",
-        "08035963919"
+        "08035963919",
+        "767 or 112 (toll-free)"
       ],
       "commissioner": null,
       "verified": false,
@@ -405,6 +408,7 @@
   "sources": [
     "https://www.npf.gov.ng/information/emergency_number.php",
     "https://m.facebook.com/ngpolice/photos/police-emergency-numbers1-abia-08035415408-08079210003-08079210004-080792100052-/887831054592288/",
-    "https://www.pulse.ng/story/nigeria-emergency-numbers-state-directory-2026062213515128457"
+    "https://www.pulse.ng/story/nigeria-emergency-numbers-state-directory-2026062213515128457",
+    "https://lagos.npf.gov.ng/news/details/188"
   ]
 }
