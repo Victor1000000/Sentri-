@@ -1,0 +1,2746 @@
+diff --git a/.gitignore b/.gitignore
+index 7e50bcf0162d504985fadb4dce2a5333a2d39044..fffffb9bb2b77d4b798568c35ca445e6229457b7 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -5,3 +5,4 @@
+ build/
+ *.log
+ .DS_Store
++dump.rdb
+diff --git a/backend/src/app.ts b/backend/src/app.ts
+index de9be0d110e57deacd850838535eef1bcd1792d0..04520f3ef199af26c304795f2863d9603e581ca2 100644
+--- a/backend/src/app.ts
++++ b/backend/src/app.ts
+@@ -67,8 +67,11 @@
+ 
+   app.setErrorHandler((err, _req, reply) => {
+     if (err instanceof z.ZodError) return reply.code(400).send({ error: 'bad_request' });
+-    const code = (err as { statusCode?: number }).statusCode;
+-    if (code && code < 500) return reply.code(code).send({ error: 'bad_request' });
++    const e = err as { statusCode?: number; code?: unknown };
++    if (e.statusCode && e.statusCode < 500) return reply.code(e.statusCode).send({ error: 'bad_request' });
++    // PostgreSQL class 22 is "data exception": the database refused a value the caller sent (a malformed id, a
++    // NUL character, a number out of range). That is a bad request, not a server fault.
++    if (typeof e.code === 'string' && /^22[0-9A-Z]{3}$/.test(e.code)) return reply.code(400).send({ error: 'bad_request' });
+     return reply.code(500).send({ error: 'internal' });
+   });
+ 
+diff --git a/backend/src/config/env.ts b/backend/src/config/env.ts
+index c2c4534070f183fd09b8ebeb7675d7169bed8489..745d61d09230a22c91374109d15d9c359f3892ea 100644
+--- a/backend/src/config/env.ts
++++ b/backend/src/config/env.ts
+@@ -5,6 +5,29 @@
+   .default('false')
+   .transform((v) => v === 'true');
+ 
++/**
++ * Turns a 32-byte secret into 64 hex characters. Accepts hex as it is, or base64 / base64url (what a hosting
++ * dashboard's "generate a random value" makes). Returns null for anything else.
++ */
++export function toHexKey(value: string): string | null {
++  const v = value.trim();
++  if (/^[0-9a-fA-F]{64}$/.test(v)) return v.toLowerCase();
++  if (/^[A-Za-z0-9+/_-]{43}=?$/.test(v)) {
++    const bytes = Buffer.from(v.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
++    if (bytes.length === 32) return bytes.toString('hex');
++  }
++  return null;
++}
++
++const key32 = z.string().transform((v, ctx) => {
++  const hex = toHexKey(v);
++  if (!hex) {
++    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'must be 32 bytes: 64 hex characters, or base64' });
++    return z.NEVER;
++  }
++  return hex;
++});
++
+ /** Hosting dashboards often leave a variable set but empty. Treat that as "not set". */
+ const blankIsUnset = (v: unknown) => (v === '' ? undefined : v);
+ 
+@@ -60,8 +83,8 @@
+     REDIS_URL: z.string().optional(),
+     JWT_SECRET: z.string().min(32).optional(),
+     /** 64 hex chars each (openssl rand -hex 32). Keep in a secret manager, never in the database. */
+-    DATA_KEY: z.string().regex(/^[0-9a-fA-F]{64}$/).optional(),
+-    PHONE_HMAC_KEY: z.string().regex(/^[0-9a-fA-F]{64}$/).optional(),
++    DATA_KEY: key32.optional(),
++    PHONE_HMAC_KEY: key32.optional(),
+     DEFAULT_COUNTRY_CODE: z.string().regex(/^\d{1,3}$/).default('234'),
+     /**
+      * How many reverse proxies sit in front of the server (hosting platforms usually add 1). Rate limits use the
+diff --git a/backend/src/db/migrate.ts b/backend/src/db/migrate.ts
+index 589c35b1c764f09b51db5eaa57d78166d6f87ac7..dbb009cbb67c0330a8d3bd1dbcb87d6ceca523b7 100644
+--- a/backend/src/db/migrate.ts
++++ b/backend/src/db/migrate.ts
+@@ -5,7 +5,18 @@
+ export function createPool(databaseUrl: string): pg.Pool {
+   // bigint columns hold epoch-ms values, which fit safely in a JS number.
+   pg.types.setTypeParser(20, (v) => Number(v));
+-  return new pg.Pool({ connectionString: databaseUrl, max: 10 });
++  const pool = new pg.Pool({
++    connectionString: databaseUrl,
++    max: 10,
++    connectionTimeoutMillis: 10_000,
++    idleTimeoutMillis: 30_000,
++    // A request that runs far longer than any real one is stuck; stop it instead of piling up connections.
++    statement_timeout: 20_000,
++  });
++  // The database can restart (maintenance, a failover). An idle connection that drops then emits an error, and an
++  // unhandled one would stop the whole server. The pool replaces the connection by itself; just note it.
++  pool.on('error', (err) => console.error('database connection dropped:', err instanceof Error ? err.message : 'unknown'));
++  return pool;
+ }
+ 
+ /** Applies *.sql files in order, each in its own transaction, recording what ran. */
+diff --git a/backend/src/modules/sos/pg-store.ts b/backend/src/modules/sos/pg-store.ts
+index 628e01daabf18f386ac3e06212e9bef85fa0fbd4..ada6e5a615859f0dbae737abcaeb3561e97a8d7c 100644
+--- a/backend/src/modules/sos/pg-store.ts
++++ b/backend/src/modules/sos/pg-store.ts
+@@ -54,7 +54,8 @@
+   const values: unknown[] = [];
+   for (const [k, v] of Object.entries(patch) as [keyof SosEvent, unknown][]) {
+     if (v === undefined) continue;
+-    const col = COLS[k];
++    // Own keys of the fixed map only, so a key like "constructor" or "__proto__" can never become SQL.
++    const col = Object.hasOwn(COLS, k) ? COLS[k] : undefined;
+     if (!col) throw new Error(`unknown SosEvent field: ${String(k)}`);
+     values.push(k === 'lastGeo' ? JSON.stringify(v) : v);
+     parts.push(`${col} = $${firstParam + values.length - 1}`);
+diff --git a/backend/src/server.ts b/backend/src/server.ts
+index c899397e30e862536fe45549004756087ffaf2ef..dfe224115722359599adf72e1870cf79592e7c47 100644
+--- a/backend/src/server.ts
++++ b/backend/src/server.ts
+@@ -308,6 +308,9 @@
+   );
+ }
+ 
++// A promise nobody was waiting for failed (a push provider hiccup, say). Record it and keep serving.
++process.on('unhandledRejection', (reason) => log.error({ err: reason instanceof Error ? reason.message : 'unknown' }, 'unhandled rejection'));
++
+ // Graceful shutdown: stop taking requests, then let queue workers and the pool finish.
+ for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+   process.on(sig, async () => {
+diff --git a/backend/test/hostile-input.test.ts b/backend/test/hostile-input.test.ts
+new file mode 100644
+index 0000000..0559b13366e8cd0f656cc04d4671b951345fb2c4
+--- /dev/null
++++ b/backend/test/hostile-input.test.ts
+@@ -0,0 +1,244 @@
++import { describe, expect, it } from 'vitest';
++import { buildApp } from '../src/app.js';
++import { FieldCrypto } from '../src/lib/field-crypto.js';
++import { createPinPair } from '../src/lib/pin.js';
++import { FixedWindowLimiter } from '../src/lib/rate-limit.js';
++import { MemoryInbox } from '../src/modules/inbox/memory-inbox.js';
++import { registerInboxRoutes } from '../src/modules/inbox/routes.js';
++import { InboxService } from '../src/modules/inbox/service.js';
++import { MemoryUserRepo } from '../src/modules/auth/memory-user-repo.js';
++import { MemoryOtpStore, OtpService } from '../src/modules/auth/otp.js';
++import { makeAuthenticator, registerAuthRoutes } from '../src/modules/auth/routes.js';
++import { SmsBudgetGuard } from '../src/modules/budget/budget.js';
++import type { PushPayload, PushSender } from '../src/modules/notify/contact-notifier.js';
++import { MemorySosStore } from '../src/modules/sos/memory-store.js';
++import { MemoryShares } from '../src/modules/share/memory-share.js';
++import { registerShareRoutes } from '../src/modules/share/routes.js';
++import { ShareService } from '../src/modules/share/service.js';
++import { MockSmsProvider } from '../src/providers/sms/SmsProvider.js';
++import { FakeClock, PEPPER, harness } from './helpers.js';
++
++/**
++ * Throws hostile input at every public route: SQL injection strings, NUL bytes, scripts, wrong types, oversized
++ * bodies and broken JSON. Every answer must be a clean 4xx (or a normal success). Never a 5xx, never the input echoed back.
++ */
++const HOSTILE = [
++  "' OR '1'='1",
++  "'; DROP TABLE users; --",
++  '" OR ""="',
++  '1; SELECT pg_sleep(10)--',
++  "') UNION SELECT phone_enc FROM users --",
++  'a\u0000b',
++  '\u0000',
++  '%00',
++  '<script>alert(1)</script>',
++  '../../etc/passwd',
++  '${7*7}',
++  '{{7*7}}',
++  '\u202eevil',
++  '😀'.repeat(30),
++  '__proto__',
++  'constructor',
++  ' ',
++  '',
++  'x'.repeat(2000),
++];
++const WRONG_TYPES: unknown[] = [null, 0, -1, 1e308, true, [], {}, ['a'], { a: 1 }, [[]], { __proto__: { admin: true } }];
++const MARKERS = ['DROP TABLE', 'UNION SELECT', '<script>', 'pg_sleep', 'etc/passwd'];
++
++type Case = { method: 'GET' | 'POST' | 'PUT' | 'DELETE'; url: (v: string) => string; body?: Record<string, unknown>; headers?: Record<string, string> };
++
++async function rig() {
++  const h = await harness();
++  const store = new MemorySosStore();
++  const pins = await createPinPair('1234', '4321', PEPPER);
++  store.addUser({ id: 'u1', phone: '+2348000000000', locale: 'en', name: 'Ada' }, pins, [
++    { id: 'c1', userId: 'u1', phone: '+2348000000001', locale: 'en', hasApp: true, priority: 0 },
++  ]);
++  store.putUser({ id: 'uc1', phone: '+2348000000001', locale: 'en' });
++  const inbox = new MemoryInbox(store);
++  const shares = new MemoryShares();
++  const push: PushSender = {
++    async sendToContact() { return false; },
++    async sendToUser(_u: string, _p: PushPayload) { return true; },
++  };
++  let n = 0;
++  const clock = new FakeClock();
++  const o = { clock: clock.fn, newId: () => `id-${++n}`, retentionMs: 72 * 3_600_000 };
++  const shareSvc = new ShareService(store, inbox, shares, push, o);
++  const inboxSvc = new InboxService(store, inbox, push, { alertView: async () => 'invalid' } as never, { ...o, shares });
++  const authenticate = async (req: { headers: Record<string, unknown> }) => (req.headers['x-user'] as string | undefined) ?? null;
++  const app = buildApp({ engine: h.engine, authenticate, startLimiter: new FixedWindowLimiter(100_000, 60_000) });
++  registerShareRoutes(app, { service: shareSvc, authenticate, limiter: new FixedWindowLimiter(100_000, 60_000), updateLimiter: new FixedWindowLimiter(100_000, 60_000), clock: clock.fn });
++  registerInboxRoutes(app, { service: inboxSvc, authenticate, limiter: new FixedWindowLimiter(100_000, 60_000) });
++
++  // sign-in and profile routes, with a real signed-in person
++  const sms = new MockSmsProvider(0);
++  const fc = new FieldCrypto('a'.repeat(64), 'b'.repeat(64));
++  const budget = new SmsBudgetGuard({ dailyLimitKobo: 1_000_000, emergencyReservePct: 20, perUserDailyKobo: 1_000_000 });
++  let k = 0;
++  const otp = new OtpService(new MemoryOtpStore(), sms, fc, budget, () => `o${++k}`);
++  const auth = makeAuthenticator('s'.repeat(32), Date.now);
++  const authApp = buildApp({ engine: h.engine, authenticate: auth.userId, startLimiter: new FixedWindowLimiter(100_000, 60_000) });
++  registerAuthRoutes(authApp, {
++    otp,
++    users: new MemoryUserRepo(new MemorySosStore()),
++    jwtSecret: 's'.repeat(32),
++    pinPepper: PEPPER,
++    clock: Date.now,
++    defaultCountryCode: '234',
++    ipLimiter: new FixedWindowLimiter(100_000, 60_000),
++    authenticate: auth,
++  });
++  let code = '';
++  await otp.issue('+2349024804472', async (c) => void (code = c), 0);
++  const key = Buffer.alloc(32, 7).toString('base64');
++  const signed = await authApp.inject({
++    method: 'POST',
++    url: '/v1/auth/otp/verify',
++    payload: { phone: '+2349024804472', code, platform: 'android', publicKey: key, boxPublicKey: key },
++  });
++  const token = (signed.json() as { accessToken: string }).accessToken;
++  return { app, authApp, token };
++}
++
++const SOS_CASES: Case[] = [
++  { method: 'POST', url: () => '/v1/sos', body: { trigger: 'shake', lat: 6.5, lon: 3.4, accuracyM: 12 } },
++  { method: 'POST', url: (v) => `/v1/sos/${encodeURIComponent(v)}/location`, body: { lat: 6.5, lon: 3.4, accuracyM: 12 } },
++  { method: 'POST', url: (v) => `/v1/sos/${encodeURIComponent(v)}/pin`, body: { pin: '1234' } },
++  { method: 'POST', url: () => '/v1/sos/current/pin', body: { pin: '1234' } },
++  { method: 'POST', url: () => '/v1/alerts/low-battery', body: { lat: 6.5, lon: 3.4 } },
++  { method: 'GET', url: (v) => `/v1/geo/reverse?lat=${encodeURIComponent(v)}&lon=${encodeURIComponent(v)}` },
++  { method: 'POST', url: () => '/v1/shares', body: { contactIds: ['c1'], geo: { lat: 6.5, lon: 3.4 }, hours: 2 } },
++  { method: 'PUT', url: (v) => `/v1/shares/${encodeURIComponent(v)}/location`, body: { lat: 6.5, lon: 3.4 } },
++  { method: 'POST', url: (v) => `/v1/shares/${encodeURIComponent(v)}/extend`, body: { hours: 2 } },
++  { method: 'DELETE', url: (v) => `/v1/shares/${encodeURIComponent(v)}` },
++  { method: 'GET', url: (v) => `/v1/inbox/${encodeURIComponent(v)}` },
++  { method: 'POST', url: (v) => `/v1/inbox/${encodeURIComponent(v)}/respond` },
++  { method: 'POST', url: (v) => `/v1/invites/${encodeURIComponent(v)}`, body: { decision: 'accept' } },
++];
++
++const AUTH_CASES: Case[] = [
++  { method: 'POST', url: () => '/v1/auth/otp/request', body: { phone: '08031234567' } },
++  { method: 'POST', url: () => '/v1/auth/otp/verify', body: { phone: '08031234567', code: '123456', platform: 'android', publicKey: 'a', boxPublicKey: 'b', locale: 'en' } },
++  { method: 'POST', url: () => '/v1/auth/refresh', body: { deviceId: '00000000-0000-4000-8000-000000000000', refreshToken: 'x'.repeat(30) } },
++  { method: 'PUT', url: () => '/v1/me/contacts', body: { contacts: [{ phone: '08031234567', locale: 'en' }] } },
++  { method: 'PUT', url: () => '/v1/me/pins', body: { cancelPin: '1234', duressPin: '4321' } },
++  { method: 'PUT', url: () => '/v1/me/profile', body: { name: 'Ada', locale: 'en', dataSaver: true } },
++  { method: 'PUT', url: () => '/v1/me/push-token', body: { token: 'x'.repeat(40) } },
++];
++
++/** Every string field in turn replaced by `v`, and then every field at once. */
++function withStrings(body: Record<string, unknown>, v: unknown): Record<string, unknown>[] {
++  const paths: (string | number)[][] = [];
++  const walk = (x: unknown, p: (string | number)[]) => {
++    if (typeof x === 'string' || typeof x === 'number' || typeof x === 'boolean') paths.push(p);
++    else if (Array.isArray(x)) x.forEach((y, i) => walk(y, [...p, i]));
++    else if (x && typeof x === 'object') Object.entries(x).forEach(([k, y]) => walk(y, [...p, k]));
++  };
++  walk(body, []);
++  const set = (root: Record<string, unknown>, p: (string | number)[], val: unknown) => {
++    let cur: any = root;
++    p.slice(0, -1).forEach((k) => (cur = cur[k]));
++    cur[p[p.length - 1]!] = val;
++  };
++  const out = paths.map((p) => {
++    const c = structuredClone(body);
++    set(c, p, v);
++    return c;
++  });
++  const all = structuredClone(body);
++  paths.forEach((p) => set(all, p, v));
++  return [...out, all];
++}
++
++function check(res: { statusCode: number; body: string; headers: Record<string, unknown> }, label: string) {
++  expect(res.statusCode, `${label} -> ${res.statusCode} ${res.body.slice(0, 120)}`).toBeLessThan(500);
++  for (const m of MARKERS) expect(res.body.includes(m), `${label} echoed "${m}"`).toBe(false);
++  expect(String(res.headers['content-type'] ?? 'application/json'), label).toMatch(/json/);
++}
++
++describe('hostile input', () => {
++  for (const [name, cases, useAuthApp] of [
++    ['sos, sharing and inbox routes', SOS_CASES, false],
++    ['sign-in and profile routes', AUTH_CASES, true],
++  ] as const) {
++    it(`every ${name} answers cleanly to hostile text in every field and in the URL`, async () => {
++      const r = await rig();
++      for (const c of cases) {
++        const target = useAuthApp ? r.authApp : r.app;
++        const headers = useAuthApp ? { authorization: `Bearer ${r.token}` } : { 'x-user': 'u1' };
++        for (const v of HOSTILE) {
++          const bodies = c.body ? withStrings(c.body, v) : [undefined];
++          for (const b of bodies) {
++            const res = await target.inject({ method: c.method, url: c.url(v), headers, ...(b ? { payload: b } : {}) });
++            check(res, `${c.method} ${c.url('<text>')} with ${JSON.stringify(v).slice(0, 30)}`);
++          }
++        }
++      }
++    });
++
++    it(`every ${name} answers cleanly to the wrong kind of value in every field`, async () => {
++      const r = await rig();
++      for (const c of cases) {
++        if (!c.body) continue;
++        const target = useAuthApp ? r.authApp : r.app;
++        const headers = useAuthApp ? { authorization: `Bearer ${r.token}` } : { 'x-user': 'u1' };
++        for (const v of WRONG_TYPES) {
++          for (const b of withStrings(c.body, v)) {
++            const res = await target.inject({ method: c.method, url: c.url('id-1'), headers, payload: JSON.stringify(b) });
++            check(res, `${c.method} ${c.url('id-1')} with ${JSON.stringify(v)}`);
++          }
++        }
++      }
++    });
++
++    it(`every ${name} survives broken JSON, the wrong content type, an empty body and an oversized body`, async () => {
++      const r = await rig();
++      for (const c of cases) {
++        if (c.method === 'GET' || c.method === 'DELETE') continue;
++        const target = useAuthApp ? r.authApp : r.app;
++        const base = useAuthApp ? { authorization: `Bearer ${r.token}` } : { 'x-user': 'u1' };
++        const url = c.url('id-1');
++        for (const [payload, type] of [
++          ['{"a":', 'application/json'],
++          ['{"a":1}', 'text/plain'],
++          ['', 'application/json'],
++          ['null', 'application/json'],
++          ['[]', 'application/json'],
++          ['"just a string"', 'application/json'],
++          [JSON.stringify({ pad: 'x'.repeat(200_000) }), 'application/json'],
++        ] as const) {
++          const res = await target.inject({ method: c.method, url, headers: { ...base, 'content-type': type }, payload });
++          check(res, `${c.method} ${url} with ${type} ${payload.slice(0, 20)}`);
++        }
++      }
++    });
++  }
++});
++
++describe('a value the database refuses is the caller\'s mistake', () => {
++  it('maps PostgreSQL "data exception" errors (class 22) to 400, and other failures to 500', async () => {
++    const h = await harness();
++    const app = buildApp({ engine: h.engine, authenticate: async () => 'u1', startLimiter: new FixedWindowLimiter(100, 60_000) });
++    app.get('/t/bad-id', async () => {
++      throw Object.assign(new Error('invalid input syntax for type uuid: "x"'), { code: '22P02' });
++    });
++    app.get('/t/nul', async () => {
++      throw Object.assign(new Error('invalid byte sequence for encoding "UTF8": 0x00'), { code: '22021' });
++    });
++    app.get('/t/boom', async () => {
++      throw Object.assign(new Error('connection refused'), { code: 'ECONNREFUSED' });
++    });
++    app.get('/t/db-down', async () => {
++      throw Object.assign(new Error('the database system is shutting down'), { code: '57P01' });
++    });
++    const get = async (u: string) => app.inject({ method: 'GET', url: u });
++    expect((await get('/t/bad-id')).statusCode).toBe(400);
++    expect((await get('/t/nul')).statusCode).toBe(400);
++    expect((await get('/t/boom')).statusCode).toBe(500);
++    expect((await get('/t/db-down')).statusCode).toBe(500);
++    expect((await get('/t/bad-id')).json()).toEqual({ error: 'bad_request' });
++    expect((await get('/t/boom')).json()).toEqual({ error: 'internal' }); // no internal detail leaks
++  });
++});
+diff --git a/backend/test/pg.integration.test.ts b/backend/test/pg.integration.test.ts
+index 9c7783730e6cec4e2296bc63dd13575db4bf9af4..85c844a841c967ee60882dba2eec63d7bde2350a 100644
+--- a/backend/test/pg.integration.test.ts
++++ b/backend/test/pg.integration.test.ts
+@@ -466,4 +466,68 @@
+       expect((await pool.query("SELECT count(*)::int AS n FROM admins WHERE email = 'c@x.ng'")).rows[0].n).toBe(1);
+     });
+   });
++  describe('hostile input against the real tables', () => {
++    const HOSTILE = [
++      "' OR '1'='1",
++      "'; DROP TABLE users; --",
++      '" OR ""="',
++      "') UNION SELECT phone_enc FROM users --",
++      '1; SELECT pg_sleep(10)--',
++      'a\u0000b',
++      '<script>alert(1)</script>',
++      '${7*7}',
++      '😀'.repeat(20),
++      '__proto__',
++      'x'.repeat(3000),
++    ];
++    const tableCount = async () =>
++      (await pool.query("SELECT count(*)::int AS n FROM information_schema.tables WHERE table_schema = 'public'")).rows[0].n as number;
++
++    it('hostile text in a phone number or a name is stored as ordinary data and changes nothing else', async () => {
++      const before = await tableCount();
++      const ids: string[] = [];
++      for (const v of HOSTILE) {
++        const id = await newUser(v);
++        ids.push(id);
++        await repo.updateProfile(id, { name: v });
++        expect(await repo.getPhone(id)).toBe(v); // comes back exactly as given
++      }
++      expect(new Set(ids).size).toBe(HOSTILE.length); // "' OR '1'='1" did not match everyone: each is its own person
++      expect((await pool.query('SELECT count(*)::int AS n FROM users')).rows[0].n).toBe(HOSTILE.length);
++      expect(await tableCount()).toBe(before); // nothing dropped, nothing created
++    });
++
++    it('hostile text in an inbox name round-trips as text', async () => {
++      const inbox = new PgInbox(pool, fc);
++      const from = await newUser('+2348000000011');
++      const to = await newUser('+2348000000012');
++      for (const v of HOSTILE) {
++        const item = await inbox.upsert({
++          id: randomUUID(), userId: to, fromUserId: from, fromName: v, kind: 'low_battery', sosId: null, locale: 'en',
++          createdAt: now, updatedAt: now, purgeAfter: now + DAY,
++        } as never);
++        expect(item.fromName).toBe(v);
++      }
++      expect((await inbox.list(to, 100)).map((x) => x.fromName).sort()).toEqual([...HOSTILE].sort());
++    });
++
++    it('a SOS update accepts only its own column names, never inherited or invented ones', async () => {
++      const u = await newUser('+2348000000013');
++      const e = event(u);
++      await store.createEventIfNoActive(e);
++      for (const key of ['constructor', '__proto__', 'toString', 'state; DROP TABLE users; --', 'nope']) {
++        const patch = JSON.parse(`{${JSON.stringify(key)}: 1}`) as never;
++        await expect(store.updateEvent(e.id, patch)).rejects.toThrow(/unknown SosEvent field/);
++        await expect(store.transition(e.id, ['active'], patch)).rejects.toThrow(/unknown SosEvent field/);
++      }
++      expect((await store.getEvent(e.id))?.state).toBe('active'); // untouched
++    });
++
++    it('a malformed id or a NUL character is refused by the database with a "data exception" the server turns into a 400', async () => {
++      for (const bad of ['not-a-uuid', "' OR '1'='1", 'a\u0000b', '']) {
++        await expect(store.getEvent(bad)).rejects.toMatchObject({ code: expect.stringMatching(/^22/) });
++      }
++      expect(await store.getEvent(randomUUID())).toBeNull(); // a well-formed id that does not exist is just "not found"
++    });
++  });
+ });
+diff --git a/backend/test/sql-safety.test.ts b/backend/test/sql-safety.test.ts
+new file mode 100644
+index 0000000..feffefe696959bdecb63b49177e0cc4579b382a6
+--- /dev/null
++++ b/backend/test/sql-safety.test.ts
+@@ -0,0 +1,82 @@
++import { readFileSync, readdirSync, statSync } from 'node:fs';
++import { join, relative } from 'node:path';
++import { fileURLToPath } from 'node:url';
++import { describe, expect, it } from 'vitest';
++
++/**
++ * A guard, not a proof: it fails the moment anyone builds SQL out of text. Every value that comes from a person must
++ * reach the database as a bound parameter ($1, $2, ...). The few places that put fixed fragments of SQL together are
++ * listed here after review. A new one fails this test until someone has checked it and added it.
++ */
++const SRC = fileURLToPath(new URL('../src/', import.meta.url));
++
++function tsFiles(dir: string): string[] {
++  return readdirSync(dir).flatMap((n) => {
++    const p = join(dir, n);
++    return statSync(p).isDirectory() ? tsFiles(p) : p.endsWith('.ts') ? [p] : [];
++  });
++}
++const rel = (p: string) => relative(SRC, p).replaceAll('\\', '/');
++const SQL_WORDS = /\b(SELECT|INSERT INTO|UPDATE|DELETE FROM|WHERE|ORDER BY|LIMIT)\b/;
++const TEMPLATE = /`((?:[^`\\]|\\.)*)`/gs;
++
++/** Reviewed: every ${} below is a fixed fragment written in our own code, never request data. */
++const REVIEWED_INTERPOLATIONS: Record<string, string[][]> = {
++  'modules/dispatch/pg-directory.ts': [['PgDirectory.SELECT', 'PgDirectory.RANK'], ['PgDirectory.SELECT']], // static column list / ranking
++  'modules/inbox/pg-inbox.ts': [['insert', 'refresh'], ['insert', 'refresh']], // static INSERT and ON CONFLICT text
++  'modules/sos/pg-store.ts': [['sql'], ['sql']], // "col = $n" pairs; column names come only from the fixed COLS map
++};
++
++/** Reviewed: query() calls whose first argument is a variable (built from the fragments above, or a shipped file). */
++const REVIEWED_VARIABLE_QUERIES = new Set(['db/migrate.ts: sql', 'modules/inbox/pg-inbox.ts: sql']);
++
++describe('SQL is never built from text', () => {
++  const files = tsFiles(SRC);
++
++  it('only the reviewed template literals put anything inside SQL', () => {
++    const found: Record<string, string[][]> = {};
++    for (const f of files) {
++      for (const m of readFileSync(f, 'utf8').matchAll(TEMPLATE)) {
++        const body = m[1]!;
++        if (!SQL_WORDS.test(body) || !body.includes('${')) continue;
++        (found[rel(f)] ??= []).push([...body.matchAll(/\$\{([^}]*)\}/g)].map((x) => x[1]!.trim()));
++      }
++    }
++    expect(found).toEqual(REVIEWED_INTERPOLATIONS);
++  });
++
++  it('only the reviewed query() calls take a variable instead of a literal', () => {
++    const found = new Set<string>();
++    for (const f of files) {
++      for (const m of readFileSync(f, 'utf8').matchAll(/\.query(?:<[^>]*>)?\(\s*([^\s`'"][^,)]*)/g)) found.add(`${rel(f)}: ${m[1]!.trim()}`);
++    }
++    expect(found).toEqual(REVIEWED_VARIABLE_QUERIES);
++  });
++
++  it('nothing is added onto a SQL string with +', () => {
++    for (const f of files) {
++      expect(/\.query(?:<[^>]*>)?\(\s*['"`][^'"`]*['"`]\s*\+/.test(readFileSync(f, 'utf8')), rel(f)).toBe(false);
++    }
++  });
++
++  it('the reviewed fragments really are fixed text', () => {
++    const dir = readFileSync(join(SRC, 'modules/dispatch/pg-directory.ts'), 'utf8');
++    for (const name of ['SELECT', 'RANK']) {
++      const m = new RegExp(`static\\s+(?:readonly\\s+)?${name}\\s*=\\s*([\`'"])([\\s\\S]*?)\\1\\s*;`).exec(dir);
++      expect(m, `PgDirectory.${name}`).not.toBeNull();
++      expect(m![2]!.includes('${')).toBe(false);
++    }
++    const inbox = readFileSync(join(SRC, 'modules/inbox/pg-inbox.ts'), 'utf8');
++    for (const name of ['insert', 'refresh']) {
++      const m = new RegExp(`const\\s+${name}\\s*=\\s*\`([\\s\\S]*?)\`;`).exec(inbox);
++      expect(m, `inbox ${name}`).not.toBeNull();
++      expect(m![1]!.includes('${')).toBe(false);
++    }
++  });
++
++  it('the SOS update only ever uses column names from its fixed map', () => {
++    const store = readFileSync(join(SRC, 'modules/sos/pg-store.ts'), 'utf8');
++    expect(store).toContain('Object.hasOwn(COLS, k)');
++    expect(store).toMatch(/\$\$\{firstParam \+ values\.length - 1\}/); // values are always numbered parameters
++  });
++});
+diff --git a/backend/test/telegram.test.ts b/backend/test/telegram.test.ts
+index d993ee9b5721f0a5b1c9ad01b73163c74a00636a..0d1a41d853c3b489099f594bb18aee8f549e9c5e 100644
+--- a/backend/test/telegram.test.ts
++++ b/backend/test/telegram.test.ts
+@@ -1,6 +1,6 @@
+ import { describe, expect, it } from 'vitest';
+ import { buildApp } from '../src/app.js';
+-import { EnvSchema, loadConfig } from '../src/config/env.js';
++import { EnvSchema, loadConfig, toHexKey } from '../src/config/env.js';
+ import { FieldCrypto } from '../src/lib/field-crypto.js';
+ import { FixedWindowLimiter } from '../src/lib/rate-limit.js';
+ import { MemoryUserRepo } from '../src/modules/auth/memory-user-repo.js';
+@@ -511,5 +511,45 @@
+ 
+   it('would not start in production mode, which is why the Blueprint uses development', () => {
+     expect(() => loadConfig({ ...render, NODE_ENV: 'production' })).toThrow();
++  });
++});
++
++describe('secrets from a hosting dashboard', () => {
++  const dev = { PUBLIC_BASE_URL: 'https://api.example.com', TOKEN_SECRET: 't'.repeat(32), PIN_PEPPER: 'p'.repeat(32) };
++  const live = {
++    ...dev,
++    STORE: 'postgres',
++    DATABASE_URL: 'postgres://u:p@db/sentri',
++    REDIS_URL: 'redis://r:6379',
++    JWT_SECRET: 'Hj7+Lk2/Mn9PqRs4TuVw6XyZa8BcDe0FgHi1JkLmNoP=',
++  };
++  const b64 = 'Qa1+Ws2/Ed3RfTg4YhUj5IkOl6PzXc7VbNm8AsDf9Gh=';
++
++  it('accepts 32-byte keys as hex or as base64, and hands them on as hex', () => {
++    const hex = 'ab'.repeat(32);
++    expect(toHexKey(hex)).toBe(hex);
++    expect(toHexKey(hex.toUpperCase())).toBe(hex);
++    expect(toHexKey(b64)).toBe(Buffer.from(b64, 'base64').toString('hex'));
++    expect(toHexKey(b64.replace(/\+/g, '-').replace(/\//g, '_'))).toBe(Buffer.from(b64, 'base64').toString('hex')); // base64url
++    expect(toHexKey(b64.replace(/=$/, ''))).toBe(Buffer.from(b64, 'base64').toString('hex')); // no padding
++  });
++
++  it('refuses anything that is not exactly 32 bytes', () => {
++    for (const bad of ['', 'short', 'zz'.repeat(32), 'ab'.repeat(31), 'ab'.repeat(33), 'A'.repeat(42), 'A'.repeat(45), `${b64}!`]) {
++      expect(toHexKey(bad), bad).toBeNull();
++    }
++  });
++
++  it('starts on the permanent database with Render-style base64 secrets', () => {
++    const c = loadConfig({ ...live, DATA_KEY: b64, PHONE_HMAC_KEY: 'Zz9+Yy8/Xx7WwVv6UuTt5SsRr4QqPp3OoNn2MmLl1Kk=' });
++    expect(c.STORE).toBe('postgres');
++    expect(c.DATA_KEY).toMatch(/^[0-9a-f]{64}$/);
++    expect(c.PHONE_HMAC_KEY).toMatch(/^[0-9a-f]{64}$/);
++    expect(c.DATA_KEY).not.toBe(c.PHONE_HMAC_KEY);
++  });
++
++  it('refuses the permanent database without its keys, or with a bad key', () => {
++    expect(() => loadConfig({ ...live })).toThrow(/DATA_KEY/);
++    expect(() => loadConfig({ ...live, DATA_KEY: 'nope', PHONE_HMAC_KEY: b64 })).toThrow(/DATA_KEY/);
+   });
+ });
+diff --git a/docs/HANDOFF.md b/docs/HANDOFF.md
+new file mode 100644
+index 0000000..693c467b9a0fe4d5ae00007e97376900780adf12
+--- /dev/null
++++ b/docs/HANDOFF.md
+@@ -0,0 +1,186 @@
++# Sentri: hand-over for the next engineer or AI
++
++Read this whole file before touching anything. It records what exists, what was verified, what was NOT verified,
++the traps already found, and the exact next steps. The owner (Vic) is non-technical, works only from an Android phone,
++and has limited AI credit, so be accurate, keep replies short and plain, and never ask him to paste secrets in chat.
++
++## 0. Rules that prevent most mistakes
++1. Nothing can be compiled or run for the Flutter app in the sandbox used so far. GitHub Actions is the only compiler.
++   Treat every Dart edit as unverified until a CI run is green. Read errors from the run page (section 3).
++2. Never put a secret (bot token, API keys, DATA_KEY...) in the repo, in chat, or in logs.
++3. Never change `verified` in `mobile/assets/directory/police_directory.json` or the `verified_at` logic in the backend.
++   Those control whether the SERVER may alert a police command. Only the on-screen wording was changed.
++4. All SQL must use bound parameters ($1, $2...). `backend/test/sql-safety.test.ts` fails if SQL is built from text.
++5. Every user-supplied value goes through a zod schema. Free-text rules already exist (see `modules/auth/routes.ts`).
++6. A fake class that `implements` a Dart class must override EVERY member, including ones with default bodies.
++   When you add a member to `SentriApi` or `LocationSource`, update the fakes in `mobile/test/helpers.dart`.
++7. A Dart function type with a nullable optional parameter is NOT a subtype of one with a non-null optional parameter.
++   `I18n.t` is `String t(String key, [Map<String, String> args = const {}])`; match it exactly when passing it around.
++8. The app's theme makes every `FilledButton` full width (`Size.fromHeight(52)`). Inside a `Row`/`ListTile` give it
++   `FilledButton.styleFrom(minimumSize: Size(96, 44))` or the neighbouring text collapses to one letter per line.
++9. Keep all five language files (`mobile/assets/i18n/{en,ha,ig,pcm,yo}.json`) in step: same keys, same `{placeholders}`.
++   `mobile/test/units_test.dart` enforces it. Hausa/Igbo/Yoruba/Pidgin text was written by an AI: have native speakers review it.
++
++## 1. The product
++Sentri is a personal-safety app for all Nigerians. One hidden action (shake, volume button, power button, floating
++button) sends an SOS with live location to 3 to 5 trusted contacts INSIDE the app (inbox + push), never by SMS to
++contacts. It also offers live location sharing, a police directory with the nearest command and one-tap calls, 112,
++a cancel PIN and a duress PIN, five languages (English, Hausa, Igbo, Pidgin, Yoruba), and low-battery alerts.
++Sign-up is by phone number; the one-time code comes through a Telegram bot (free), not SMS.
++
++## 2. Repository: github.com/Victor1000000/Sentri- (branch main)
++- `backend/` Node 22 + TypeScript + Fastify + zod. `src/modules/*` (auth, sos, share, inbox, dispatch, geo, admin,
++  telegram, notify...). Postgres (PostGIS) + Redis (BullMQ) in real mode; in-memory stores for tests/dev.
++  Tests: vitest. `npx tsc --noEmit` and `npx vitest run --exclude test/pg.integration.test.ts` must pass.
++  Real-database tests: `TEST_DATABASE_URL=postgres://user:pw@localhost:5432/sentri_test npx vitest run test/pg.integration.test.ts`
++  (needs Postgres 16 + PostGIS and the database name must contain "test").
++- `mobile/` Flutter (Android only). `lib/core/net/api.dart` (HTTP client), `lib/features/*`, `lib/services.dart` (wiring),
++  `lib/app.dart` (shell). Android scaffolding is generated in CI by `flutter create` (see workflow), only
++  `mobile/android/app/src/main` is kept in git.
++- `.github/workflows/sentri-apk.yml` builds the APK (release, falls back to debug). `apply-patch.yml` applies a patch file
++  and pushes. `keep-awake.yml` pings the server every 5 minutes (needs repo secret API_BASE_URL).
++- `Dockerfile.backend`, `render.yaml` (free test server, memory store), `render.live.yaml` (permanent server, see 8.3).
++- `docs/` older design/security notes. This file.
++
++## 3. How changes reach GitHub (important, unusual)
++Nobody working on this has push access (the GitHub connector failed to sign in, no token). The only route:
++1. Produce ONE patch file named exactly `sentri-telegram-signup.patch` (the name is hard-coded in `apply-patch.yml`;
++   it is a historical name, the content can be anything). Create it with `git diff <remote main> HEAD`, excluding anything
++   under `.github/workflows/` (the workflow token cannot change workflow files).
++2. Vic uploads it to the repo's top level (github.com > Add file > Upload files; same name overwrites).
++3. Vic runs Actions > "Apply Telegram sign-up patch" > Run workflow (he finds the button on
++   `github.com/Victor1000000/Sentri-/actions/workflows/apply-patch.yml`, mobile layout can hide it: use "Desktop site").
++   It applies the patch, runs `tsc` and the backend tests, pushes to main only if they pass, deletes the patch file,
++   and starts the APK build.
++4. Changes to files under `.github/workflows/` must be uploaded by Vic by hand into that folder (rename `.yml.txt` to `.yml`
++   in GitHub's editor if his phone will not offer a `.yml`).
++Always dry-run first: clone the repo fresh, `git apply --check`, `git apply`, then run the backend tests.
++
++Reading a CI result without logging in (works; logs themselves need a login, annotations do not):
++- list runs: `curl -sL https://github.com/Victor1000000/Sentri-/actions` and regex `"name":"Build Sentri APK","runNumber":N,"id":"(\d+)"`
++- run page: `curl -sL https://github.com/Victor1000000/Sentri-/actions/runs/<id>`; strip tags; read "Status" and the
++  annotations. The APK workflow prints build/test/analyzer errors as annotations ("build.log matches" etc.).
++- The GitHub REST API is rate-limited from the sandbox; the artifact download link needs a login (Vic downloads it from the
++  Summary page of the run, bottom, "Artifacts", `sentri-apk`).
++Each CI build is signed with a fresh debug key, so Vic must UNINSTALL the old app before installing a new APK.
++
++## 4. Current live state
++- Remote main = commit `50d0773` (Telegram sign-up code). THE PATCH IN THIS HAND-OVER HAS NOT BEEN APPLIED YET.
++- APK builds are green. The Telegram sign-up works end to end on the test server (Vic confirmed codes arrive).
++- Render: free web service `sentri-api` from `render.yaml` (Frankfurt). Memory store: it forgets everything on every
++  restart or after 15 idle minutes. Bot `@TheRealSentri_Bot`; token/username are Render env vars (never seen by the AI).
++- GitHub repo secret `API_BASE_URL` = the Render address (no trailing slash). No secret means the APK points at a dead
++  placeholder and sign-up fails with "Something went wrong".
++- Paystack: Vic only just signed up, not verified. No billing code exists yet.
++
++## 5. What this patch contains
++Mobile
++- `features/onboarding/permissions_panel.dart`: fixed the "one letter per line" glitch (see rule 8). Also used by trigger settings.
++- `features/police/police_screen.dart` + `assets/i18n/*` (`police.note`, `police.approx`, `police.listed`): confident wording,
++  badge "Official NPF line", removed the "reported ... not yet confirmed" captions, commissioner line only when a name exists.
++- `assets/directory/police_directory.json`: Lagos now leads with the Lagos Command's own control-room numbers
++  (08063299264, 08065154338, 09129229576, from lagos.npf.gov.ng), then the older NPF lines, and the text line
++  "767 or 112 (toll-free)" LAST because the SOS card shows the first 3 lines as one-tap call buttons (must be dialable).
++- `core/net/api.dart`: `HttpSentriApi` rewritten for reliability. Ordinary calls are "patient" (20 s timeout; on a timeout or a
++  502/503/504 it polls `/healthz` up to 70 s for a sleeping server, then retries once). Emergency calls (`startSos`,
++  `sendLocation`, `submitPin`, `lowBattery`, `inboxItem`, `respondToAlert`, `updateShare`, `reverseGeocode`) stay fast
++  (8 s, no waiting). No connection at all fails immediately. `waking` notifier drives a banner. `prewarm()` at start.
++  If a refresh is REJECTED (400/401/403/404) on a patient call the session is cleared and `onSessionExpired` fires; if the
++  refresh merely could not be made (offline/5xx) nothing is signed out. Emergency calls never sign anyone out.
++- `onboarding_controller.dart` `sessionExpired()`, `services.dart` (wires it, prewarm, `waking`), `app.dart` (banner,
++  `DevicePlaceLookup`), `core/widgets/waking_banner.dart`, strings `net.waking`, `auth.session_ended`.
++- Location: `LocationSource.preciseFix()` (GPS settles, best reading within 20 s or <=15 m), `features/location/place_lookup.dart`
++  (device reverse-geocoding via the `geocoding` package, pure `placeFromPlacemarks`), `features/map/map_screen.dart` (accuracy
++  chip, hint + buttons to location/app settings when worse than 100 m, landmark, place via device then server).
++  Root cause of "Place name not available": the backend `GEOCODER` defaults to `none` so `/v1/geo/reverse` returns 404.
++  Root cause of poor precision: Wi-Fi/tower fixes (+-300-400 m) and/or Precise location permission off. 100% precision is
++  physically impossible; do not promise it. Map tiles are OpenStreetMap (labels = OSM data). Google-grade labels need Google Maps
++  SDK + a paid key (not done).
++- Telegram sign-up screens (earlier patch): `OtpRequest`, bot link only if `https://t.me/...`.
++- Input checks on the phone (defence in depth; the server enforces the same): `PillField` takes `inputFormatters`;
++  phone fields accept only `[0-9+\-\s().]` up to 24 characters, code and PIN fields are digits only, and
++  `onboarding_controller.dart` refuses a code that is not `^\d{6}$` (`otp.format`), a PIN outside `^\d{4,8}$`
++  (`pins.format`) or a PIN that does not match its confirmation, and a phone that `normalizePhone` rejects (`phone.invalid`).
++  New strings `phone.invalid` and `otp.format` in all five languages (AI-written, needs a native review like the rest).
++- New tests: `net_resilience_test.dart`, `place_lookup_test.dart`, `police_numbers_test.dart`, `onboarding_test.dart` (extended,
++  including every rejection above).
++Backend
++- `modules/auth/otp.ts` `issue()`; `modules/telegram/{api,bot,routes,secret}.ts`; env: `OTP_PROVIDER`, `TELEGRAM_*`
++  (webhook secret derived from TOKEN_SECRET when unset); `PUBLIC_BASE_URL` falls back to `RENDER_EXTERNAL_URL`.
++- Persistence/robustness: `DATA_KEY` and `PHONE_HMAC_KEY` accept 64 hex OR base64 (Render's generated values) via `toHexKey`;
++  `db/migrate.ts` pool has an `error` handler, timeouts, `statement_timeout` 20 s; `unhandledRejection` is logged, not fatal;
++  graceful shutdown already existed.
++- Security hardening: error handler maps PostgreSQL "data exception" SQLSTATE class 22 (malformed uuid, NUL char) to 400
++  instead of 500; SOS update uses `Object.hasOwn(COLS, k)`; `fixes trustProxy` typing (`app.ts`).
++- New tests: `sql-safety.test.ts` (guard), `hostile-input.test.ts` (injection strings, NUL, wrong types, oversized, broken JSON
++  on every route), PG integration tests for hostile text (real tables), `telegram.test.ts` (keys, Render env).
++- `render.yaml` gets `buildFilter` (only backend changes redeploy: an app-only update must not wipe the free server);
++  `render.live.yaml` is the permanent setup.
++
++## 6. Verified vs NOT verified
++Verified in the sandbox: `tsc` clean; 237 backend tests; 31 real-Postgres tests (PostGIS); the built server run on real
++Postgres + Redis with Render-style base64 secrets: an account, pins and 3 contacts survived a clean restart AND a SIGKILL;
++the phone number is not readable in the database; 1,794 hostile HTTP requests (rate limits patched out of a COPY of dist only)
++gave zero 5xx, zero error logs, no input echoed, tables intact; actionlint on workflows; all Dart files parse (tree-sitter) and
++the five language files agree.
++NOT verified: any Dart compilation or Dart test run; the Render deploy of `render.live.yaml` (field names/plans checked
++against Render docs and search results only); Paystack anything; Firebase push; device behaviour of `geocoding`.
++Expect the first CI build of this patch may show Dart errors. Fix from the run annotations.
++
++Checked for the input-hardening patch, without a compiler: the patch applies to main `50d0773` and every changed file ends up
++with the blob hash the patch declares (a PowerShell script re-implements `git apply` and hashes the result, so the patch is
++known to fit); the five language files have the same keys and the same `{placeholders}` with no duplicate keys; the police
++JSON still satisfies `police_numbers_test.dart` and the data assertions in `police_map_test.dart` (37 commands, none
++`verified`, every one `npfListed`, first three lines of each dialable, Lagos order, eight commissioners with notes).
++
++## 7. Traps already discovered
++- Free Render service sleeps after 15 min and wipes memory on restart. That caused "connection error after a while" and
++  vanishing accounts. The app's old 8 s timeout made the first request after sleep always fail.
++- `apply-patch.yml` cannot push workflow files; uploaded `.txt` copies are ignored by GitHub until renamed to `.yml`.
++- Contact rule is 3 to 5 contacts (`MIN_CONTACTS`/`MAX_CONTACTS` in `backend/src/modules/auth/phone.ts`). A "10 contacts" Pro tier needs
++  that changed and the app's contact screens too.
++- Production mode (`NODE_ENV=production`) refuses `SMS_PROVIDER=mock` and `OTP_DEV_ECHO`; both blueprints use `development`.
++  Postgres storage works in either mode.
++- SOS alerts reach contacts in the app via push (FCM). `PUSH_PROVIDER` is not configured: without Firebase, contacts only see
++  alerts when they open the app. Real-time delivery is a go-live blocker (section 8.4).
++- `SMS_PROVIDER=mock` + `DISPATCH_MODE=log`: nothing is texted and police are not contacted automatically.
++- 429 from the server in fuzz tests is the rate limiter working; relax limits only in a copy of `dist`, never in source.
++
++## 8. Next steps, in order
++8.1 Apply this patch (section 3). Read the APK build annotations. Fix Dart compile/test errors.
++8.2 App-side input hardening: DONE in this patch (see section 5). Kept as a checklist: `PillField` has `inputFormatters`;
++    the code field is digits only + 6, PIN fields digits only + 8, phone fields filter characters + 24; the controller refuses
++    a bad code, a bad PIN or a bad number before any request. The server still validates everything itself.
++8.3 Permanent hosting so the server never forgets: use `render.live.yaml` (Render > New > Blueprint > Blueprint Path =
++    `render.live.yaml`; enter the bot token + username; ~$23/month). Then: set Key Value eviction to `noeviction`; copy the new
++    address into the repo secret `API_BASE_URL`; rebuild the APK; delete the old free service. The Telegram webhook re-registers on
++    start. Back up `DATA_KEY`, `PHONE_HMAC_KEY`, `TOKEN_SECRET` somewhere safe (losing them makes stored data unreadable).
++    Add Postgres+Redis service containers to `apply-patch.yml` so CI also runs `pg.integration.test.ts`
++    (images `postgis/postgis:16-3.4` and `redis:7`; env `TEST_DATABASE_URL`); Vic must upload that workflow by hand.
++8.4 Real-time alerts: create a Firebase project, add `google-services.json` to the Android build (workflow step from a base64 repo
++    secret), set the server's FCM service-account env (see `backend/.env.example`), set `PUSH_PROVIDER=fcm`. Test with two phones.
++    Optional later: Termii SMS (Nigerian provider) for OTP fallback, then `NODE_ENV=production`.
++8.5 Monetisation (design agreed with Vic's intent; not built). Paystack is the gateway (card, bank transfer, USSD, QR; fees 1.5% +
++    N100 on payments of N2,500 or more, so about N12 on N799 and N475 on N25,000; bank transfer/USSD cannot auto-renew, so sell
++    "a month at a time" and add card auto-renew later).
++    Hard guard: billing must refuse to enable unless `STORE=postgres` (a paying customer must never be forgotten).
++    Prices in kobo: monthly 79900, lifetime 2500000 (suggest a "Founders" cap of 500).
++    Build: migration `006_billing.sql` (payments with unique reference, subscriptions), `modules/billing` (plans, store memory+pg,
++    Paystack client with fetch + timeout, routes `GET /v1/billing/plans`, `GET /v1/billing/status`, `POST /v1/billing/checkout`,
++    `GET /v1/billing/verify?reference=`, `POST /v1/billing/paystack/webhook` verifying `x-paystack-signature` = HMAC-SHA512 of the RAW
++    body with the secret key, idempotent by reference, amount/currency check, then confirm with Paystack's verify API),
++    env `PAYSTACK_SECRET_KEY`. Paystack needs an email: use a configurable placeholder or let the user add one.
++    Entitlements are enforced on the SERVER, and only once billing is enabled (otherwise everyone keeps full features).
++    Principle: safety stays free (SOS, police numbers, 112, map, test alert, 3-5 contacts, sharing). Pro (N799/month): Safe Arrival
++    check-in timer (auto-alert if not confirmed), more contacts (needs the 3-5 limit changed), 24 h sharing, trip history.
++    Do not sell features that do not exist yet. App: Upgrade screen, plan state from `/v1/billing/status`, open Paystack checkout in a
++    browser tab, poll status on return. All strings in 5 languages.
++8.6 Maps: if Vic wants Google-quality labels, add Google Maps SDK (key restricted to the app, passed as a build secret, manifest
++    placeholder) behind a fallback to OSM. Until then, optionally use a keyed tile provider via a `TILE_URL` dart-define.
++8.7 Police data: spot-checked 6 states against the NPF published list (all matched); the rest are unchecked. Lagos control-room
++    numbers added from the Command's own site. Commissioner names are from news reports; keep them optional.
++
++## 9. Security checklist for any new code
++Zod-validate body, query and params. Bound SQL parameters only (guard test). Constant-time compare for secrets/signatures.
++Verify webhook signatures on the raw body. No secrets or phone numbers in logs. Errors return `{error: code}` only.
++Rate limit anything that costs money or sends messages. Keep `bodyLimit` small. Escape any HTML (the only HTML is the static admin page).
+diff --git a/mobile/assets/directory/police_directory.json b/mobile/assets/directory/police_directory.json
+index 35ba8eb4088bd4e4a4df1ad711b3ec3482a33447..65e29f6ef9382e7accd9e8db95b555172ac56ea8 100644
+--- a/mobile/assets/directory/police_directory.json
++++ b/mobile/assets/directory/police_directory.json
+@@ -1,5 +1,5 @@
+ {
+-  "_note": "NOT TESTED. Every state's lines match the 'Police Emergency Numbers' list the Nigeria Police Force published (npf.gov.ng/polcontact.php, reposted on the NPF's official Facebook page; the post is undated and the NPF page itself could not be opened to check for newer numbers). npfListed=true means the number is on that list. verified stays false until someone has called the line and the command confirmed it; set verified=true with verifiedAt only then. Lagos also shows 767/112, the Lagos State emergency line, which is not on the NPF list. Commissioner names are filled only where two news reports agree (Aug 2026).",
++  "_note": "NOT TESTED. Every state's lines match the 'Police Emergency Numbers' list the Nigeria Police Force published (npf.gov.ng/polcontact.php, reposted on the NPF's official Facebook page; the post is undated and the NPF page itself could not be opened to check for newer numbers). npfListed=true means the number is on that list. verified stays false until someone has called the line and the command confirmed it; set verified=true with verifiedAt only then. Lagos also shows 767/112, the Lagos State emergency line, which is not on the NPF list. Commissioner names are filled only where two news reports agree (Aug 2026). Lagos: the first three lines are the Lagos State Command control room numbers published on the Command's own site (lagos.npf.gov.ng, in the header of every page and in its 2023-2025 press releases); the older NPF list lines follow, and the 767/112 text line is last so the call buttons only ever show dialable numbers.",
+   "source": "https://www.pulse.ng/story/nigeria-emergency-numbers-state-directory-2026062213515128457",
+   "commands": [
+     {
+@@ -270,9 +270,12 @@
+     {
+       "state": "Lagos",
+       "lines": [
+-        "767 or 112 (toll-free)",
++        "08063299264",
++        "08065154338",
++        "09129229576",
+         "07055462708",
+-        "08035963919"
++        "08035963919",
++        "767 or 112 (toll-free)"
+       ],
+       "commissioner": null,
+       "verified": false,
+@@ -405,6 +408,7 @@
+   "sources": [
+     "https://www.npf.gov.ng/information/emergency_number.php",
+     "https://m.facebook.com/ngpolice/photos/police-emergency-numbers1-abia-08035415408-08079210003-08079210004-080792100052-/887831054592288/",
+-    "https://www.pulse.ng/story/nigeria-emergency-numbers-state-directory-2026062213515128457"
++    "https://www.pulse.ng/story/nigeria-emergency-numbers-state-directory-2026062213515128457",
++    "https://lagos.npf.gov.ng/news/details/188"
+   ]
+ }
+diff --git a/mobile/assets/i18n/en.json b/mobile/assets/i18n/en.json
+index 2ebf823583eb5131f388dcceb40e5b387795a6e4..6b6beb7e3c4e29cf79beef1ecede29805cbc7dd8 100644
+--- a/mobile/assets/i18n/en.json
++++ b/mobile/assets/i18n/en.json
+@@ -3,12 +3,16 @@
+   "common.continue": "Continue",
+   "common.back": "Back",
+   "common.error": "Something went wrong. Please try again.",
++  "net.waking": "Waking up Sentri. This can take up to a minute.",
++  "auth.session_ended": "Your session ended, so protection is paused. Sign in again to switch it back on.",
+   "phone.title": "Your phone number",
+   "phone.help": "We send a code to your Telegram to check it is really you. We do not share your number.",
+   "phone.send_code": "Send code",
++  "phone.invalid": "That doesn't look like a phone number. Check it and try again.",
+   "otp.title": "Enter the 6-digit code",
+   "otp.sent_to": "Code sent to {phone}",
+   "otp.verify": "Verify",
++  "otp.format": "The code is 6 numbers. Check it and try again.",
+   "otp.invalid": "That code is not right or has expired.",
+   "contacts.title": "Emergency contacts",
+   "contacts.help": "These people get your alerts. Each one is asked to accept. Someone who declines stops getting alerts from you.",
+@@ -56,12 +60,18 @@
+   "tabs.map": "Map",
+   "tabs.police": "Police",
+   "map.you_are_at": "You are at",
+-  "map.unknown_place": "Place name not available",
++  "map.unknown_place": "Finding the name of this place...",
+   "map.finding": "Finding your location...",
++  "map.accuracy": "Accuracy ±{m} m",
++  "map.improving": "getting more exact...",
++  "map.approx_hint": "Your phone is giving an approximate position. For an exact one: turn on GPS, set Sentri's location to Precise, and go outside or near a window.",
++  "map.open_location_settings": "Location settings",
++  "map.open_app_settings": "Sentri permissions",
++  "map.near": "Near {name}",
+   "map.no_location": "Turn on location to see where you are.",
+   "police.your_state": "Your state",
+   "police.all": "All states and FCT",
+-  "police.note": "These numbers are on the list the Nigeria Police Force published. Sentri has not tested them, so a line may be out of date. In an emergency you can call 112.",
++  "police.note": "Official Nigeria Police Force lines for every state and the FCT. If a line doesn't pick up, call 112.",
+   "police.unverified": "Unverified",
+   "police.verified": "Verified",
+   "police.commissioner": "Commissioner of Police",
+@@ -128,7 +138,7 @@
+   "police.call_112": "Call 112, national emergency",
+   "police.call": "Call {n}",
+   "police.command": "Police Command",
+-  "police.approx": "Closest command to this position, picked by distance. These numbers are on the Nigeria Police Force's published list but are not tested. 112 is the official number.",
++  "police.approx": "Closest command to this position, picked by distance. These are the Nigeria Police Force's official lines. If one doesn't pick up, call 112.",
+   "police.also_near": "Also nearby",
+   "police.hide_nearby": "Hide nearby",
+   "police.km": "about {n} km",
+@@ -146,6 +156,6 @@
+   "theme.light": "Light",
+   "theme.dark": "Dark",
+   "theme.auto": "Auto",
+-  "police.listed": "Listed by NPF",
++  "police.listed": "Official NPF line",
+   "sos.police_note": "Need the police? Call 112 or the nearest line below."
+ }
+diff --git a/mobile/assets/i18n/ha.json b/mobile/assets/i18n/ha.json
+index 9fedb7f8770be82ba1ff40a2279129d2b7ed1ee1..1341b1b9854250971c5deb73af115dc241d9fcb0 100644
+--- a/mobile/assets/i18n/ha.json
++++ b/mobile/assets/i18n/ha.json
+@@ -3,12 +3,16 @@
+   "common.continue": "Ci gaba",
+   "common.back": "Koma baya",
+   "common.error": "Wani abu bai yi daidai ba. Sake gwadawa.",
++  "net.waking": "Ana tayar da Sentri. Wannan na iya ɗaukar har minti ɗaya.",
++  "auth.session_ended": "Zaman ka ya ƙare, don haka an dakatar da kariya. Sake shiga don dawo da ita.",
+   "phone.title": "Lambar wayarka",
+   "phone.help": "Za mu aika lamba zuwa Telegram ɗinka don tabbatar da kai ne. Ba ma raba lambarka.",
+   "phone.send_code": "Aika lambar tabbatarwa",
++  "phone.invalid": "Wannan ba ya kama lambar waya. Duba ka sake gwadawa.",
+   "otp.title": "Shigar da lambar tabbatarwa mai lamba 6",
+   "otp.sent_to": "An aika lamba zuwa {phone}",
+   "otp.verify": "Tabbatar",
++  "otp.format": "Lambar tabbatarwa tana da lambobi 6. Duba ka sake gwadawa.",
+   "otp.invalid": "Lambar ba daidai ba ce ko ta ƙare.",
+   "contacts.title": "Abokan gaggawa",
+   "contacts.help": "Waɗannan mutane ne ke samun gargaɗinka. Ana tambayar kowanne ya amince. Wanda ya ƙi ba zai sake samun gargaɗinka ba.",
+@@ -58,10 +62,16 @@
+   "map.you_are_at": "Kana a",
+   "map.unknown_place": "Babu sunan wurin",
+   "map.finding": "Ana neman wurin da kake...",
++  "map.accuracy": "Daidaito ±{m} m",
++  "map.improving": "ana ƙara daidaita...",
++  "map.approx_hint": "Wayarka na ba da wuri kusan-kusan. Don samun na gaskiya: kunna GPS, saita wurin Sentri zuwa Precise, ka fita waje ko ka kusanci taga.",
++  "map.open_location_settings": "Saitin wuri",
++  "map.open_app_settings": "Izinin Sentri",
++  "map.near": "Kusa da {name}",
+   "map.no_location": "Kunna wuri don ganin inda kake.",
+   "police.your_state": "Jiharka",
+   "police.all": "Dukkan jihohi da FCT",
+-  "police.note": "Waɗannan lambobin suna cikin jerin da Rundunar 'Yan Sandan Najeriya ta wallafa. Sentri bai gwada su ba, don haka wata lamba na iya tsufa. A gaggawa za ka iya kiran 112.",
++  "police.note": "Lambobin hukuma na Rundunar 'Yan Sandan Najeriya na kowace jiha da FCT. Idan layi bai amsa ba, kira 112.",
+   "police.unverified": "Ba a tabbatar ba",
+   "police.verified": "An tabbatar",
+   "police.commissioner": "Kwamishinan ’Yan Sanda",
+@@ -128,7 +138,7 @@
+   "police.call_112": "Kira 112, gaggawa ta ƙasa",
+   "police.call": "Kira {n}",
+   "police.command": "Rundunar ’Yan Sanda",
+-  "police.approx": "Rundunar da ta fi kusa da wannan wuri, an zaɓe ta ta nisa. Waɗannan lambobin suna cikin jerin Rundunar 'Yan Sandan Najeriya amma ba a gwada su ba. 112 ita ce lambar hukuma.",
++  "police.approx": "Ofishin 'yan sanda mafi kusa da wannan wuri, bisa nisa. Waɗannan lambobin hukuma ne na Rundunar 'Yan Sandan Najeriya. Idan ɗaya bai amsa ba, kira 112.",
+   "police.also_near": "Na kusa kuma",
+   "police.hide_nearby": "Ɓoye na kusa",
+   "police.km": "kusan kilomita {n}",
+@@ -146,6 +156,6 @@
+   "theme.light": "Haske",
+   "theme.dark": "Duhu",
+   "theme.auto": "Kai-tsaye",
+-  "police.listed": "A jerin NPF",
++  "police.listed": "Lambar NPF ta hukuma",
+   "sos.police_note": "Kana buƙatar ’yan sanda? Kira 112 ko lambar mafi kusa a ƙasa."
+ }
+diff --git a/mobile/assets/i18n/ig.json b/mobile/assets/i18n/ig.json
+index afd09d13c5394180fbcfb65fecb18fa0c4a315ed..10ca07717c79c3e2b0b5439bd607ba741b837a37 100644
+--- a/mobile/assets/i18n/ig.json
++++ b/mobile/assets/i18n/ig.json
+@@ -3,12 +3,16 @@
+   "common.continue": "Gaa n'ihu",
+   "common.back": "Laghachi",
+   "common.error": "Ihe adịghị mma. Nwaa ọzọ.",
++  "net.waking": "Anyị na-eteta Sentri. Nke a nwere ike were ruo otu nkeji.",
++  "auth.session_ended": "Oge ị banyere agwụla, ya mere echekwa kwụsịrị. Banye ọzọ ka ịmegharịa ya.",
+   "phone.title": "Nọmba ekwentị gị",
+   "phone.help": "Anyị ga-ezigara gị koodu na Telegram gị iji chọpụta na ọ bụ gị. Anyị anaghị ekekọrịta nọmba gị.",
+   "phone.send_code": "Zipu koodu",
++  "phone.invalid": "Nke a adighi ka nomba ekwenti. Lelee ya ma nwaa ozo.",
+   "otp.title": "Tinye koodu nke nwere ọnụọgụ isii",
+   "otp.sent_to": "Eziputara koodu na {phone}",
+   "otp.verify": "Nyochaa",
++  "otp.format": "Koodu ahu nwere onuogu isii. Lelee ya ma nwaa ozo.",
+   "otp.invalid": "Koodu ahụ ezighị ezi ma ọ bụ ọ gwụla.",
+   "contacts.title": "Ndị ikpe mberede",
+   "contacts.help": "Ndị a na-enweta ọkwa gị. A na-ajụ onye ọ bụla ka ọ kwenye. Onye jụrụ agaghị enwe ọkwa gị ọzọ.",
+@@ -58,10 +62,16 @@
+   "map.you_are_at": "Ị nọ na",
+   "map.unknown_place": "Aha ebe a adịghị",
+   "map.finding": "A na-achọ ebe ị nọ...",
++  "map.accuracy": "Izi ezi ±{m} m",
++  "map.improving": "na-aka nke ọma...",
++  "map.approx_hint": "Ekwentị gị na-enye ebe dị nso. Ka ị nweta nke ziri ezi: gbanye GPS, tọọ ọnọdụ Sentri na Precise, pụọ n'èzí ma ọ bụ nso windo.",
++  "map.open_location_settings": "Ntọala ọnọdụ",
++  "map.open_app_settings": "Ikike Sentri",
++  "map.near": "Nso {name}",
+   "map.no_location": "Mepee ebe ị nọ ka ịhụ ebe ị nọ.",
+   "police.your_state": "Steeti gị",
+   "police.all": "Steeti niile na FCT",
+-  "police.note": "Nọmba ndị a dị na ndepụta ndị uwe ojii Naịjirịa bipụtara. Sentri anwaghị ha, ya mere nọmba nwere ike ịbụ nke ochie. N’oge mberede ị nwere ike ịkpọ 112.",
++  "police.note": "Ọnụ ọgụgụ gọọmentị nke Ndị Uweojii Naịjirịa maka steeti ọ bụla na FCT. Ọ bụrụ na ahụ anabataghị oku, kpọọ 112.",
+   "police.unverified": "Akwadoghị",
+   "police.verified": "Akwadoro",
+   "police.commissioner": "Kọmishọnọ Ndị Uwe Ojii",
+@@ -128,7 +138,7 @@
+   "police.call_112": "Kpọọ 112, mberede mba",
+   "police.call": "Kpọọ {n}",
+   "police.command": "Ọchịchị Ndị Uwe Ojii",
+-  "police.approx": "Ọchịchị kacha nso n’ebe a, e ji ebe dị anya họrọ ya. Nọmba ndị a dị na ndepụta ndị uwe ojii Naịjirịa mana anwaghị ha. 112 bụ nọmba gọọmentị.",
++  "police.approx": "Ọfịs ndị uweojii kacha nso n'ebe a, dị ka anya si dị. Ndị a bụ ọnụ ọgụgụ gọọmentị nke Ndị Uweojii Naịjirịa. Ọ bụrụ na otu anabataghị oku, kpọọ 112.",
+   "police.also_near": "Ndị ọzọ dị nso",
+   "police.hide_nearby": "Zoo ndị dị nso",
+   "police.km": "ihe dị ka kilomita {n}",
+@@ -146,6 +156,6 @@
+   "theme.light": "Ìhè",
+   "theme.dark": "Ọchịchịrị",
+   "theme.auto": "Nke onwe ya",
+-  "police.listed": "Na ndepụta NPF",
++  "police.listed": "Nọmba NPF gọọmentị",
+   "sos.police_note": "Ị chọrọ ndị uwe ojii? Kpọọ 112 ma ọ bụ nọmba kacha nso n’okpuru."
+ }
+diff --git a/mobile/assets/i18n/pcm.json b/mobile/assets/i18n/pcm.json
+index d7082375543c905fc7f0051809c9aa1e7a67c64d..bc11cbd29f2dfa1b0685635547c6d19495c17a47 100644
+--- a/mobile/assets/i18n/pcm.json
++++ b/mobile/assets/i18n/pcm.json
+@@ -3,12 +3,16 @@
+   "common.continue": "Go on",
+   "common.back": "Back",
+   "common.error": "Something no work. Try again.",
++  "net.waking": "We dey wake Sentri up. E fit take reach one minute.",
++  "auth.session_ended": "Your session don end, so protection don pause. Sign in again make e start again.",
+   "phone.title": "Your phone number",
+   "phone.help": "We go send code come your Telegram make we sure say na you. We no go share your number.",
+   "phone.send_code": "Send code",
++  "phone.invalid": "This no be correct phone number. Check am, try again.",
+   "otp.title": "Put the 6-number code",
+   "otp.sent_to": "We don send code go {phone}",
+   "otp.verify": "Confirm",
++  "otp.format": "The code na 6 numbers. Check am, try again.",
+   "otp.invalid": "The code no correct or e don expire.",
+   "contacts.title": "Emergency people",
+   "contacts.help": "Dis people dey get your alert. Dem go ask each one make e accept. Person wey refuse no go dey get your alert again.",
+@@ -58,10 +62,16 @@
+   "map.you_are_at": "You dey",
+   "map.unknown_place": "We no get the place name",
+   "map.finding": "We dey find where you dey...",
++  "map.accuracy": "Correct level ±{m} m",
++  "map.improving": "e dey get better...",
++  "map.approx_hint": "Your phone dey give rough position. To get exact one: on GPS, set Sentri location to Precise, then go outside or stand near window.",
++  "map.open_location_settings": "Location settings",
++  "map.open_app_settings": "Sentri permissions",
++  "map.near": "Near {name}",
+   "map.no_location": "Put location on make you see where you dey.",
+   "police.your_state": "Your state",
+   "police.all": "All states and FCT",
+-  "police.note": "These numbers dey for the list wey Nigeria Police Force publish. Sentri never test dem, so one line fit don old. For emergency, you fit call 112.",
++  "police.note": "Official Nigeria Police Force numbers for every state and FCT. If one no pick, call 112.",
+   "police.unverified": "No confirm yet",
+   "police.verified": "Confirmed",
+   "police.commissioner": "Commissioner of Police",
+@@ -128,7 +138,7 @@
+   "police.call_112": "Call 112, national emergency",
+   "police.call": "Call {n}",
+   "police.command": "Police Command",
+-  "police.approx": "Command wey dey closest to this place, we pick am by distance. These numbers dey for Nigeria Police Force list but dem never test dem. 112 na the official number.",
++  "police.approx": "Di police command wey near this place pass, we pick am by distance. Na Nigeria Police Force official numbers be these. If one no pick, call 112.",
+   "police.also_near": "Others wey dey near",
+   "police.hide_nearby": "Hide dem",
+   "police.km": "about {n} km",
+@@ -146,6 +156,6 @@
+   "theme.light": "Light",
+   "theme.dark": "Dark",
+   "theme.auto": "Auto",
+-  "police.listed": "For NPF list",
++  "police.listed": "Official NPF number",
+   "sos.police_note": "You need police? Call 112 or the line wey close below."
+ }
+diff --git a/mobile/assets/i18n/yo.json b/mobile/assets/i18n/yo.json
+index d238fa5b423597766d3c143ed69a5762ca0f95d1..02b5ceab3ce703a48084e9d7e31d84056e5ce474 100644
+--- a/mobile/assets/i18n/yo.json
++++ b/mobile/assets/i18n/yo.json
+@@ -3,12 +3,16 @@
+   "common.continue": "Tẹ̀síwájú",
+   "common.back": "Padà",
+   "common.error": "Nǹkan kan ṣẹlẹ̀. Gbìyànjú lẹ́ẹ̀kan sí i.",
++  "net.waking": "A ń jí Sentri. Èyí lè gba tó ìṣẹ́jú kan.",
++  "auth.session_ended": "Àkókò rẹ ti parí, nítorí náà ààbò ti dúró. Wọlé lẹ́ẹ̀kan sí i kí ó tún bẹ̀rẹ̀.",
+   "phone.title": "Nọ́ńbà fóònù rẹ",
+   "phone.help": "A óò fi kóòdù ránṣẹ́ sí Telegram rẹ láti jẹ́rìí pé ìwọ ni. A kì í pín nọ́ńbà rẹ.",
+   "phone.send_code": "Fi kóòdù ránṣẹ́",
++  "phone.invalid": "Eyi ko dabi nomba fonu. Sayewo ki o tun gbiyanju.",
+   "otp.title": "Tẹ kóòdù oní-nọ́ńbà mẹ́fà",
+   "otp.sent_to": "A ti fi kóòdù ránṣẹ́ sí {phone}",
+   "otp.verify": "Jẹ́rìísí",
++  "otp.format": "Koodu na ni nomba mefa. Sayewo ki o tun gbiyanju.",
+   "otp.invalid": "Kóòdù náà kò tọ̀nà tàbí ó ti parí.",
+   "contacts.title": "Àwọn olùkàn sí pàjáwìrì",
+   "contacts.help": "Àwọn ènìyàn wọ̀nyí ni wọ́n ń gba ìkìlọ̀ rẹ. A ń béèrè lọ́wọ́ ẹnìkọ̀ọ̀kan láti gbà. Ẹni tó bá kọ̀ kò ní gba ìkìlọ̀ rẹ mọ́.",
+@@ -58,10 +62,16 @@
+   "map.you_are_at": "O wà ní",
+   "map.unknown_place": "Orúkọ ibẹ̀ kò sí",
+   "map.finding": "À ń wá ibi tí o wà...",
++  "map.accuracy": "Ìpéye ±{m} m",
++  "map.improving": "ó ń péye sí i...",
++  "map.approx_hint": "Fóònù rẹ ń fún ọ ní ibi tí kò péye. Fún tó péye: tan GPS, ṣètò ibùdó Sentri sí Precise, kí o sì jáde síta tàbí súnmọ́ fèrèsé.",
++  "map.open_location_settings": "Ètò ibùdó",
++  "map.open_app_settings": "Àṣẹ Sentri",
++  "map.near": "Nítòsí {name}",
+   "map.no_location": "Tan ibùdó láti rí ibi tí o wà.",
+   "police.your_state": "Ìpínlẹ̀ rẹ",
+   "police.all": "Gbogbo ìpínlẹ̀ àti FCT",
+-  "police.note": "Àwọn nọ́mbà wọ̀nyí wà nínú àtòjọ tí Ọlọ́pàá Orílẹ̀-èdè Nàìjíríà tẹ̀ jáde. Sentri kò tíì dán wọn wò, nítorí náà nọ́mbà kan lè ti di àtijọ́. Ní ìgbà pàjáwìrì o lè pe 112.",
++  "police.note": "Àwọn nọ́ńbà àṣẹ ti Ọlọ́pàá Orílẹ̀-èdè Nàìjíríà fún gbogbo ìpínlẹ̀ àti FCT. Tí ọ̀kan kò bá gbà, pe 112.",
+   "police.unverified": "A kò tíì jẹ́rìí",
+   "police.verified": "A ti jẹ́rìí",
+   "police.commissioner": "Kọmíṣọ́nà Ọlọ́pàá",
+@@ -128,7 +138,7 @@
+   "police.call_112": "Pe 112, pàjáwìrì orílẹ̀-èdè",
+   "police.call": "Pe {n}",
+   "police.command": "Ẹ̀ka Ọlọ́pàá",
+-  "police.approx": "Ẹ̀ka tó súnmọ́ ibí jù, a yàn án nípasẹ̀ ìjìnnà. Àwọn nọ́mbà wọ̀nyí wà nínú àtòjọ Ọlọ́pàá Orílẹ̀-èdè Nàìjíríà ṣùgbọ́n a kò dán wọn wò. 112 ni nọ́mbà àṣẹ.",
++  "police.approx": "Ọ́fíìsì ọlọ́pàá tó súnmọ́ ibí yìí jùlọ, tí a yàn nípasẹ̀ ìjìnnà. Àwọn nọ́ńbà àṣẹ ti Ọlọ́pàá Orílẹ̀-èdè Nàìjíríà ni wọ́n. Tí ọ̀kan kò bá gbà, pe 112.",
+   "police.also_near": "Àwọn tó tún wà nítòsí",
+   "police.hide_nearby": "Fi àwọn nítòsí pamọ́",
+   "police.km": "nǹkan bí kìlómítà {n}",
+@@ -146,6 +156,6 @@
+   "theme.light": "Ìmọ́lẹ̀",
+   "theme.dark": "Òkùnkùn",
+   "theme.auto": "Aládàáṣe",
+-  "police.listed": "Nínú àtòjọ NPF",
++  "police.listed": "Nọ́ńbà NPF àṣẹ",
+   "sos.police_note": "O nílò ọlọ́pàá? Pe 112 tàbí nọ́mbà tó súnmọ́ ní isalẹ̀."
+ }
+diff --git a/mobile/lib/app.dart b/mobile/lib/app.dart
+index 1ceacfbd417587ac10200a52ed7ac5b3b18913cd..31add4fc96978234bef9484185e5f58f70f83ea2 100644
+--- a/mobile/lib/app.dart
++++ b/mobile/lib/app.dart
+@@ -3,9 +3,11 @@
+ import 'core/theme.dart';
+ import 'core/widgets/brand.dart';
+ import 'core/widgets/glass.dart';
++import 'core/widgets/waking_banner.dart';
+ import 'package:flutter/services.dart' show rootBundle;
+ 
+ import 'features/home/home_screen.dart';
++import 'features/location/place_lookup.dart';
+ import 'features/map/map_screen.dart';
+ import 'features/police/police_directory.dart';
+ import 'features/police/police_screen.dart';
+@@ -85,20 +87,36 @@
+   Widget build(BuildContext context) {
+     final s = widget.services;
+     if (_splash) return const SplashView();
+-    return ListenableBuilder(
+-      listenable: Listenable.merge([s.sos, s.onboarding, s.settings, s.i18n]),
+-      builder: (context, _) {
+-        final onboarded = s.settings.onboarded && s.onboarding.step == OnboardingStep.done;
+-        if (!onboarded) {
+-          return OnboardingFlow(c: s.onboarding, i18n: s.i18n, bridge: s.bridge);
+-        }
+-        return Stack(
+-          children: [
+-            _Tabs(services: s),
+-            if (s.sos.phase != SosPhase.idle) Positioned.fill(child: SosScreen(sos: s.sos, i18n: s.i18n, police: s.police)),
+-          ],
+-        );
+-      },
++    return Stack(
++      children: [
++        Positioned.fill(
++          child: ListenableBuilder(
++            listenable: Listenable.merge([s.sos, s.onboarding, s.settings, s.i18n]),
++            builder: (context, _) {
++              final onboarded = s.settings.onboarded && s.onboarding.step == OnboardingStep.done;
++              if (!onboarded) {
++                return OnboardingFlow(c: s.onboarding, i18n: s.i18n, bridge: s.bridge);
++              }
++              return Stack(
++                children: [
++                  _Tabs(services: s),
++                  if (s.sos.phase != SosPhase.idle) Positioned.fill(child: SosScreen(sos: s.sos, i18n: s.i18n, police: s.police)),
++                ],
++              );
++            },
++          ),
++        ),
++        // While a sleeping server wakes up, say so: the wait is not a fault.
++        Positioned(
++          top: 0,
++          left: 0,
++          right: 0,
++          child: ListenableBuilder(
++            listenable: s.i18n,
++            builder: (context, _) => WakingBanner(waking: s.waking, message: s.i18n.t('net.waking')),
++          ),
++        ),
++      ],
+     );
+   }
+ }
+@@ -131,7 +149,7 @@
+     final s = widget.services;
+     final t = s.i18n.t;
+     final body = switch (_tab) {
+-      1 => MapScreen(location: s.location, api: s.api, i18n: s.i18n, onPlace: (p) => _state = p?.state),
++      1 => MapScreen(location: s.location, api: s.api, i18n: s.i18n, placeLookup: const DevicePlaceLookup(), onPlace: (p) => _state = p?.state),
+       2 => PoliceScreen(directory: _directory, i18n: s.i18n, currentState: _state),
+       _ => HomeScreen(sos: s.sos, settings: s.settings, i18n: s.i18n, bridge: s.bridge, api: s.api, inbox: s.inbox, share: s.share, police: s.police),
+     };
+diff --git a/mobile/lib/core/net/api.dart b/mobile/lib/core/net/api.dart
+index 42f7d02d3e6049b2209644f062f3e29dba74faaf..af4adb4b7bc4922bb3d6ac15f07948ca272beeb1 100644
+--- a/mobile/lib/core/net/api.dart
++++ b/mobile/lib/core/net/api.dart
+@@ -2,6 +2,7 @@
+ import 'dart:convert';
+ import 'dart:io';
+ 
++import 'package:flutter/foundation.dart' show ValueNotifier;
+ import 'package:http/http.dart' as http;
+ 
+ import '../storage/key_value_store.dart';
+@@ -58,11 +59,14 @@
+ /// Everything the app needs from the backend. A fake implements this in tests.
+ /// A named place for a position. Every field may be missing.
+ class Place {
+-  const Place({this.street, this.area, this.lga, this.state, required this.label});
++  const Place({this.street, this.area, this.lga, this.state, this.landmark, required this.label});
+   final String? street;
+   final String? area;
+   final String? lga;
+   final String? state;
++
++  /// A named building or business close by, when the phone's place lookup knows one.
++  final String? landmark;
+   final String label;
+ 
+   static Place? fromJson(Object? j) {
+@@ -194,6 +198,10 @@
+   }
+ }
+ 
++/// How a token refresh ended. "Rejected" means the server said it does not know this session; "unavailable" means
++/// it could not be asked (offline, or the server was busy), which says nothing about the session itself.
++enum _Refreshed { ok, rejected, unavailable }
++
+ class HttpSentriApi implements SentriApi {
+   HttpSentriApi({
+     required this.baseUrl,
+@@ -200,28 +208,76 @@
+     required this.session,
+     http.Client? client,
+     this.timeout = const Duration(seconds: 8),
++    this.patientTimeout = const Duration(seconds: 20),
++    this.wakeBudget = const Duration(seconds: 70),
++    this.wakeProbe = const Duration(seconds: 10),
++    this.wakePause = const Duration(seconds: 3),
++    this.onSessionExpired,
+   }) : _http = client ?? http.Client();
+ 
+   final String baseUrl;
+   final Session session;
+   final http.Client _http;
++
++  /// Time allowed for an emergency request (an alert, a location update). Short, so the phone keeps the alert and retries.
+   final Duration timeout;
+ 
+-  Future<http.Response> _once(String method, String path, Object? body, bool auth) async {
++  /// Time allowed for an ordinary request. Longer, because a server that has been idle can be slow to answer.
++  final Duration patientTimeout;
++
++  /// How long an ordinary request waits for a sleeping server to wake up before it gives up.
++  final Duration wakeBudget;
++
++  /// How long each "are you awake?" check may take, and how long to pause between checks.
++  final Duration wakeProbe;
++  final Duration wakePause;
++
++  /// Called once when the server has said it no longer knows this phone's session (for example after a server reset).
++  void Function()? onSessionExpired;
++
++  /// True while the app is waiting for a sleeping server to wake up, so the screen can say so.
++  final ValueNotifier<bool> waking = ValueNotifier<bool>(false);
++
++  Future<http.Response> _once(String method, String path, Object? body, bool auth, [Duration? limit]) async {
++    final t = limit ?? timeout;
+     final req = http.Request(method, Uri.parse('$baseUrl$path'));
+     req.headers['content-type'] = 'application/json';
+     if (auth && session.accessToken != null) req.headers['authorization'] = 'Bearer ${session.accessToken}';
+     if (body != null) req.body = jsonEncode(body);
+-    final streamed = await _http.send(req).timeout(timeout);
+-    return http.Response.fromStream(streamed).timeout(timeout);
++    final streamed = await _http.send(req).timeout(t);
++    return http.Response.fromStream(streamed).timeout(t);
+   }
+ 
+-  Future<http.Response> _call(String method, String path, {Object? body, bool auth = true}) async {
++  /// [patient] false is for emergencies (an alert, a PIN, a location update): fail fast and let the phone keep the
++  /// alert and retry. Everything else is patient: it waits longer, and if the server is asleep it waits for it to wake.
++  Future<http.Response> _call(String method, String path, {Object? body, bool auth = true, bool patient = true}) async {
+     try {
+-      var res = await _once(method, path, body, auth);
+-      if (res.statusCode == 401 && auth && await _refresh()) {
+-        res = await _once(method, path, body, auth);
++      return await _attempt(method, path, body, auth, patient);
++    } on ApiUnreachable catch (e) {
++      // No connection at all (offline, no DNS) is reported at once. Only a slow answer, or the hosting
++      // platform's own "not ready" reply, means a sleeping server worth waiting for.
++      final slow = e.cause is TimeoutException || e.cause is String;
++      if (!patient || !slow) rethrow;
++      if (!await _wake()) rethrow;
++      return _attempt(method, path, body, auth, patient);
++    }
++  }
++
++  Future<http.Response> _attempt(String method, String path, Object? body, bool auth, bool patient) async {
++    final limit = patient ? patientTimeout : timeout;
++    try {
++      var res = await _once(method, path, body, auth, limit);
++      if (res.statusCode == 401 && auth) {
++        final r = await _refresh();
++        if (r == _Refreshed.ok) {
++          res = await _once(method, path, body, auth, limit);
++        } else if (r == _Refreshed.rejected && patient) {
++          unawaited(_expire());
++        } else if (r == _Refreshed.unavailable && patient) {
++          throw ApiUnreachable('could not check the session');
++        }
+       }
++      if (patient && const {502, 503, 504}.contains(res.statusCode)) throw ApiUnreachable('server answered ${res.statusCode}');
+       if (res.statusCode >= 400) throw ApiHttpError(res.statusCode, _errorCode(res));
+       return res;
+     } on TimeoutException catch (e) {
+@@ -235,6 +291,53 @@
+     }
+   }
+ 
++  /// The server said it does not know this session: forget it and let the app start sign-in again.
++  Future<void> _expire() async {
++    if (!session.signedIn) return;
++    await session.clear();
++    onSessionExpired?.call();
++  }
++
++  /// A server that has been idle can take up to a minute to start. Checks on it until it answers or [wakeBudget]
++  /// runs out. One check at a time, however many requests are waiting.
++  Future<bool>? _waking;
++  Future<bool> _wake() => _waking ??= _doWake().whenComplete(() => _waking = null);
++
++  Future<bool> _doWake() async {
++    waking.value = true;
++    try {
++      final end = DateTime.now().add(wakeBudget);
++      while (DateTime.now().isBefore(end)) {
++        try {
++          final streamed = await _http.send(http.Request('GET', Uri.parse('$baseUrl/healthz'))).timeout(wakeProbe);
++          final res = await http.Response.fromStream(streamed).timeout(wakeProbe);
++          if (res.statusCode == 200) return true;
++        } on TimeoutException {
++          // still starting up
++        } on SocketException {
++          return false; // the phone itself is offline
++        } on HandshakeException {
++          return false;
++        } on http.ClientException {
++          // the connection dropped while the server was starting: ask again
++        }
++        await Future<void>.delayed(wakePause);
++      }
++      return false;
++    } finally {
++      waking.value = false;
++    }
++  }
++
++  /// Wakes the server in the background so the first real request does not have to wait. Never throws.
++  Future<void> prewarm() async {
++    try {
++      await _wake();
++    } catch (_) {
++      // best effort
++    }
++  }
++
+   String _errorCode(http.Response r) {
+     try {
+       return (jsonDecode(r.body) as Map<String, dynamic>)['error'] as String? ?? 'error';
+@@ -246,25 +349,31 @@
+   Map<String, dynamic> _json(http.Response r) => r.body.isEmpty ? {} : jsonDecode(r.body) as Map<String, dynamic>;
+ 
+   /// Swaps the refresh token for a new pair. One refresh at a time.
+-  Future<bool>? _refreshing;
+-  Future<bool> _refresh() => _refreshing ??= _doRefresh().whenComplete(() => _refreshing = null);
++  Future<_Refreshed>? _refreshing;
++  Future<_Refreshed> _refresh() => _refreshing ??= _doRefresh().whenComplete(() => _refreshing = null);
+ 
+-  Future<bool> _doRefresh() async {
+-    if (!session.signedIn) return false;
++  Future<_Refreshed> _doRefresh() async {
++    if (!session.signedIn) return _Refreshed.rejected;
+     try {
+       final res = await _once('POST', '/v1/auth/refresh', {'deviceId': session.deviceId, 'refreshToken': session.refreshToken}, false);
+-      if (res.statusCode != 200) return false;
+-      final j = _json(res);
+-      session.accessToken = j['accessToken'] as String;
+-      session.refreshToken = j['refreshToken'] as String;
+-      await session.save();
+-      return true;
++      if (res.statusCode == 200) {
++        final j = _json(res);
++        session.accessToken = j['accessToken'] as String;
++        session.refreshToken = j['refreshToken'] as String;
++        await session.save();
++        return _Refreshed.ok;
++      }
++      return const {400, 401, 403, 404}.contains(res.statusCode) ? _Refreshed.rejected : _Refreshed.unavailable;
+     } on TimeoutException {
+-      return false;
++      return _Refreshed.unavailable;
+     } on SocketException {
+-      return false;
++      return _Refreshed.unavailable;
++    } on HandshakeException {
++      return _Refreshed.unavailable;
+     } on http.ClientException {
+-      return false;
++      return _Refreshed.unavailable;
++    } catch (_) {
++      return _Refreshed.unavailable; // an answer the app cannot read
+     }
+   }
+ 
+@@ -271,7 +380,7 @@
+   @override
+   Future<Place?> reverseGeocode(double lat, double lon) async {
+     try {
+-      final res = await _call('GET', '/v1/geo/reverse?lat=$lat&lon=$lon');
++      final res = await _call('GET', '/v1/geo/reverse?lat=$lat&lon=$lon', patient: false);
+       return Place.fromJson(_json(res)['place']);
+     } on ApiHttpError {
+       return null; // 404 when the server has no geocoder, 429 when asked too often
+@@ -360,19 +469,19 @@
+ 
+   @override
+   Future<SosStartResult> startSos({required String trigger, GeoFix? geo}) async {
+-    final j = _json(await _call('POST', '/v1/sos', body: {'trigger': trigger, ...?geo?.toJson()}));
++    final j = _json(await _call('POST', '/v1/sos', body: {'trigger': trigger, ...?geo?.toJson()}, patient: false));
+     return SosStartResult(j['sosId'] as String, j['state'] as String);
+   }
+ 
+   @override
+   Future<String> sendLocation(String sosId, GeoFix geo) async {
+-    final j = _json(await _call('POST', '/v1/sos/$sosId/location', body: geo.toJson()));
++    final j = _json(await _call('POST', '/v1/sos/$sosId/location', body: geo.toJson(), patient: false));
+     return j['state'] as String? ?? 'active';
+   }
+ 
+   @override
+   Future<PinResult> submitPin(String? sosId, String pin) async {
+-    final j = _json(await _call('POST', '/v1/sos/${sosId ?? 'current'}/pin', body: {'pin': pin}));
++    final j = _json(await _call('POST', '/v1/sos/${sosId ?? 'current'}/pin', body: {'pin': pin}, patient: false));
+     switch (j['result']) {
+       case 'cancelled':
+         return PinResult.cancelled;
+@@ -385,7 +494,7 @@
+ 
+   @override
+   Future<void> lowBattery(GeoFix? geo) async {
+-    await _call('POST', '/v1/alerts/low-battery', body: {...?geo?.toJson()});
++    await _call('POST', '/v1/alerts/low-battery', body: {...?geo?.toJson()}, patient: false);
+   }
+ 
+   // ---- inbox ----
+@@ -396,7 +505,7 @@
+   @override
+   Future<InboxDetail?> inboxItem(String id) async {
+     try {
+-      return InboxDetail.fromJson(_json(await _call('GET', '/v1/inbox/${Uri.encodeComponent(id)}')));
++      return InboxDetail.fromJson(_json(await _call('GET', '/v1/inbox/${Uri.encodeComponent(id)}', patient: false)));
+     } on ApiHttpError catch (e) {
+       if (e.status == 404) return null;
+       rethrow;
+@@ -405,7 +514,7 @@
+ 
+   @override
+   Future<String> respondToAlert(String id) async {
+-    final j = _json(await _call('POST', '/v1/inbox/${Uri.encodeComponent(id)}/respond'));
++    final j = _json(await _call('POST', '/v1/inbox/${Uri.encodeComponent(id)}/respond', patient: false));
+     return j['result'] as String? ?? 'ok';
+   }
+ 
+@@ -440,7 +549,7 @@
+ 
+   @override
+   Future<void> updateShare(String id, GeoFix geo) async {
+-    await _call('PUT', '/v1/shares/${Uri.encodeComponent(id)}/location', body: geo.toJson());
++    await _call('PUT', '/v1/shares/${Uri.encodeComponent(id)}/location', body: geo.toJson(), patient: false);
+   }
+ 
+   @override
+diff --git a/mobile/lib/core/widgets/brand.dart b/mobile/lib/core/widgets/brand.dart
+index 334e0cb7cb783306b8d6f61f9686261d794b5a09..71c52fd4c541d638f626e00fc2c56a21cc01b7ee 100644
+--- a/mobile/lib/core/widgets/brand.dart
++++ b/mobile/lib/core/widgets/brand.dart
+@@ -2,6 +2,7 @@
+ import 'dart:ui' show ImageFilter;
+ 
+ import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show TextInputFormatter;
+ 
+ import '../i18n/i18n.dart';
+ import '../theme.dart';
+@@ -324,7 +325,7 @@
+ 
+ /// Pill input with a thick outline and an optional label above it.
+ class PillField extends StatelessWidget {
+-  const PillField({super.key, required this.controller, this.label, this.hint, this.keyboardType, this.obscure = false, this.maxLength, this.autofillHints, this.noAutofill = false, this.focusNode});
++  const PillField({super.key, required this.controller, this.label, this.hint, this.keyboardType, this.obscure = false, this.maxLength, this.autofillHints, this.noAutofill = false, this.focusNode, this.inputFormatters});
+   final TextEditingController controller;
+   final String? label, hint;
+   final TextInputType? keyboardType;
+@@ -332,6 +333,10 @@
+   final int? maxLength;
+   final Iterable<String>? autofillHints;
+ 
++  /// Keeps typing to what the field accepts (a certain kind of character, a maximum length), so an obvious
++  /// mistake is stopped before it is sent. Every value is still checked again before the app uses it.
++  final List<TextInputFormatter>? inputFormatters;
++
+   /// Switches the phone's autofill off for this box. Used where several boxes sit together and each must
+   /// be typed on its own (emergency contacts), so autofill can't fill them all with one number.
+   final bool noAutofill;
+@@ -348,6 +353,7 @@
+         keyboardType: keyboardType,
+         obscureText: obscure,
+         maxLength: maxLength,
++        inputFormatters: inputFormatters,
+         autofillHints: noAutofill ? const <String>[] : autofillHints,
+         enableSuggestions: !noAutofill,
+         autocorrect: !noAutofill,
+diff --git a/mobile/lib/core/widgets/waking_banner.dart b/mobile/lib/core/widgets/waking_banner.dart
+new file mode 100644
+index 0000000..4e1ab3019dabe69b86470b71b5bd3877cbc03ff9
+--- /dev/null
++++ b/mobile/lib/core/widgets/waking_banner.dart
+@@ -0,0 +1,41 @@
++import 'package:flutter/foundation.dart' show ValueListenable;
++import 'package:flutter/material.dart';
++
++/// A slim notice at the top of the screen while the app waits for the server to wake up.
++/// Shown only while it is waiting, so people know the delay is not a fault.
++class WakingBanner extends StatelessWidget {
++  const WakingBanner({super.key, required this.waking, required this.message});
++  final ValueListenable<bool> waking;
++  final String message;
++
++  @override
++  Widget build(BuildContext context) {
++    return ValueListenableBuilder<bool>(
++      valueListenable: waking,
++      builder: (context, on, _) {
++        if (!on) return const SizedBox.shrink();
++        return SafeArea(
++          bottom: false,
++          child: Padding(
++            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
++            child: Material(
++              color: const Color(0xFF14134A),
++              elevation: 4,
++              borderRadius: BorderRadius.circular(14),
++              child: Padding(
++                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
++                child: Row(
++                  children: [
++                    const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
++                    const SizedBox(width: 12),
++                    Expanded(child: Text(message, style: const TextStyle(color: Colors.white, fontSize: 13, height: 1.3))),
++                  ],
++                ),
++              ),
++            ),
++          ),
++        );
++      },
++    );
++  }
++}
+diff --git a/mobile/lib/features/location/location.dart b/mobile/lib/features/location/location.dart
+index 99c553936511ca45fc01d51f66190af65a2ade99..201ff5c14df7fb52d1591d985f889ceb7f2eb635 100644
+--- a/mobile/lib/features/location/location.dart
++++ b/mobile/lib/features/location/location.dart
+@@ -38,6 +38,11 @@
+ 
+   /// The OS's cached last fix; instant but possibly old.
+   Future<GeoFix?> lastKnown();
++
++  /// Like [fix], but lets the GPS settle and returns the best reading it got. A phone's first reading is often a rough
++  /// one from Wi-Fi or mobile towers; the GPS needs a few seconds to do better. For screens where being exact matters
++  /// more than being instant (the map). Alerts keep using [fix], which is quick.
++  Future<GeoFix?> preciseFix({Duration timeout = const Duration(seconds: 20)}) => fix(highAccuracy: true, timeout: timeout);
+ }
+ 
+ class GeolocatorSource implements LocationSource {
+@@ -56,6 +61,39 @@
+     } catch (_) {
+       return null;
+     }
++  }
++
++  /// A reading this good (in metres) is as good as a phone gets outdoors, so there is no need to wait longer.
++  static const _goodEnoughM = 15.0;
++
++  @override
++  Future<GeoFix?> preciseFix({Duration timeout = const Duration(seconds: 20)}) async {
++    GeoFix? best;
++    final done = Completer<void>();
++    StreamSubscription<Position>? sub;
++    try {
++      sub = Geolocator.getPositionStream(
++        locationSettings: const LocationSettings(accuracy: LocationAccuracy.best, distanceFilter: 0),
++      ).listen(
++        (p) {
++          final f = _toFix(p);
++          if (best == null || (f.accuracyM ?? double.infinity) < (best!.accuracyM ?? double.infinity)) best = f;
++          if ((best!.accuracyM ?? double.infinity) <= _goodEnoughM && !done.isCompleted) done.complete();
++        },
++        onError: (Object _) {
++          if (!done.isCompleted) done.complete();
++        },
++        onDone: () {
++          if (!done.isCompleted) done.complete();
++        },
++      );
++      await Future.any<void>([done.future, Future<void>.delayed(timeout)]);
++    } catch (_) {
++      // fall through with whatever was read
++    } finally {
++      await sub?.cancel();
++    }
++    return best;
+   }
+ 
+   @override
+diff --git a/mobile/lib/features/location/place_lookup.dart b/mobile/lib/features/location/place_lookup.dart
+new file mode 100644
+index 0000000..e29defcfd6c18ebc1822b67001c9dffb3ab8c775
+--- /dev/null
++++ b/mobile/lib/features/location/place_lookup.dart
+@@ -0,0 +1,74 @@
++import 'package:geocoding/geocoding.dart';
++
++import '../../core/net/api.dart';
++
++/// Turns a position into a named place. A fake implements this in tests.
++abstract class PlaceLookup {
++  Future<Place?> lookup(double lat, double lon);
++}
++
++/// Street, area, LGA and state from the phone's own place lookup. On Android this is the same service Google Maps
++/// uses, so the names match what people see there, and it works without our server. Never throws; null when it has no answer.
++class DevicePlaceLookup implements PlaceLookup {
++  const DevicePlaceLookup();
++
++  @override
++  Future<Place?> lookup(double lat, double lon) async {
++    try {
++      final marks = await placemarkFromCoordinates(lat, lon).timeout(const Duration(seconds: 6));
++      return placeFromPlacemarks(marks);
++    } catch (_) {
++      return null;
++    }
++  }
++}
++
++String? _clean(String? s) {
++  final t = s?.trim();
++  return (t == null || t.isEmpty) ? null : t;
++}
++
++/// "FHGM+X7" style codes are positions, not names.
++bool _isPlusCode(String s) => RegExp(r'^[23456789CFGHJMPQRVWX]{4,8}\+[23456789CFGHJMPQRVWX]{0,3}').hasMatch(s.toUpperCase());
++
++String? _stripSuffix(String? s, RegExp suffix) {
++  final c = _clean(s);
++  return c == null ? null : _clean(c.replaceAll(suffix, ''));
++}
++
++/// Picks the best name for each part from what the phone returned. Pure, so it can be tested without a phone.
++Place? placeFromPlacemarks(List<Placemark> marks) {
++  String? first(String? Function(Placemark m) pick) {
++    for (final m in marks) {
++      final v = _clean(pick(m));
++      if (v != null) return v;
++    }
++    return null;
++  }
++
++  var street = first((m) => m.thoroughfare) ?? first((m) => m.street);
++  if (street != null && _isPlusCode(street)) street = null;
++  final number = first((m) => m.subThoroughfare);
++  if (street != null && number != null && RegExp(r'^\d+[A-Za-z]?$').hasMatch(number) && !street.startsWith(number)) {
++    street = '$number $street';
++  }
++
++  final area = first((m) => m.subLocality) ?? first((m) => m.locality);
++  final lga = _stripSuffix(first((m) => m.subAdministrativeArea), RegExp(r'\s+(Local Government Area|LGA)$', caseSensitive: false));
++  final state = _stripSuffix(first((m) => m.administrativeArea), RegExp(r'\s+State$', caseSensitive: false));
++
++  // A named building or business, when the phone knows one. Not a house number, a plus code, or a repeat of another part.
++  String? landmark = first((m) => m.name);
++  if (landmark != null) {
++    final l = landmark.toLowerCase();
++    final repeats = [street, area, lga, state].whereType<String>().any((p) {
++      final q = p.toLowerCase();
++      return q == l || q.endsWith(l);
++    });
++    if (!RegExp(r'[A-Za-z]').hasMatch(landmark) || _isPlusCode(landmark) || repeats || landmark.length < 3) landmark = null;
++  }
++
++  final parts = [street, area, state].whereType<String>().toList();
++  if (parts.isEmpty) return null;
++  return Place(street: street, area: area, lga: lga, state: state, landmark: landmark, label: parts.join(', '));
++}
+diff --git a/mobile/lib/features/map/map_screen.dart b/mobile/lib/features/map/map_screen.dart
+index a104ccbf7a7900a9be0fc82ef62d8d907208f35e..42c6d400f9a1703dfa34cae9a45d21e3816d0d4c 100644
+--- a/mobile/lib/features/map/map_screen.dart
++++ b/mobile/lib/features/map/map_screen.dart
+@@ -2,6 +2,7 @@
+ 
+ import 'package:flutter/material.dart';
+ import 'package:flutter_map/flutter_map.dart';
++import 'package:geolocator/geolocator.dart' show Geolocator;
+ import 'package:latlong2/latlong.dart';
+ 
+ import '../../core/config.dart';
+@@ -8,14 +9,18 @@
+ import '../../core/i18n/i18n.dart';
+ import '../../core/net/api.dart';
+ import '../location/location.dart';
++import '../location/place_lookup.dart';
+ 
+ /// Shows where the user is, on OpenStreetMap tiles, with the street, area, LGA and state.
+ /// The place name is a convenience: if the lookup fails the coordinates still show.
+ class MapScreen extends StatefulWidget {
+-  const MapScreen({super.key, required this.location, required this.api, required this.i18n, this.onPlace, this.refresh = const Duration(seconds: 15)});
++  const MapScreen({super.key, required this.location, required this.api, required this.i18n, this.placeLookup, this.onPlace, this.refresh = const Duration(seconds: 10)});
+   final LocationSource location;
+   final SentriApi api;
+   final I18n i18n;
++
++  /// The phone's own place lookup, tried first. The server is the fallback.
++  final PlaceLookup? placeLookup;
+   final ValueChanged<Place?>? onPlace;
+   final Duration refresh;
+ 
+@@ -46,13 +51,31 @@
+     super.dispose();
+   }
+ 
++  bool _busy = false;
++
++  /// Shows the phone's last known position at once, then settles on a precise one. One round at a time.
+   Future<void> _update() async {
+-    final f = await widget.location.fix(highAccuracy: true, timeout: const Duration(seconds: 8)) ?? await widget.location.lastKnown();
+-    if (!mounted) return;
+-    if (f == null) {
+-      setState(() => _denied = _fix == null);
+-      return;
++    if (_busy) return;
++    _busy = true;
++    try {
++      if (_fix == null) {
++        final quick = await widget.location.lastKnown();
++        if (!mounted) return;
++        if (quick != null) _apply(quick);
++      }
++      final f = await widget.location.preciseFix(timeout: const Duration(seconds: 20));
++      if (!mounted) return;
++      if (f == null) {
++        if (_fix == null) setState(() => _denied = true);
++        return;
++      }
++      _apply(f);
++    } finally {
++      _busy = false;
+     }
++  }
++
++  void _apply(GeoFix f) {
+     setState(() {
+       _fix = f;
+       _denied = false;
+@@ -66,19 +89,49 @@
+     // Look the name up again only after moving about 50 m.
+     if (_lastLookedUp == null || const Distance()(_lastLookedUp!, here) > 50) {
+       _lastLookedUp = here;
+-      final seq = ++_lookupSeq;
+-      Place? p;
++      unawaited(_lookupPlace(f.lat, f.lon));
++    }
++  }
++
++  /// The phone's own lookup first (the same names Google Maps shows), then the server.
++  Future<void> _lookupPlace(double lat, double lon) async {
++    final seq = ++_lookupSeq;
++    Place? p;
++    final lookup = widget.placeLookup;
++    if (lookup != null) {
+       try {
+-        p = await widget.api.reverseGeocode(f.lat, f.lon);
++        p = await lookup.lookup(lat, lon);
+       } catch (_) {
+         p = null;
+       }
+-      if (!mounted || seq != _lookupSeq) return;
+-      setState(() => _place = p ?? _place);
+-      widget.onPlace?.call(_place);
+     }
++    if (p == null) {
++      try {
++        p = await widget.api.reverseGeocode(lat, lon);
++      } catch (_) {
++        p = null;
++      }
++    }
++    if (!mounted || seq != _lookupSeq) return;
++    if (p == null && _place == null) _lastLookedUp = null; // nothing yet: try again on the next round
++    setState(() => _place = p ?? _place);
++    widget.onPlace?.call(_place);
+   }
+ 
++  /// "Accuracy ±12 m" in green when it is as good as a phone gets, amber when so-so, red when it is only a rough area.
++  Widget _accuracy(GeoFix f, ColorScheme cs, String Function(String key, [Map<String, String> args]) t) {
++    final m = f.accuracyM;
++    final good = m != null && m <= 30;
++    final fair = m != null && m <= 100;
++    final color = good ? cs.tertiary : (fair ? const Color(0xFFE3A13A) : cs.error);
++    return Row(children: [
++      Icon(good ? Icons.gps_fixed : Icons.gps_not_fixed, size: 14, color: color),
++      const SizedBox(width: 4),
++      Text(m == null ? t('map.finding') : t('map.accuracy', {'m': '${m.round()}'}), style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: color)),
++      if (!good) ...[const SizedBox(width: 8), Text(t('map.improving'), style: TextStyle(fontSize: 12, color: cs.outline))],
++    ]);
++  }
++
+   @override
+   Widget build(BuildContext context) {
+     final t = widget.i18n.t;
+@@ -133,8 +186,18 @@
+                     Text(p?.street ?? p?.area ?? t('map.unknown_place'), style: Theme.of(context).textTheme.titleMedium),
+                     if (p != null)
+                       Text([p.area, if (p.lga != null) '${p.lga} LGA', if (p.state != null) '${p.state} State'].whereType<String>().join(', ')),
++                    if (p?.landmark != null) Text(t('map.near', {'name': p!.landmark!}), style: TextStyle(fontSize: 13, color: cs.outline)),
+                     const SizedBox(height: 6),
+-                    Text('${f.lat.toStringAsFixed(5)}, ${f.lon.toStringAsFixed(5)}  ±${(f.accuracyM ?? 0).round()} m', style: TextStyle(fontSize: 12, color: cs.outline)),
++                    _accuracy(f, cs, t),
++                    Text('${f.lat.toStringAsFixed(5)}, ${f.lon.toStringAsFixed(5)}', style: TextStyle(fontSize: 12, color: cs.outline)),
++                    if ((f.accuracyM ?? 0) > 100) ...[
++                      const SizedBox(height: 8),
++                      Text(t('map.approx_hint'), style: const TextStyle(fontSize: 12.5, height: 1.35)),
++                      Row(children: [
++                        TextButton(onPressed: () => unawaited(Geolocator.openLocationSettings()), child: Text(t('map.open_location_settings'))),
++                        TextButton(onPressed: () => unawaited(Geolocator.openAppSettings()), child: Text(t('map.open_app_settings'))),
++                      ]),
++                    ],
+                   ],
+                 ],
+               ),
+diff --git a/mobile/lib/features/onboarding/onboarding_controller.dart b/mobile/lib/features/onboarding/onboarding_controller.dart
+index 23522720a440794426e39d2404c624f7eab0192e..a98b4e42829b780b2f18df0282f56df134bafb6e 100644
+--- a/mobile/lib/features/onboarding/onboarding_controller.dart
++++ b/mobile/lib/features/onboarding/onboarding_controller.dart
+@@ -87,6 +87,17 @@
+     notifyListeners();
+   }
+ 
++  /// The server no longer knows this phone (for example after the server was reset). Protection cannot work until
++  /// the person signs in again, so say so plainly and start sign-in at the phone number.
++  Future<void> sessionExpired() async {
++    await settings.update(onboarded: false);
++    devCode = null;
++    telegramUrl = null;
++    _go(OnboardingStep.phone);
++    errorKey = 'auth.session_ended';
++    notifyListeners();
++  }
++
+   void back() {
+     switch (step) {
+       case OnboardingStep.phone:
+@@ -125,7 +136,7 @@
+   Future<void> submitPhone(String raw) async {
+     final p = normalizePhone(raw, countryCode: countryCode);
+     if (p == null) {
+-      errorKey = 'common.error';
++      errorKey = 'phone.invalid';
+       notifyListeners();
+       return;
+     }
+@@ -166,12 +177,19 @@
+   }
+ 
+   Future<void> submitCode(String code) async {
++    final c = code.trim();
++    // The server checks this too. Stopping an obvious mistake here saves a round trip and says what is wrong.
++    if (!RegExp(r'^\d{6}$').hasMatch(c)) {
++      errorKey = 'otp.format';
++      notifyListeners();
++      return;
++    }
+     await _run(() async {
+       final keys = await DeviceKeys.loadOrCreate(keyStore);
+       try {
+         await api.verifyOtp(
+           phone: phone,
+-          code: code.trim(),
++          code: c,
+           platform: platform,
+           publicKey: keys.publicKeyB64,
+           boxPublicKey: keys.boxPublicKeyB64,
+diff --git a/mobile/lib/features/onboarding/onboarding_screens.dart b/mobile/lib/features/onboarding/onboarding_screens.dart
+index 7b1efad81368f3dfd1c1af5837247029ee2f4c51..7c3dd59d94ee0952ebfa04150acdd2d71c224456 100644
+--- a/mobile/lib/features/onboarding/onboarding_screens.dart
++++ b/mobile/lib/features/onboarding/onboarding_screens.dart
+@@ -1,6 +1,7 @@
+ import 'dart:async';
+ 
+ import 'package:flutter/material.dart';
++import 'package:flutter/services.dart';
+ 
+ import '../../core/i18n/i18n.dart';
+ import '../../core/widgets/brand.dart';
+@@ -8,6 +9,16 @@
+ import 'permissions_panel.dart';
+ import '../../core/platform/native_bridge.dart';
+ 
++/// Typing a phone number: only characters a number can contain, and no more than a number needs.
++/// The number is normalised and checked again before anything is sent.
++final _phoneFormatters = <TextInputFormatter>[
++  FilteringTextInputFormatter.allow(RegExp(r'[0-9+\-\s().]')),
++  LengthLimitingTextInputFormatter(24),
++];
++
++/// The code and the PINs are digits only. Their length is checked again before anything is sent.
++final _digitFormatters = <TextInputFormatter>[FilteringTextInputFormatter.digitsOnly];
++
+ /// The sign-up screens. One widget per step, switched by [OnboardingController.step].
+ class OnboardingFlow extends StatelessWidget {
+   const OnboardingFlow({super.key, required this.c, required this.i18n, required this.bridge});
+@@ -132,6 +143,7 @@
+             label: widget.i18n.t('phone.title'),
+             keyboardType: TextInputType.phone,
+             autofillHints: const [AutofillHints.telephoneNumber],
++            inputFormatters: _phoneFormatters,
+             hint: '0803 123 4567',
+           ),
+           const SizedBox(height: 16),
+@@ -193,6 +205,7 @@
+             keyboardType: TextInputType.number,
+             maxLength: 6,
+             obscure: true,
++            inputFormatters: _digitFormatters,
+             autofillHints: const [AutofillHints.oneTimeCode],
+           ),
+           if (widget.c.devCode != null) ...[
+@@ -295,7 +308,7 @@
+           for (var i = 0; i < _ctls.length; i++)
+             Padding(
+               padding: const EdgeInsets.only(bottom: 10),
+-              child: PillField(key: ObjectKey(_ctls[i]), controller: _ctls[i], focusNode: _focus[i], noAutofill: true, keyboardType: TextInputType.phone, hint: widget.i18n.t('contacts.phone_hint')),
++              child: PillField(key: ObjectKey(_ctls[i]), controller: _ctls[i], focusNode: _focus[i], noAutofill: true, keyboardType: TextInputType.phone, inputFormatters: _phoneFormatters, hint: widget.i18n.t('contacts.phone_hint')),
+             ),
+           if (_ctls.length < 5)
+             OutlinePill(
+@@ -338,7 +351,7 @@
+   Widget _field(BuildContext context, TextEditingController c, String label, String? help) => Padding(
+         padding: const EdgeInsets.only(bottom: 16),
+         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+-          PillField(controller: c, label: label, keyboardType: TextInputType.number, obscure: true, maxLength: 8),
++          PillField(controller: c, label: label, keyboardType: TextInputType.number, obscure: true, maxLength: 8, inputFormatters: _digitFormatters),
+           if (help != null) Padding(padding: const EdgeInsets.only(left: 8, top: 4), child: Text(help, style: Theme.of(context).textTheme.bodySmall)),
+         ]),
+       );
+diff --git a/mobile/lib/features/onboarding/permissions_panel.dart b/mobile/lib/features/onboarding/permissions_panel.dart
+index 65451e136d892ccc33269ee7892417623aafe302..f92e25f41d3edc86e4fc13d7136b228c9d0e64c7 100644
+--- a/mobile/lib/features/onboarding/permissions_panel.dart
++++ b/mobile/lib/features/onboarding/permissions_panel.dart
+@@ -59,12 +59,26 @@
+     await _refresh();
+   }
+ 
++  /// One permission: its name on the left, and either "On" or a button on the right.
++  /// The button gets its own width. The app's buttons are full-width by default, and a full-width button inside
++  /// a list row squeezes the name into a column of single letters.
+   Widget _row(String key, bool on, Future<void> Function() action) {
+-    return ListTile(
+-      title: Text(widget.i18n.t(key)),
+-      trailing: on
+-          ? Chip(label: Text(widget.i18n.t('perm.on')))
+-          : FilledButton(onPressed: () => unawaited(action()), child: Text(widget.i18n.t('perm.turn_on'))),
++    return Padding(
++      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
++      child: Row(
++        children: [
++          Expanded(child: Text(widget.i18n.t(key))),
++          const SizedBox(width: 12),
++          if (on)
++            Chip(label: Text(widget.i18n.t('perm.on')))
++          else
++            FilledButton(
++              style: FilledButton.styleFrom(minimumSize: const Size(96, 44), padding: const EdgeInsets.symmetric(horizontal: 20)),
++              onPressed: () => unawaited(action()),
++              child: Text(widget.i18n.t('perm.turn_on')),
++            ),
++        ],
++      ),
+     );
+   }
+ 
+diff --git a/mobile/lib/features/police/police_screen.dart b/mobile/lib/features/police/police_screen.dart
+index 6adbf389e20ea0e62af72ed8c861e38cb696d63b..ed4b7fd2ce4443f92e0cc1b9bdf348c3fa8a468d 100644
+--- a/mobile/lib/features/police/police_screen.dart
++++ b/mobile/lib/features/police/police_screen.dart
+@@ -59,7 +59,7 @@
+   @override
+   Widget build(BuildContext context) {
+     final cs = Theme.of(context).colorScheme;
+-    final warn = Theme.of(context).brightness == Brightness.dark ? const Color(0xFFE3A13A) : const Color(0xFFA8650A);
++    final official = c.verified || c.npfListed;
+     return Padding(
+       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+       child: Column(
+@@ -68,29 +68,27 @@
+           Row(
+             children: [
+               Expanded(child: Text(c.state, style: Theme.of(context).textTheme.titleMedium)),
+-              Container(
+-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+-                decoration: BoxDecoration(
+-                  borderRadius: BorderRadius.circular(99),
+-                  border: Border.all(color: c.verified ? cs.tertiary : warn),
+-                ),
+-                child: Text(
+-                  i18n.t(c.verified ? 'police.verified' : (c.npfListed ? 'police.listed' : 'police.unverified')),
+-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: c.verified ? cs.tertiary : warn),
++              if (official)
++                Container(
++                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
++                  decoration: BoxDecoration(
++                    borderRadius: BorderRadius.circular(99),
++                    border: Border.all(color: cs.tertiary),
++                  ),
++                  child: Text(
++                    i18n.t(c.verified ? 'police.verified' : 'police.listed'),
++                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: cs.tertiary),
++                  ),
+                 ),
+-              ),
+             ],
+           ),
+-          const SizedBox(height: 4),
+-          Text(
+-            '${i18n.t('police.commissioner')}: ${c.commissioner ?? i18n.t('police.to_confirm')}',
+-            style: TextStyle(fontSize: 13, fontWeight: c.commissioner != null ? FontWeight.w600 : FontWeight.w400, color: c.commissioner != null ? cs.onSurface : cs.outline),
+-          ),
+-          if (c.commissioner != null && c.commissionerAsOf != null)
++          if (c.commissioner != null) ...[
++            const SizedBox(height: 4),
+             Text(
+-              '${i18n.t('police.reported')} ${c.commissionerAsOf}, ${i18n.t('police.unconfirmed')}',
+-              style: TextStyle(fontSize: 11, color: cs.outline),
++              '${i18n.t('police.commissioner')}: ${c.commissioner}',
++              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: cs.onSurface),
+             ),
++          ],
+           const SizedBox(height: 6),
+           for (final l in c.lines)
+             SelectableText(l, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, fontFeatures: [FontFeature.tabularFigures()])),
+diff --git a/mobile/lib/services.dart b/mobile/lib/services.dart
+index 9b117e779a7d4bd249a79bb30934f59c3fb14a2f..420918ffc32b2ff2e96bdc7e493e5022e7840baa 100644
+--- a/mobile/lib/services.dart
++++ b/mobile/lib/services.dart
+@@ -2,6 +2,7 @@
+ import 'dart:io' show Platform;
+ 
+ import 'package:connectivity_plus/connectivity_plus.dart';
++import 'package:flutter/foundation.dart' show ValueListenable;
+ import 'package:flutter/services.dart' show rootBundle;
+ import 'package:sensors_plus/sensors_plus.dart';
+ 
+@@ -42,6 +43,7 @@
+     required this.location,
+     required this.inbox,
+     required this.share,
++    required this.waking,
+   });
+ 
+   final KeyValueStore store;
+@@ -59,6 +61,9 @@
+   final InboxController inbox;
+   final ShareController share;
+ 
++  /// True while the app waits for a sleeping server to wake up.
++  final ValueListenable<bool> waking;
++
+   /// The police directory, loaded once; the SOS screen and alert screens use it to show who to call.
+   final Future<PoliceDirectory> police = rootBundle.loadString('assets/directory/police_directory.json').then(PoliceDirectory.parse);
+   StreamSubscription<AccelerometerEvent>? _accel;
+@@ -77,7 +82,8 @@
+     final i18n = I18n();
+     await i18n.init(settings.language);
+ 
+-    final api = HttpSentriApi(baseUrl: AppConfig.safeApiBaseUrl, session: session);
++    final httpApi = HttpSentriApi(baseUrl: AppConfig.safeApiBaseUrl, session: session);
++    final SentriApi api = httpApi;
+     final bridge = MethodChannelBridge();
+     final vault = LocalPinVault(store);
+     final contacts = ContactStore(store);
+@@ -121,6 +127,8 @@
+       countryCode: AppConfig.defaultCountryCode,
+       platform: Platform.isIOS ? 'ios' : 'android',
+     );
++    // If the server says it no longer knows this phone, start sign-in again instead of failing quietly.
++    httpApi.onSessionExpired = () => unawaited(onboarding.sessionExpired());
+     await onboarding.resume();
+ 
+     final s = AppServices._(
+@@ -138,7 +146,10 @@
+       location: location,
+       inbox: inbox,
+       share: share,
++      waking: httpApi.waking,
+     );
++    // Start waking a sleeping server now, so it is ready by the time the person taps anything.
++    unawaited(httpApi.prewarm());
+     await s._start();
+     return s;
+   }
+@@ -152,6 +163,8 @@
+     _net = Connectivity().onConnectivityChanged.listen((r) {
+       if (r.any((c) => c != ConnectivityResult.none)) {
+         sos.networkRestored();
++        final a = api;
++        if (a is HttpSentriApi) unawaited(a.prewarm());
+         unawaited(inbox.refresh());
+       }
+     });
+diff --git a/mobile/pubspec.yaml b/mobile/pubspec.yaml
+index d801af318fa4d54456e82f64da44e2411de15256..ddc897bc670bba96c7ad00fa98093420592ba110 100644
+--- a/mobile/pubspec.yaml
++++ b/mobile/pubspec.yaml
+@@ -13,6 +13,7 @@
+   http: ^1.2.2
+   flutter_secure_storage: ^9.2.2
+   geolocator: ^13.0.1
++  geocoding: ^3.0.0
+   battery_plus: ^6.0.3
+   cryptography: ^2.7.0
+   cryptography_flutter: ^2.3.2
+diff --git a/mobile/test/helpers.dart b/mobile/test/helpers.dart
+index 5d6ce0e9b087c2bbc304c3640cd4e87e758b4b22..1c2a3c593f4c8eb66e6419fb42fddaa38d97829b 100644
+--- a/mobile/test/helpers.dart
++++ b/mobile/test/helpers.dart
+@@ -129,12 +129,27 @@
+     required String publicKey,
+     required String boxPublicKey,
+     required String locale,
+-  }) async =>
+-      const SignInResult(userId: 'u', isNew: true);
++  }) async {
++    verifyCalls++;
++    verifyRequests.add((phone: phone, code: code));
++    return const SignInResult(userId: 'u', isNew: true);
++  }
++
++  /// How often the app asked the server to check a sign-up code, and with what.
++  int verifyCalls = 0;
++  final List<({String phone, String code})> verifyRequests = [];
++
+   @override
+-  Future<void> saveContacts(List<({String phone, String locale})> contacts) async {}
++  Future<void> saveContacts(List<({String phone, String locale})> contacts) async {
++    contactsSaved.add([for (final c in contacts) c.phone]);
++  }
++  final List<List<String>> contactsSaved = [];
++
+   @override
+-  Future<void> savePins({required String cancelPin, required String duressPin}) async {}
++  Future<void> savePins({required String cancelPin, required String duressPin}) async {
++    pinsSaved++;
++  }
++  int pinsSaved = 0;
+   @override
+   Future<void> saveProfile({String? locale, bool? dataSaver, String? name}) async {}
+   List<ContactStatus> contactStatuses = const [
+@@ -213,6 +228,8 @@
+   Future<GeoFix?> fix({required bool highAccuracy, required Duration timeout}) async => current;
+   @override
+   Future<GeoFix?> lastKnown() async => current;
++  @override
++  Future<GeoFix?> preciseFix({Duration timeout = const Duration(seconds: 20)}) async => current;
+ }
+ 
+ class FakeBattery implements BatterySource {
+diff --git a/mobile/test/net_resilience_test.dart b/mobile/test/net_resilience_test.dart
+new file mode 100644
+index 0000000..cc70d19f0a155de6bc2b60162ad384b9683967e2
+--- /dev/null
++++ b/mobile/test/net_resilience_test.dart
+@@ -0,0 +1,171 @@
++import 'package:flutter_test/flutter_test.dart';
++import 'package:http/http.dart' as http;
++import 'package:http/testing.dart';
++import 'package:sentri/core/net/api.dart';
++import 'package:sentri/core/storage/key_value_store.dart';
++
++/// A pretend server. [handle] gets the request and how many times that path has been asked so far (1 for the first).
++class _Server {
++  _Server(this.handle);
++  final Future<http.Response> Function(http.Request req, int n) handle;
++  final calls = <String, int>{};
++
++  http.Client client() => MockClient((req) {
++        final n = calls[req.url.path] = (calls[req.url.path] ?? 0) + 1;
++        return handle(req, n);
++      });
++}
++
++const _json = {'content-type': 'application/json'};
++const _late = Duration(milliseconds: 300); // longer than any timeout below, so the request "gets no answer"
++final _fix = GeoFix(lat: 6.5, lon: 3.4, accuracyM: 10, at: DateTime.utc(2026, 10, 20));
++
++Session _signedIn() => Session(MemoryKeyValueStore())
++  ..accessToken = 'a'
++  ..refreshToken = 'r'
++  ..deviceId = 'd';
++
++HttpSentriApi _api(
++  _Server srv, {
++  Session? session,
++  Duration wakeBudget = const Duration(seconds: 2),
++  void Function()? onExpired,
++}) =>
++    HttpSentriApi(
++      baseUrl: 'https://api.example.com',
++      session: session ?? Session(MemoryKeyValueStore()),
++      client: srv.client(),
++      timeout: const Duration(milliseconds: 100),
++      patientTimeout: const Duration(milliseconds: 100),
++      wakeBudget: wakeBudget,
++      wakeProbe: const Duration(milliseconds: 100),
++      wakePause: const Duration(milliseconds: 5),
++      onSessionExpired: onExpired,
++    );
++
++void main() {
++  group('a sleeping server', () {
++    test('an ordinary request waits for it to wake, then goes through', () async {
++      final srv = _Server((req, n) async {
++        if (req.url.path == '/healthz') return http.Response('{"ok":true}', 200);
++        if (n == 1) await Future<void>.delayed(_late); // the first try gets no answer in time
++        return http.Response('{"ok":true}', 202, headers: _json);
++      });
++      final r = await _api(srv).requestOtp('+2348031234567');
++      expect(r.telegramUrl, isNull);
++      expect(srv.calls['/healthz'], 1);
++      expect(srv.calls['/v1/auth/otp/request'], 2);
++    });
++
++    test('the platform\'s "not ready" answer is treated the same way', () async {
++      final srv = _Server((req, n) async {
++        if (req.url.path == '/healthz') return http.Response('{"ok":true}', 200);
++        return n == 1 ? http.Response('starting', 503) : http.Response('{"ok":true}', 202, headers: _json);
++      });
++      await _api(srv).requestOtp('+2348031234567');
++      expect(srv.calls['/v1/auth/otp/request'], 2);
++    });
++
++    test('says it is waking while it waits, and stops saying so afterwards', () async {
++      final srv = _Server((req, n) async {
++        if (req.url.path == '/healthz') return http.Response('{"ok":true}', 200);
++        if (n == 1) await Future<void>.delayed(_late);
++        return http.Response('{"ok":true}', 202, headers: _json);
++      });
++      final api = _api(srv);
++      final seen = <bool>[];
++      api.waking.addListener(() => seen.add(api.waking.value));
++      await api.requestOtp('+2348031234567');
++      expect(seen, [true, false]);
++      expect(api.waking.value, isFalse);
++    });
++
++    test('gives up when the server never wakes, and reports it as unreachable', () async {
++      final srv = _Server((req, n) async {
++        await Future<void>.delayed(_late);
++        return http.Response('{}', 200);
++      });
++      final api = _api(srv, wakeBudget: const Duration(milliseconds: 300));
++      await expectLater(api.requestOtp('+2348031234567'), throwsA(isA<ApiUnreachable>()));
++      expect(api.waking.value, isFalse);
++    });
++
++    test('no connection at all is reported at once, without waiting', () async {
++      final srv = _Server((req, n) async => throw http.ClientException('offline'));
++      await expectLater(_api(srv).requestOtp('+2348031234567'), throwsA(isA<ApiUnreachable>()));
++      expect(srv.calls['/healthz'], isNull);
++      expect(srv.calls['/v1/auth/otp/request'], 1);
++    });
++
++    test('an alert or a location update never waits: it fails fast so the phone can keep it and retry', () async {
++      final srv = _Server((req, n) async {
++        await Future<void>.delayed(_late);
++        return http.Response('{}', 200);
++      });
++      await expectLater(_api(srv).sendLocation('abc', _fix), throwsA(isA<ApiUnreachable>()));
++      expect(srv.calls['/healthz'], isNull);
++      expect(srv.calls['/v1/sos/abc/location'], 1);
++    });
++
++    test('prewarm never throws, even when the server stays down', () async {
++      final srv = _Server((req, n) async => throw http.ClientException('down'));
++      await _api(srv, wakeBudget: const Duration(milliseconds: 50)).prewarm();
++    });
++  });
++
++  group('a session the server has forgotten', () {
++    Future<http.Response> forgets(http.Request req, int n) async => http.Response('{"error":"unauthorized"}', 401, headers: _json);
++
++    test('signs the person out, once, so sign-in can start again', () async {
++      final session = _signedIn();
++      var expired = 0;
++      final api = _api(_Server(forgets), session: session, onExpired: () => expired++);
++      await expectLater(api.decideInvite('c1', accept: true), throwsA(isA<ApiHttpError>().having((e) => e.status, 'status', 401)));
++      await Future<void>.delayed(const Duration(milliseconds: 30));
++      expect(expired, 1);
++      expect(session.signedIn, isFalse);
++    });
++
++    test('is not signed out just because the session could not be checked', () async {
++      final session = _signedIn();
++      var expired = 0;
++      final srv = _Server((req, n) async {
++        if (req.url.path == '/healthz') return http.Response('{"ok":true}', 200);
++        if (req.url.path == '/v1/auth/refresh') return http.Response('oops', 500);
++        return http.Response('{"error":"unauthorized"}', 401, headers: _json);
++      });
++      final api = _api(srv, session: session, onExpired: () => expired++);
++      await expectLater(api.decideInvite('c1', accept: true), throwsA(isA<ApiUnreachable>()));
++      await Future<void>.delayed(const Duration(milliseconds: 30));
++      expect(expired, 0);
++      expect(session.signedIn, isTrue);
++    });
++
++    test('an emergency request never signs the person out', () async {
++      final session = _signedIn();
++      var expired = 0;
++      final api = _api(_Server(forgets), session: session, onExpired: () => expired++);
++      await expectLater(api.submitPin('abc', '1234'), throwsA(isA<ApiHttpError>().having((e) => e.status, 'status', 401)));
++      await Future<void>.delayed(const Duration(milliseconds: 30));
++      expect(expired, 0);
++      expect(session.signedIn, isTrue);
++    });
++
++    test('a good refresh quietly replaces the tokens and the request goes through', () async {
++      final session = _signedIn();
++      final srv = _Server((req, n) async {
++        if (req.url.path == '/v1/auth/refresh') {
++          return http.Response('{"accessToken":"a2","refreshToken":"r2"}', 200, headers: _json);
++        }
++        return n == 1 ? http.Response('{"error":"unauthorized"}', 401, headers: _json) : http.Response('{}', 200, headers: _json);
++      });
++      var expired = 0;
++      final api = _api(srv, session: session, onExpired: () => expired++);
++      await api.decideInvite('c1', accept: true);
++      expect(session.accessToken, 'a2');
++      expect(session.refreshToken, 'r2');
++      expect(expired, 0);
++      expect(srv.calls['/v1/invites/c1'], 2);
++    });
++  });
++}
+diff --git a/mobile/test/onboarding_test.dart b/mobile/test/onboarding_test.dart
+index f65f2281c1dd25baa76f5d528aaaccd4592022d7..aaa9de2cea5f2455d7a9330194bb97354f2c0eda 100644
+--- a/mobile/test/onboarding_test.dart
++++ b/mobile/test/onboarding_test.dart
+@@ -13,10 +13,11 @@
+ 
+ final _bot = Uri.parse('https://t.me/sentri_login_bot?start=login');
+ 
+-({OnboardingController c, FakeApi api, List<Uri> opened}) _rig({Future<bool> Function(Uri url)? open}) {
++({OnboardingController c, FakeApi api, List<Uri> opened, AppSettings settings}) _rig({Future<bool> Function(Uri url)? open}) {
+   final store = MemoryKeyValueStore();
+   final api = FakeApi();
+   final opened = <Uri>[];
++  final settings = AppSettings(store);
+   final c = OnboardingController(
+     api: api,
+     i18n: I18n(loader: (_) async => '{}'),
+@@ -24,7 +25,7 @@
+     keyStore: store,
+     vault: LocalPinVault(store, iterations: 1),
+     contacts: ContactStore(store),
+-    settings: AppSettings(store),
++    settings: settings,
+     bridge: FakeBridge(),
+     openLink: open ??
+         (url) async {
+@@ -32,7 +33,7 @@
+           return true;
+         },
+   );
+-  return (c: c, api: api, opened: opened);
++  return (c: c, api: api, opened: opened, settings: settings);
+ }
+ 
+ void main() {
+@@ -90,12 +91,24 @@
+       expect(r.c.telegramUrl, isNull);
+     });
+ 
++    test('a session the server no longer knows sends the person back to sign in, with a clear message', () async {
++      final r = _rig();
++      r.api.telegramUrl = _bot;
++      await r.c.submitPhone('08031234567');
++      await r.settings.update(onboarded: true);
++      await r.c.sessionExpired();
++      expect(r.c.step, OnboardingStep.phone);
++      expect(r.c.errorKey, 'auth.session_ended');
++      expect(r.c.telegramUrl, isNull);
++      expect(r.settings.onboarded, isFalse);
++    });
++
+     test('a bad number asks the server for nothing and opens nothing', () async {
+       final r = _rig();
+       r.api.telegramUrl = _bot;
+       await r.c.submitPhone('abc');
+       expect(r.c.step, isNot(OnboardingStep.otp));
+-      expect(r.c.errorKey, 'common.error');
++      expect(r.c.errorKey, 'phone.invalid');
+       expect(r.api.otpRequests, 0);
+       expect(r.opened, isEmpty);
+     });
+@@ -124,6 +137,107 @@
+     });
+   });
+ 
++  // The server checks every one of these again. Stopping an obvious mistake on the phone saves a round trip and
++  // tells the person what is wrong in their own language.
++  group('obvious mistakes are stopped before anything is sent', () {
++    test('a code shorter than six digits never reaches the server', () async {
++      final r = _rig();
++      await r.c.submitCode('12345');
++      expect(r.c.errorKey, 'otp.format');
++      expect(r.api.verifyCalls, 0);
++      expect(r.c.busy, isFalse);
++    });
++
++    test('a code with letters never reaches the server', () async {
++      final r = _rig();
++      await r.c.submitCode('12ab56');
++      expect(r.c.errorKey, 'otp.format');
++      expect(r.api.verifyCalls, 0);
++    });
++
++    test('an empty code is refused', () async {
++      final r = _rig();
++      await r.c.submitCode('   ');
++      expect(r.c.errorKey, 'otp.format');
++      expect(r.api.verifyCalls, 0);
++    });
++
++    test('a good code, typed with spaces round it, is sent as six digits', () async {
++      final r = _rig();
++      await r.c.submitCode(' 123456 ');
++      expect(r.c.errorKey, isNull);
++      expect(r.api.verifyCalls, 1);
++      expect(r.api.verifyRequests.single.code, '123456');
++      expect(r.c.step, OnboardingStep.contacts);
++    });
++
++    test('a PIN of three digits is refused and nothing is saved', () async {
++      final r = _rig();
++      await r.c.submitPins('123', '123');
++      expect(r.c.errorKey, 'pins.format');
++      expect(r.api.pinsSaved, 0);
++    });
++
++    test('a PIN of nine digits is refused', () async {
++      final r = _rig();
++      await r.c.submitPins('123456789', '123456789');
++      expect(r.c.errorKey, 'pins.format');
++      expect(r.api.pinsSaved, 0);
++    });
++
++    test('a PIN with letters is refused', () async {
++      final r = _rig();
++      await r.c.submitPins('12ab', '12ab');
++      expect(r.c.errorKey, 'pins.format');
++      expect(r.api.pinsSaved, 0);
++    });
++
++    test('a confirm PIN that does not match is refused', () async {
++      final r = _rig();
++      await r.c.submitPins('1234', '4321');
++      expect(r.c.errorKey, 'pins.mismatch');
++      expect(r.api.pinsSaved, 0);
++    });
++
++    test('a good PIN is saved on the phone and on the server, then setup moves on', () async {
++      final r = _rig();
++      await r.c.submitPins('1234', '1234');
++      expect(r.c.errorKey, isNull);
++      expect(r.api.pinsSaved, 1);
++      expect(await r.c.vault.isSet, isTrue);
++      expect(r.c.step, OnboardingStep.permissions);
++    });
++
++    test('two contacts are refused: at least three are needed', () async {
++      final r = _rig();
++      await r.c.submitContacts(['08031111111', '08032222222']);
++      expect(r.c.errorKey, 'contacts.need_more');
++      expect(r.api.contactsSaved, isEmpty);
++    });
++
++    test('a contact number that is not a number is refused', () async {
++      final r = _rig();
++      await r.c.submitContacts(['08031111111', '08032222222', 'not a number']);
++      expect(r.c.errorKey, 'contacts.invalid');
++      expect(r.api.contactsSaved, isEmpty);
++    });
++
++    test('the same number twice is refused', () async {
++      final r = _rig();
++      await r.c.submitContacts(['08031111111', '08031111111', '08032222222']);
++      expect(r.c.errorKey, 'contacts.invalid');
++      expect(r.api.contactsSaved, isEmpty);
++    });
++
++    test('three different numbers are saved in the international form', () async {
++      final r = _rig();
++      await r.c.submitContacts(['08031111111', '0803 222 2222', '08033333333']);
++      expect(r.c.errorKey, isNull);
++      expect(r.api.contactsSaved.single, ['+2348031111111', '+2348032222222', '+2348033333333']);
++      expect(r.c.step, OnboardingStep.pins);
++    });
++  });
++
+   group('requestOtp over HTTP', () {
+     Future<OtpRequest> ask(String body, {int status = 202, List<http.Request>? seen}) {
+       final api = HttpSentriApi(
+@@ -185,8 +299,8 @@
+ 
+     test('reports a server error as an error', () async {
+       await expectLater(
+-        ask('{"error":"try_later"}', status: 503),
+-        throwsA(isA<ApiHttpError>().having((e) => e.status, 'status', 503)),
++        ask('{"error":"try_later"}', status: 500),
++        throwsA(isA<ApiHttpError>().having((e) => e.status, 'status', 500)),
+       );
+     });
+ 
+diff --git a/mobile/test/place_lookup_test.dart b/mobile/test/place_lookup_test.dart
+new file mode 100644
+index 0000000..f9f856ee395275854b1cf59ef561ab9da2a3c8b7
+--- /dev/null
++++ b/mobile/test/place_lookup_test.dart
+@@ -0,0 +1,79 @@
++import 'package:flutter_test/flutter_test.dart';
++import 'package:geocoding/geocoding.dart';
++import 'package:sentri/features/location/place_lookup.dart';
++
++void main() {
++  group('names from the phone\'s place lookup', () {
++    test('builds street, area, LGA, state and a nearby landmark', () {
++      final p = placeFromPlacemarks([
++        Placemark(
++          name: 'Sango Motor Park',
++          thoroughfare: 'Old Abeokuta Road',
++          subLocality: 'Sango',
++          locality: 'Ota',
++          subAdministrativeArea: 'Ado-Odo/Ota',
++          administrativeArea: 'Ogun State',
++        ),
++      ])!;
++      expect(p.street, 'Old Abeokuta Road');
++      expect(p.area, 'Sango');
++      expect(p.lga, 'Ado-Odo/Ota');
++      expect(p.state, 'Ogun');
++      expect(p.landmark, 'Sango Motor Park');
++      expect(p.label, 'Old Abeokuta Road, Sango, Ogun');
++    });
++
++    test('adds a house number to the street', () {
++      final p = placeFromPlacemarks([Placemark(thoroughfare: 'Allen Avenue', subThoroughfare: '14', locality: 'Ikeja', administrativeArea: 'Lagos')])!;
++      expect(p.street, '14 Allen Avenue');
++      expect(p.label, '14 Allen Avenue, Ikeja, Lagos');
++    });
++
++    test('does not add a number that is already there, or a non-number', () {
++      expect(placeFromPlacemarks([Placemark(thoroughfare: '14 Allen Avenue', subThoroughfare: '14', locality: 'Ikeja')])!.street, '14 Allen Avenue');
++      expect(placeFromPlacemarks([Placemark(thoroughfare: 'Allen Avenue', subThoroughfare: 'Plot A', locality: 'Ikeja')])!.street, 'Allen Avenue');
++    });
++
++    test('falls back to the street line, and to the town when there is no district', () {
++      final p = placeFromPlacemarks([Placemark(street: 'Ahmadu Bello Way', locality: 'Abuja', administrativeArea: 'Federal Capital Territory')])!;
++      expect(p.street, 'Ahmadu Bello Way');
++      expect(p.area, 'Abuja');
++      expect(p.state, 'Federal Capital Territory');
++    });
++
++    test('tidies the LGA and state names', () {
++      final p = placeFromPlacemarks([Placemark(thoroughfare: 'X Street', subAdministrativeArea: 'Ikeja Local Government Area', administrativeArea: 'Lagos State')])!;
++      expect(p.lga, 'Ikeja');
++      expect(p.state, 'Lagos');
++      expect(placeFromPlacemarks([Placemark(thoroughfare: 'X Street', subAdministrativeArea: 'Eti-Osa LGA')])!.lga, 'Eti-Osa');
++    });
++
++    test('ignores a plus code used as a street or a name', () {
++      final p = placeFromPlacemarks([Placemark(name: 'FHGM+X7', street: 'FHGM+X7', locality: 'Ota', administrativeArea: 'Ogun')])!;
++      expect(p.street, isNull);
++      expect(p.landmark, isNull);
++      expect(p.label, 'Ota, Ogun');
++    });
++
++    test('does not call a house number, or a repeat of another part, a landmark', () {
++      expect(placeFromPlacemarks([Placemark(name: '14', thoroughfare: 'Allen Avenue', locality: 'Ikeja')])!.landmark, isNull);
++      expect(placeFromPlacemarks([Placemark(name: 'Allen Avenue', thoroughfare: '14 Allen Avenue', locality: 'Ikeja')])!.landmark, isNull);
++      expect(placeFromPlacemarks([Placemark(name: 'Ikeja', thoroughfare: 'Allen Avenue', locality: 'Ikeja')])!.landmark, isNull);
++    });
++
++    test('takes the first non-empty value for each part across several results', () {
++      final p = placeFromPlacemarks([
++        Placemark(thoroughfare: '  ', locality: ''),
++        Placemark(thoroughfare: 'Adeniran Ogunsanya Street', subLocality: 'Surulere', administrativeArea: 'Lagos'),
++      ])!;
++      expect(p.street, 'Adeniran Ogunsanya Street');
++      expect(p.area, 'Surulere');
++    });
++
++    test('says nothing when there is nothing to say', () {
++      expect(placeFromPlacemarks([]), isNull);
++      expect(placeFromPlacemarks([Placemark()]), isNull);
++      expect(placeFromPlacemarks([Placemark(name: 'Somewhere')]), isNull);
++    });
++  });
++}
+diff --git a/mobile/test/police_numbers_test.dart b/mobile/test/police_numbers_test.dart
+new file mode 100644
+index 0000000..9d49dcf171425e1dba3ccba0b3d884e967f60c7c
+--- /dev/null
++++ b/mobile/test/police_numbers_test.dart
+@@ -0,0 +1,29 @@
++import 'dart:io';
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:sentri/features/police/police_directory.dart';
++
++void main() {
++  final dir = PoliceDirectory.parse(File('assets/directory/police_directory.json').readAsStringSync());
++
++  test('the lines shown as one-tap call buttons are always real, dialable numbers', () {
++    // The alert screen shows the first three lines of the nearest command (two for the ones nearby) as call buttons.
++    for (final c in dir.commands) {
++      for (final l in c.lines.take(3)) {
++        expect(RegExp(r'^\d{9,11}$').hasMatch(l), isTrue, reason: '${c.state}: "$l" is not dialable');
++      }
++    }
++  });
++
++  test('Lagos leads with the Command\'s own control room lines', () {
++    final lagos = dir.commands.firstWhere((c) => c.state == 'Lagos');
++    expect(lagos.lines.take(3), ['08063299264', '08065154338', '09129229576']);
++    expect(lagos.lines, containsAll(['07055462708', '08035963919']));
++  });
++
++  test('every state still has at least one line', () {
++    for (final c in dir.commands) {
++      expect(c.lines, isNotEmpty, reason: c.state);
++    }
++  });
++}
+diff --git a/render.live.yaml b/render.live.yaml
+new file mode 100644
+index 0000000..b2e7c0c79c4524f3f41b089b6c4e793b48994887
+--- /dev/null
++++ b/render.live.yaml
+@@ -0,0 +1,73 @@
++# Render Blueprint for the PERMANENT Sentri server: it remembers everything (accounts, contacts, alerts, shares).
++# Use it instead of render.yaml: in Render choose New > Blueprint, and set "Blueprint Path" to render.live.yaml.
++#
++# Costs about $23 a month: web service (starter) + Postgres (basic-256mb) + Key Value / Redis (starter).
++# NOT YET TRIED ON RENDER. If Render rejects a field, its error message names it; fix that line.
++#
++# NEVER delete or regenerate DATA_KEY, PHONE_HMAC_KEY or TOKEN_SECRET once real people have signed up:
++# stored phone numbers and names can no longer be read without them.
++#
++# After it is live, in the Key Value instance's settings set the eviction policy to "noeviction" (the job queue needs it).
++databases:
++  - name: sentri-db
++    plan: basic-256mb
++    postgresMajorVersion: "16"
++    ipAllowList: []
++
++services:
++  - type: keyvalue
++    name: sentri-redis
++    plan: starter
++    ipAllowList: []
++
++  - type: web
++    name: sentri-api-live
++    runtime: docker
++    plan: starter
++    region: frankfurt
++    dockerfilePath: ./Dockerfile.backend
++    dockerContext: .
++    healthCheckPath: /healthz
++    autoDeploy: true
++    buildFilter:
++      paths:
++        - backend/**
++        - Dockerfile.backend
++    envVars:
++      # development, not production: production refuses SMS_PROVIDER=mock, and there is no SMS provider yet.
++      # Storage is fully permanent either way.
++      - key: NODE_ENV
++        value: development
++      - key: STORE
++        value: postgres
++      - key: DATABASE_URL
++        fromDatabase:
++          name: sentri-db
++          property: connectionString
++      - key: REDIS_URL
++        fromService:
++          type: keyvalue
++          name: sentri-redis
++          property: connectionString
++      - key: OTP_PROVIDER
++        value: telegram
++      - key: SMS_PROVIDER
++        value: mock
++      - key: TRUST_PROXY_HOPS
++        value: "1"
++      # Random 256-bit values made once by Render and kept. The server accepts them as base64.
++      - key: TOKEN_SECRET
++        generateValue: true
++      - key: JWT_SECRET
++        generateValue: true
++      - key: PIN_PEPPER
++        generateValue: true
++      - key: DATA_KEY
++        generateValue: true
++      - key: PHONE_HMAC_KEY
++        generateValue: true
++      # Render asks for these two when the Blueprint is created. They come from @BotFather.
++      - key: TELEGRAM_BOT_TOKEN
++        sync: false
++      - key: TELEGRAM_BOT_USERNAME
++        sync: false
+diff --git a/render.yaml b/render.yaml
+index 6a1e4336491a736882914ede7600edf1a816243d..dbf0e038f90f3e00cb6374e0e1d4691aba6acf4f 100644
+--- a/render.yaml
++++ b/render.yaml
+@@ -10,6 +10,12 @@
+     dockerContext: .
+     healthCheckPath: /healthz
+     autoDeploy: true
++    # Redeploy only when the server's own files change. An app-only update then leaves the running server alone
++    # (on the free plan a restart clears everything the server holds in memory).
++    buildFilter:
++      paths:
++        - backend/**
++        - Dockerfile.backend
+     envVars:
+       - key: NODE_ENV
+         value: development
