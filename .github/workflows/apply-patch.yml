@@ -1,18 +1,33 @@
 name: Apply Telegram sign-up patch
 
 # One-time helper. Needs sentri-telegram-signup.patch at the top of the repo.
-# Run it by hand: Actions > Apply Telegram sign-up patch > Run workflow.
+# It now runs by itself when that patch is uploaded (or when this file is saved),
+# and it can still be started by hand: Actions > Apply Telegram sign-up patch > Run workflow.
 # It applies the patch, runs the backend checks, and only if they pass it pushes the result to main
 # and starts the APK build.
 on:
+  push:
+    branches: [main]
+    paths:
+      - sentri-telegram-signup.patch
+      - .github/workflows/apply-patch.yml
   workflow_dispatch:
 
 permissions:
   contents: write
   actions: write
 
+# Never let two applies run over each other.
+concurrency:
+  group: apply-patch
+  cancel-in-progress: false
+
 jobs:
   apply:
+    # The commit this workflow makes deletes the patch file, and deleting it counts as a change to
+    # that path, so it would start this workflow again. Skip that run: only a real upload or a
+    # manual run may apply a patch.
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
