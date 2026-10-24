@@ -1,0 +1,12 @@
+diff --git a/mobile/pubspec.yaml b/mobile/pubspec.yaml
+--- a/mobile/pubspec.yaml
++++ b/mobile/pubspec.yaml
+@@ -13,7 +13,7 @@
+   http: ^1.2.2
+   flutter_secure_storage: ^9.2.2
+   geolocator: ^13.0.1
+-  geocoding: ^3.0.0
++  geocoding: ^4.0.0
+   battery_plus: ^6.0.3
+   cryptography: ^2.7.0
+   cryptography_flutter: ^2.3.2
