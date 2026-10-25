@@ -1,0 +1,216 @@
+diff --git a/mobile/lib/core/settings.dart b/mobile/lib/core/settings.dart
+--- a/mobile/lib/core/settings.dart
++++ b/mobile/lib/core/settings.dart
+@@ -15,6 +15,8 @@ class AppSettings extends ChangeNotifier {
+   TriggerSettings triggers = const TriggerSettings();
+   bool dataSaver = false;
+
+   /// A 4-digit recovery code the person sets during sign-up. Used to prefill the phone step
+   /// if the server ever forgets the session, so they type their code instead of retyping their number.
+   String recoveryCode = '';
+
+   bool onboarded = false;
+   String language = 'en';
+@@ -21,7 +23,7 @@ class AppSettings extends ChangeNotifier {
+   String theme = 'system';
+
+   Future<void> load() async {
+     final raw = await _store.read(_k);
+     if (raw == null) return;
+     final j = jsonDecode(raw) as Map<String, dynamic>;
++    recoveryCode = j['recoveryCode'] as String? ?? '';
+     triggers = TriggerSettings(
+       shake: j['shake'] as bool? ?? true,
+       volume: j['volume'] as bool? ?? true,
+@@ -39,6 +41,7 @@ class AppSettings extends ChangeNotifier {
+     bool? language,
+     String? theme,
++    String? recoveryCode,
+   }) async {
+     this.triggers = triggers ?? this.triggers;
+     this.dataSaver = dataSaver ?? this.dataSaver;
++    this.recoveryCode = recoveryCode ?? this.recoveryCode;
+     this.onboarded = onboarded ?? this.onboarded;
+@@ -54,6 +56,7 @@ class AppSettings extends ChangeNotifier {
+       'power': this.triggers.power,
+       'floating': this.triggers.floating,
+       'sens': this.triggers.shakeSensitivity,
++      'recoveryCode': this.recoveryCode,
+       'dataSaver': this.dataSaver,
+       'onboarded': this.onboarded,
+       'lang': this.language,
+@@ -63,6 +66,12 @@ class AppSettings extends ChangeNotifier {
+     notifyListeners();
+   }
+
+   /// Remember the 4-digit recovery code the person chose as their PIN, so the phone step can prefill it.
+   Future<void> setRecoveryCode(String code) async {
+     if (code.length == 4) await update(recoveryCode: code);
+   }
+ }
+diff --git a/mobile/lib/features/onboarding/onboarding_controller.dart b/mobile/lib/features/onboarding/onboarding_controller.dart
+--- a/mobile/lib/features/onboarding/onboarding_controller.dart
++++ b/mobile/lib/features/onboarding/onboarding_controller.dart
+@@ -90,10 +90,12 @@ class OnboardingController extends ChangeNotifier {
+   /// The server no longer knows this phone (for example after the server was reset). Protection cannot work until
+   /// the person signs in again, so say so plainly and start sign-in at the phone number.
+   Future<void> sessionExpired() async {
+     await settings.update(onboarded: false);
+     devCode = null;
+     telegramUrl = null;
+     _go(OnboardingStep.phone);
++    // The phone screen prefills the recovery code so the person types their 4-digit code
++    // instead of retyping their phone number.
+     errorKey = 'auth.session_ended';
+     notifyListeners();
+   }
+@@ -231,14 +233,14 @@ class OnboardingController extends ChangeNotifier {
+   /// One cancel PIN, typed twice. The server and the phone still expect a second "silent alert" PIN, so
+   /// the app generates a random one nobody sees or knows. It can never be typed by accident, which
+   /// leaves the duress path switched off in practice.
+   Future<void> submitPins(String cancelPin, String confirmPin) async {
+-    if (!LocalPinVault.isValidFormat(cancelPin)) {
++    if (cancelPin.length != 4) {
+       errorKey = 'pins.format';
+       notifyListeners();
+       return;
+     }
+     if (cancelPin != confirmPin) {
+       errorKey = 'pins.mismatch';
+       notifyListeners();
+       return;
+     }
+@@ -257,5 +259,9 @@ class OnboardingController extends ChangeNotifier {
+   Future<void> finish() async {
+     await settings.update(onboarded: true);
+     await bridge.startProtection(settings.triggers);
++    // Remember the PIN as the 4-digit recovery code so the person can sign back in with it.
++    await settings.setRecoveryCode(cancelPin);
+     _go(OnboardingStep.done);
+   }
+ }
+diff --git a/mobile/lib/features/onboarding/onboarding_screens.dart b/mobile/lib/features/onboarding/onboarding_screens.dart
+--- a/mobile/lib/features/onboarding/onboarding_screens.dart
++++ b/mobile/lib/features/onboarding/onboarding_screens.dart
+@@ -126,6 +126,11 @@ class _PhoneStepState extends State<_PhoneStep> {
+   final _ctl = TextEditingController();
++
++  @override
++  void initState() {
++    super.initState();
++    if (_ctl.text.isEmpty && widget.c.settings.recoveryCode.isNotEmpty) _ctl.text = widget.c.settings.recoveryCode;
++  }
++
+   @override
+   void dispose() {
+     _ctl.dispose();
+@@ -354,7 +359,7 @@ class _PinsStep extends StatelessWidget {
+   Widget _field(BuildContext context, TextEditingController c, String label, String? help) => Padding(
+         padding: const EdgeInsets.only(bottom: 16),
+         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+-          PillField(controller: c, label: label, keyboardType: TextInputType.number, obscure: true, maxLength: 8, inputFormatters: _digitFormatters),
++          PillField(controller: c, label: label, keyboardType: TextInputType.number, obscure: true, maxLength: 4, inputFormatters: _digitFormatters),
+           if (help != null) Padding(padding: const EdgeInsets.only(left: 8, top: 4), child: Text(help, style: Theme.of(context).textTheme.bodySmall)),
+         ]),
+       );
+diff --git a/mobile/lib/features/sos/local_pin_vault.dart b/mobile/lib/features/sos/local_pin_vault.dart
+--- a/mobile/lib/features/sos/local_pin_vault.dart
++++ b/mobile/lib/features/sos/local_pin_vault.dart
+@@ -29,7 +29,7 @@ class LocalPinVault {
+   static const _kPins = 'pin.v1';
+   static const _kGuard = 'pin.guard.v1';
+-  static final _format = RegExp(r'^\d{4,8}$');
++  static final _format = RegExp(r'^\d{4}$');
+
+   static bool isValidFormat(String pin) => _format.hasMatch(pin);
+
+   Future<void> save(String cancelPin, String duressPin) async {
+     if (!isValidFormat(cancelPin) || !isValidFormat(duressPin)) throw ArgumentError('PIN must be 4 digits');
+     if (cancelPin == duressPin) throw ArgumentError('PINs must differ');
+diff --git a/mobile/lib/services.dart b/mobile/lib/services.dart
+--- a/mobile/lib/services.dart
++++ b/mobile/lib/services.dart
+@@ -175,11 +175,11 @@ class AppServices {
+     bridge.onTrigger((t) => unawaited(sos.trigger(t.name)));
+     final pending = await bridge.takePendingTrigger();
+     if (pending != null) unawaited(sos.trigger(pending.name));
+
+-    if (settings.onboarded) {
+-      await bridge.startProtection(settings.triggers);
+-      lowBattery.start();
+-      unawaited(_push.start());
+-      unawaited(inbox.refresh());
+-      unawaited(share.resume());
++    // Safety triggers work even when the person is signed out — protection is the app's main purpose.
++    await bridge.startProtection(settings.triggers);
++    lowBattery.start();
++    if (settings.onboarded) {
++      unawaited(_push.start());
++      unawaited(inbox.refresh());
++      unawaited(share.resume());
+     }
+     settings.addListener(() {
+       if (settings.onboarded) {
+@@ -192,7 +192,7 @@ class AppServices {
+     // iOS cannot watch sensors in the background, so shake works only while the app is open.
+     if (Platform.isIOS) {
+       final detector = ShakeDetector();
+       _accel = accelerometerEventStream().listen((e) {
+-        if (settings.triggers.shake && settings.onboarded && detector.addSample(e.x, e.y, e.z, DateTime.now())) {
++        if (settings.triggers.shake && detector.addSample(e.x, e.y, e.z, DateTime.now())) {
+           unawaited(sos.trigger('shake'));
+         }
+       });
+diff --git a/mobile/assets/i18n/en.json b/mobile/assets/i18n/en.json
+--- a/mobile/assets/i18n/en.json
++++ b/mobile/assets/i18n/en.json
+@@ -29,7 +29,7 @@
+   "pins.title": "Your safety PIN",
+   "pins.cancel_label": "Cancel PIN",
+   "pins.cancel_help": "Stops the alert.",
+-  "pins.format": "PINs must be 4 to 8 digits.",
++  "pins.format": "PIN must be 4 digits.",
+   "pins.mismatch": "The two PINs do not match.",
+   "pins.must_differ": "The two PINs must be different.",
+diff --git a/mobile/assets/i18n/ha.json b/mobile/assets/i18n/ha.json
+--- a/mobile/assets/i18n/ha.json
++++ b/mobile/assets/i18n/ha.json
+@@ -29,7 +29,7 @@
+   "pins.title": "Lambar ci gaba",
+   "pins.cancel_label": "Kammala lambar",
+   "pins.cancel_help": "Yi sharadda za tashi.",
+-  "pins.format": "PIN dole ya zama lambobi 4 zuwa 8.",
++  "pins.format": "PIN take yi lambobi 4.",
+   "pins.mismatch": "Koyon lambobi ba su yi tsare ba.",
+   "pins.must_differ": "Koyon lambobi ba su dannu ba.",
+diff --git a/mobile/assets/i18n/ig.json b/mobile/assets/i18n/ig.json
+--- a/mobile/assets/i18n/ig.json
++++ b/mobile/assets/i18n/ig.json
+@@ -29,7 +29,7 @@
+   "pins.title": "Koodu gaba gị",
+   "pins.cancel_label": "Koodu wepụta",
+   "pins.cancel_help": "Bụrụ ndị anyị agbaa.",
+-  "pins.format": "PIN ga-abụ ọnụọgụ anọ ruo asatọ.",
++  "pins.format": "PIN ga-abụ ọnụọgụ anọ.",
+   "pins.mismatch": "Koodu a ga-abụla.",
+   "pins.must_differ": "Koodu a huru.",
+diff --git a/mobile/assets/i18n/pcm.json b/mobile/assets/i18n/pcm.json
+--- a/mobile/assets/i18n/pcm.json
++++ b/mobile/assets/i18n/pcm.json
+@@ -29,7 +29,7 @@
+   "pins.title": "Your safety PIN",
+   "pins.cancel_label": "Cancel PIN",
+   "pins.cancel_help": "Stops the alert.",
+-  "pins.format": "PIN must be 4 to 8 numbers.",
++  "pins.format": "PIN must be 4 numbers.",
+   "pins.mismatch": "The two PINs do not match.",
+   "pins.must_differ": "The two PINs must be different.",
+diff --git a/mobile/assets/i18n/yo.json b/mobile/assets/i18n/yo.json
+--- a/mobile/assets/i18n/yo.json
++++ b/mobile/assets/i18n/yo.json
+@@ -29,7 +29,7 @@
+   "pins.title": "PIN tuntun rẹ",
+   "pins.cancel_label": "PIN kankan",
+   "pins.cancel_help": "Ṣe alaye àwọn àgbáyè rẹ jẹ́ kí ó jẹ́ kíkọ.",
+-  "pins.format": "PIN gbọ́dọ̀ jẹ́ nọ́ńbà mẹ́rin sí mẹ́jọ.",
++  "pins.format": "PIN gbọ́dọ̀ jẹ́ nọ́ńbà mẹ́rin.",
