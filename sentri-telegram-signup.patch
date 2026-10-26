@@ -4,16 +4,16 @@ diff --git a/mobile/lib/core/settings.dart b/mobile/lib/core/settings.dart
 @@ -15,6 +15,8 @@ class AppSettings extends ChangeNotifier {
    TriggerSettings triggers = const TriggerSettings();
    bool dataSaver = false;
-
+ 
    /// A 4-digit recovery code the person sets during sign-up. Used to prefill the phone step
    /// if the server ever forgets the session, so they type their code instead of retyping their number.
    String recoveryCode = '';
-
+ 
    bool onboarded = false;
    String language = 'en';
 @@ -21,7 +23,7 @@ class AppSettings extends ChangeNotifier {
    String theme = 'system';
-
+ 
    Future<void> load() async {
      final raw = await _store.read(_k);
      if (raw == null) return;
@@ -31,6 +31,8 @@ diff --git a/mobile/lib/core/settings.dart b/mobile/lib/core/settings.dart
      this.dataSaver = dataSaver ?? this.dataSaver;
 +    this.recoveryCode = recoveryCode ?? this.recoveryCode;
      this.onboarded = onboarded ?? this.onboarded;
+     this.language = language ?? this.language;
+     this.theme = theme ?? this.theme;
 @@ -54,6 +56,7 @@ class AppSettings extends ChangeNotifier {
        'power': this.triggers.power,
        'floating': this.triggers.floating,
@@ -42,11 +44,11 @@ diff --git a/mobile/lib/core/settings.dart b/mobile/lib/core/settings.dart
 @@ -63,6 +66,12 @@ class AppSettings extends ChangeNotifier {
      notifyListeners();
    }
-
-   /// Remember the 4-digit recovery code the person chose as their PIN, so the phone step can prefill it.
-   Future<void> setRecoveryCode(String code) async {
-     if (code.length == 4) await update(recoveryCode: code);
-   }
+ 
++  /// Remember the 4-digit recovery code the person chose as their PIN, so the phone step can prefill it.
++  Future<void> setRecoveryCode(String code) async {
++    if (code.length == 4) await update(recoveryCode: code);
++  }
  }
 diff --git a/mobile/lib/features/onboarding/onboarding_controller.dart b/mobile/lib/features/onboarding/onboarding_controller.dart
 --- a/mobile/lib/features/onboarding/onboarding_controller.dart
@@ -72,11 +74,6 @@ diff --git a/mobile/lib/features/onboarding/onboarding_controller.dart b/mobile/
 -    if (!LocalPinVault.isValidFormat(cancelPin)) {
 +    if (cancelPin.length != 4) {
        errorKey = 'pins.format';
-       notifyListeners();
-       return;
-     }
-     if (cancelPin != confirmPin) {
-       errorKey = 'pins.mismatch';
        notifyListeners();
        return;
      }
@@ -121,12 +118,12 @@ diff --git a/mobile/lib/features/sos/local_pin_vault.dart b/mobile/lib/features/
    static const _kGuard = 'pin.guard.v1';
 -  static final _format = RegExp(r'^\d{4,8}$');
 +  static final _format = RegExp(r'^\d{4}$');
-
+ 
    static bool isValidFormat(String pin) => _format.hasMatch(pin);
-
+ 
    Future<void> save(String cancelPin, String duressPin) async {
-     if (!isValidFormat(cancelPin) || !isValidFormat(duressPin)) throw ArgumentError('PIN must be 4 digits');
-     if (cancelPin == duressPin) throw ArgumentError('PINs must differ');
+-    if (!isValidFormat(cancelPin) || !isValidFormat(duressPin)) throw ArgumentError('PIN must be 4 to 8 digits');
++    if (!isValidFormat(cancelPin) || !isValidFormat(duressPin)) throw ArgumentError('PIN must be 4 digits');
 diff --git a/mobile/lib/services.dart b/mobile/lib/services.dart
 --- a/mobile/lib/services.dart
 +++ b/mobile/lib/services.dart
@@ -134,7 +131,7 @@ diff --git a/mobile/lib/services.dart b/mobile/lib/services.dart
      bridge.onTrigger((t) => unawaited(sos.trigger(t.name)));
      final pending = await bridge.takePendingTrigger();
      if (pending != null) unawaited(sos.trigger(pending.name));
-
+ 
 -    if (settings.onboarded) {
 -      await bridge.startProtection(settings.triggers);
 -      lowBattery.start();
