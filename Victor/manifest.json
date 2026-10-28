@@ -1,0 +1,18 @@
+{
+  "name": "Victor",
+  "short_name": "Victor",
+  "description": "All-in-one daily companion: screen time limits, workouts, boxing/Jiu-Jitsu, Bible verses, daily schedule, water, sleep and heart rate.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23007aff'/%3E%3Ctext x='16' y='23' font-family='system-ui,-apple-system,SF Pro Text,Segoe UI,sans-serif' font-weight='700' font-size='20' text-anchor='middle' fill='%23fff'%3EV%3C/text%3E%3C/svg%3E",
+      "sizes": "32x32",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
