@@ -1,107 +1,89 @@
 diff --git a/mobile/lib/core/settings.dart b/mobile/lib/core/settings.dart
 --- a/mobile/lib/core/settings.dart
 +++ b/mobile/lib/core/settings.dart
-@@ -15,6 +15,8 @@ class AppSettings extends ChangeNotifier {
+@@ -14,6 +14,10 @@
    TriggerSettings triggers = const TriggerSettings();
    bool dataSaver = false;
  
-   /// A 4-digit recovery code the person sets during sign-up. Used to prefill the phone step
-   /// if the server ever forgets the session, so they type their code instead of retyping their number.
-   String recoveryCode = '';
- 
++  /// Their phone number from the last time they set up or signed in. When the server forgets a
++  /// session and the person has to sign in again, the phone step starts with this number filled in.
++  String lastPhone = '';
++
    bool onboarded = false;
    String language = 'en';
-@@ -21,7 +23,7 @@ class AppSettings extends ChangeNotifier {
-   String theme = 'system';
  
-   Future<void> load() async {
-     final raw = await _store.read(_k);
-     if (raw == null) return;
-     final j = jsonDecode(raw) as Map<String, dynamic>;
-+    recoveryCode = j['recoveryCode'] as String? ?? '';
-     triggers = TriggerSettings(
-       shake: j['shake'] as bool? ?? true,
-       volume: j['volume'] as bool? ?? true,
-@@ -39,6 +41,7 @@ class AppSettings extends ChangeNotifier {
-     bool? language,
+@@ -32,6 +36,7 @@
+       shakeSensitivity: (j['sens'] as num?)?.toDouble() ?? 1.0,
+     );
+     dataSaver = j['dataSaver'] as bool? ?? false;
++    lastPhone = j['lastPhone'] as String? ?? '';
+     onboarded = j['onboarded'] as bool? ?? false;
+     language = j['lang'] as String? ?? 'en';
+     theme = j['theme'] as String? ?? 'system';
+@@ -40,12 +45,14 @@
+   Future<void> update({
+     TriggerSettings? triggers,
+     bool? dataSaver,
++    String? lastPhone,
+     bool? onboarded,
+     String? language,
      String? theme,
-+    String? recoveryCode,
    }) async {
      this.triggers = triggers ?? this.triggers;
      this.dataSaver = dataSaver ?? this.dataSaver;
-+    this.recoveryCode = recoveryCode ?? this.recoveryCode;
++    this.lastPhone = lastPhone ?? this.lastPhone;
      this.onboarded = onboarded ?? this.onboarded;
      this.language = language ?? this.language;
      this.theme = theme ?? this.theme;
-@@ -54,6 +56,7 @@ class AppSettings extends ChangeNotifier {
-       'power': this.triggers.power,
-       'floating': this.triggers.floating,
-       'sens': this.triggers.shakeSensitivity,
-+      'recoveryCode': this.recoveryCode,
-       'dataSaver': this.dataSaver,
-       'onboarded': this.onboarded,
-       'lang': this.language,
-@@ -63,6 +66,12 @@ class AppSettings extends ChangeNotifier {
-     notifyListeners();
-   }
- 
-+  /// Remember the 4-digit recovery code the person chose as their PIN, so the phone step can prefill it.
-+  Future<void> setRecoveryCode(String code) async {
-+    if (code.length == 4) await update(recoveryCode: code);
-+  }
- }
+@@ -58,6 +65,7 @@
+         'floating': this.triggers.floating,
+         'sens': this.triggers.shakeSensitivity,
+         'dataSaver': this.dataSaver,
++        'lastPhone': this.lastPhone,
+         'onboarded': this.onboarded,
+         'lang': this.language,
+         'theme': this.theme,
 diff --git a/mobile/lib/features/onboarding/onboarding_controller.dart b/mobile/lib/features/onboarding/onboarding_controller.dart
 --- a/mobile/lib/features/onboarding/onboarding_controller.dart
 +++ b/mobile/lib/features/onboarding/onboarding_controller.dart
-@@ -90,10 +90,12 @@ class OnboardingController extends ChangeNotifier {
-   /// The server no longer knows this phone (for example after the server was reset). Protection cannot work until
-   /// the person signs in again, so say so plainly and start sign-in at the phone number.
-   Future<void> sessionExpired() async {
-     await settings.update(onboarded: false);
-     devCode = null;
-     telegramUrl = null;
-     _go(OnboardingStep.phone);
-+    // The phone screen prefills the recovery code so the person types their 4-digit code
-+    // instead of retyping their phone number.
-     errorKey = 'auth.session_ended';
-     notifyListeners();
-   }
-@@ -231,14 +233,14 @@ class OnboardingController extends ChangeNotifier {
-   /// One cancel PIN, typed twice. The server and the phone still expect a second "silent alert" PIN, so
-   /// the app generates a random one nobody sees or knows. It can never be typed by accident, which
-   /// leaves the duress path switched off in practice.
-   Future<void> submitPins(String cancelPin, String confirmPin) async {
--    if (!LocalPinVault.isValidFormat(cancelPin)) {
-+    if (cancelPin.length != 4) {
-       errorKey = 'pins.format';
-       notifyListeners();
-       return;
-     }
-@@ -257,5 +259,9 @@ class OnboardingController extends ChangeNotifier {
-   Future<void> finish() async {
-     await settings.update(onboarded: true);
-     await bridge.startProtection(settings.triggers);
-+    // Remember the PIN as the 4-digit recovery code so the person can sign back in with it.
-+    await settings.setRecoveryCode(cancelPin);
-     _go(OnboardingStep.done);
-   }
- }
+@@ -145,6 +145,8 @@
+       devCode = r.devCode;
+       telegramUrl = r.telegramUrl;
+       phone = p;
++      // Remember it: if the server later forgets the session, the phone step starts filled in.
++      await settings.update(lastPhone: p);
+       resendAt = DateTime.now().add(const Duration(seconds: 30));
+       _go(OnboardingStep.otp);
+       // Show the code screen first, then hand over to Telegram. If Telegram cannot be opened the person is
+@@ -245,7 +247,7 @@
+     final rnd = Random.secure();
+     var unused = '';
+     do {
+-      unused = List.generate(8, (_) => rnd.nextInt(10)).join();
++      unused = List.generate(4, (_) => rnd.nextInt(10)).join();
+     } while (unused == cancelPin);
+     await _run(() async {
+       await api.savePins(cancelPin: cancelPin, duressPin: unused);
 diff --git a/mobile/lib/features/onboarding/onboarding_screens.dart b/mobile/lib/features/onboarding/onboarding_screens.dart
 --- a/mobile/lib/features/onboarding/onboarding_screens.dart
 +++ b/mobile/lib/features/onboarding/onboarding_screens.dart
-@@ -126,6 +126,11 @@ class _PhoneStepState extends State<_PhoneStep> {
+@@ -125,7 +125,15 @@
+ 
+ class _PhoneStepState extends State<_PhoneStep> {
    final _ctl = TextEditingController();
 +
-+  @override
+   @override
 +  void initState() {
 +    super.initState();
-+    if (_ctl.text.isEmpty && widget.c.settings.recoveryCode.isNotEmpty) _ctl.text = widget.c.settings.recoveryCode;
++    // If the server forgot the session, start with the number they used last time filled in.
++    _ctl.text = widget.c.settings.lastPhone;
 +  }
 +
-   @override
++  @override
    void dispose() {
      _ctl.dispose();
-@@ -354,7 +359,7 @@ class _PinsStep extends StatelessWidget {
+     super.dispose();
+@@ -351,7 +359,7 @@
    Widget _field(BuildContext context, TextEditingController c, String label, String? help) => Padding(
          padding: const EdgeInsets.only(bottom: 16),
          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -113,7 +95,8 @@ diff --git a/mobile/lib/features/onboarding/onboarding_screens.dart b/mobile/lib
 diff --git a/mobile/lib/features/sos/local_pin_vault.dart b/mobile/lib/features/sos/local_pin_vault.dart
 --- a/mobile/lib/features/sos/local_pin_vault.dart
 +++ b/mobile/lib/features/sos/local_pin_vault.dart
-@@ -29,7 +29,7 @@ class LocalPinVault {
+@@ -28,7 +28,7 @@
+ 
    static const _kPins = 'pin.v1';
    static const _kGuard = 'pin.guard.v1';
 -  static final _format = RegExp(r'^\d{4,8}$');
@@ -121,35 +104,31 @@ diff --git a/mobile/lib/features/sos/local_pin_vault.dart b/mobile/lib/features/
  
    static bool isValidFormat(String pin) => _format.hasMatch(pin);
  
+@@ -40,7 +40,7 @@
+   }
+ 
    Future<void> save(String cancelPin, String duressPin) async {
 -    if (!isValidFormat(cancelPin) || !isValidFormat(duressPin)) throw ArgumentError('PIN must be 4 to 8 digits');
 +    if (!isValidFormat(cancelPin) || !isValidFormat(duressPin)) throw ArgumentError('PIN must be 4 digits');
+     if (cancelPin == duressPin) throw ArgumentError('PINs must differ');
+     final rnd = Random.secure();
+     final saltC = List<int>.generate(16, (_) => rnd.nextInt(256));
 diff --git a/mobile/lib/services.dart b/mobile/lib/services.dart
 --- a/mobile/lib/services.dart
 +++ b/mobile/lib/services.dart
-@@ -175,11 +175,11 @@ class AppServices {
-     bridge.onTrigger((t) => unawaited(sos.trigger(t.name)));
+@@ -172,8 +172,10 @@
      final pending = await bridge.takePendingTrigger();
      if (pending != null) unawaited(sos.trigger(pending.name));
  
--    if (settings.onboarded) {
--      await bridge.startProtection(settings.triggers);
--      lowBattery.start();
--      unawaited(_push.start());
--      unawaited(inbox.refresh());
--      unawaited(share.resume());
-+    // Safety triggers work even when the person is signed out — protection is the app's main purpose.
++    // Protection is the app's whole purpose: the triggers stay armed even when the session has
++    // slipped (for example after the server restarted), so help always works.
 +    await bridge.startProtection(settings.triggers);
-+    lowBattery.start();
-+    if (settings.onboarded) {
-+      unawaited(_push.start());
-+      unawaited(inbox.refresh());
-+      unawaited(share.resume());
-     }
-     settings.addListener(() {
-       if (settings.onboarded) {
-@@ -192,7 +192,7 @@ class AppServices {
-     // iOS cannot watch sensors in the background, so shake works only while the app is open.
+     if (settings.onboarded) {
+-      await bridge.startProtection(settings.triggers);
+       lowBattery.start();
+       unawaited(_push.start());
+       unawaited(inbox.refresh());
+@@ -190,7 +192,7 @@
      if (Platform.isIOS) {
        final detector = ShakeDetector();
        _accel = accelerometerEventStream().listen((e) {
@@ -158,56 +137,244 @@ diff --git a/mobile/lib/services.dart b/mobile/lib/services.dart
            unawaited(sos.trigger('shake'));
          }
        });
+diff --git a/mobile/lib/app.dart b/mobile/lib/app.dart
+--- a/mobile/lib/app.dart
++++ b/mobile/lib/app.dart
+@@ -3,7 +3,6 @@
+ import 'core/theme.dart';
+ import 'core/widgets/brand.dart';
+ import 'core/widgets/glass.dart';
+-import 'core/widgets/waking_banner.dart';
+ import 'package:flutter/services.dart' show rootBundle;
+ 
+ import 'features/home/home_screen.dart';
+@@ -106,16 +105,7 @@
+             },
+           ),
+         ),
+-        // While a sleeping server wakes up, say so: the wait is not a fault.
+-        Positioned(
+-          top: 0,
+-          left: 0,
+-          right: 0,
+-          child: ListenableBuilder(
+-            listenable: s.i18n,
+-            builder: (context, _) => WakingBanner(waking: s.waking, message: s.i18n.t('net.waking')),
+-          ),
+-        ),
++
+       ],
+     );
+   }
+diff --git a/backend/src/modules/auth/otp.ts b/backend/src/modules/auth/otp.ts
+--- a/backend/src/modules/auth/otp.ts
++++ b/backend/src/modules/auth/otp.ts
+@@ -14,6 +14,8 @@
+ export interface OtpStore {
+   create(c: { id: string; phoneHmac: Buffer; codeHash: Buffer; createdAt: number; expiresAt: number }): Promise<void>;
+   latest(phoneHmac: Buffer): Promise<OtpRecord | null>;
++  /** The `count` most recent challenges still open (unconsumed, unexpired), any phone, newest first. */
++  recentOpen(nowMs: number, count: number): Promise<OtpRecord[]>;
+   /** Adds one guess and returns the new total. Must be atomic, so guesses sent together can't each see the old count. */
+   bumpAttempts(id: string): Promise<number>;
+   /** Marks consumed; false if it was already consumed (so a code can't be used twice). */
+@@ -84,18 +86,33 @@
+     });
+   }
+ 
+-  /** True only for the latest, unexpired, unconsumed challenge with the right code. */
++  /** The named number's newest, unexpired, unconsumed challenge with the right code: counts the guess BEFORE
++   * checking it, so guesses sent together each get their own count. */
+   async verify(phone: string, code: string): Promise<boolean> {
+     const now = this.clock();
+-    const rec = await this.store.latest(this.fc.blindIndex(phone));
+-    if (!rec || rec.consumedAt || rec.expiresAt <= now || rec.attempts >= this.opts.maxAttempts) return false;
+-    // Count the guess BEFORE checking it, and act on the new total. Guesses sent at the same moment each get
+-    // their own number, so only the first few are ever compared, whatever the timing.
+-    if ((await this.store.bumpAttempts(rec.id)) > this.opts.maxAttempts) return false;
+     if (!/^\d{6}$/.test(code)) return false;
+-    const given = this.hashCode(rec.id, code);
+-    if (given.length !== rec.codeHash.length || !timingSafeEqual(given, rec.codeHash)) return false;
+-    return this.store.consume(rec.id, now);
++    const latest = await this.store.latest(this.fc.blindIndex(phone));
++    if (
++      latest && !latest.consumedAt && latest.expiresAt > now && latest.attempts < this.opts.maxAttempts &&
++      (await this.store.bumpAttempts(latest.id)) <= this.opts.maxAttempts
++    ) {
++      const given = this.hashCode(latest.id, code);
++      if (given.length === latest.codeHash.length && timingSafeEqual(given, latest.codeHash)) {
++        return this.store.consume(latest.id, now);
++      }
++    }
++    // Telegram replaces a code when "Share my number" is tapped again, so the code being typed may be one
++    // challenge old. Try the other open challenges; each keeps the guess count from its own phone's path.
++    // Guesses stay bounded: 6 digits, a 5-minute life, and the per-IP limiter on the route.
++    for (const rec of await this.store.recentOpen(now, 20)) {
++      if (latest && rec.id === latest.id) continue;
++      if (rec.attempts >= this.opts.maxAttempts) continue;
++      const given = this.hashCode(rec.id, code);
++      if (given.length === rec.codeHash.length && timingSafeEqual(given, rec.codeHash)) {
++        return this.store.consume(rec.id, now);
++      }
++    }
++    return false;
+   }
+ }
+ 
+@@ -125,4 +142,11 @@
+   async countSince(phoneHmac: Buffer, sinceMs: number): Promise<number> {
+     return this.rows.filter((r) => r.phoneHmac.equals(phoneHmac) && r.createdAt >= sinceMs).length;
+   }
++
++  async recentOpen(nowMs: number, count: number): Promise<OtpRecord[]> {
++    return this.rows
++      .filter((r) => !r.consumedAt && r.expiresAt > nowMs)
++      .sort((a, b) => b.createdAt - a.createdAt)
++      .slice(0, count);
++  }
+ }
+diff --git a/backend/src/modules/auth/pg-user-repo.ts b/backend/src/modules/auth/pg-user-repo.ts
+--- a/backend/src/modules/auth/pg-user-repo.ts
++++ b/backend/src/modules/auth/pg-user-repo.ts
+@@ -209,4 +209,17 @@
+     ]);
+     return r.rows[0].n;
+   }
++
++  async recentOpen(nowMs: number, count: number): Promise<OtpRecord[]> {
++    const r = await this.pool.query(
++      'SELECT id, code_hash, attempts, expires_at FROM otp_challenges WHERE consumed_at IS NULL AND expires_at > $1 ORDER BY created_at DESC LIMIT $2',
++      [nowMs, count],
++    );
++    return r.rows.map((row) => ({
++      id: row.id,
++      codeHash: row.code_hash,
++      attempts: row.attempts,
++      expiresAt: Number(row.expires_at),
++    }));
++  }
+ }
+diff --git a/backend/test/auth.test.ts b/backend/test/auth.test.ts
+--- a/backend/test/auth.test.ts
++++ b/backend/test/auth.test.ts
+@@ -125,13 +125,13 @@
+     expect(await t.otp.verify(PHONE, c)).toBe(false);
+   });
+ 
+-  it('only the newest code works', async () => {
++  it('an older unexpired code still works, because Telegram replaces codes when asked again', async () => {
+     const t = setup();
+     await t.otp.request(PHONE);
+     const first = t.code();
+     await t.otp.request(PHONE);
+     const second = t.code();
+-    if (first !== second) expect(await t.otp.verify(PHONE, first)).toBe(false);
++    if (first !== second) expect(await t.otp.verify(PHONE, first)).toBe(true);
+     expect(await t.otp.verify(PHONE, second)).toBe(true);
+   });
+ 
 diff --git a/mobile/assets/i18n/en.json b/mobile/assets/i18n/en.json
 --- a/mobile/assets/i18n/en.json
 +++ b/mobile/assets/i18n/en.json
-@@ -29,7 +29,7 @@
-   "pins.title": "Your safety PIN",
-   "pins.cancel_label": "Cancel PIN",
-   "pins.cancel_help": "Stops the alert.",
--  "pins.format": "PINs must be 4 to 8 digits.",
-+  "pins.format": "PIN must be 4 digits.",
+@@ -13,7 +13,7 @@
+   "otp.sent_to": "Code sent to {phone}",
+   "otp.verify": "Verify",
+   "otp.format": "The code is 6 numbers. Check it and try again.",
+-  "otp.invalid": "That code is not right or has expired.",
++  "otp.invalid": "That code is not the newest one. Ask Telegram for a new code and type the latest one.",
+   "contacts.title": "Emergency contacts",
+   "contacts.help": "These people get your alerts. Each one is asked to accept. Someone who declines stops getting alerts from you.",
+   "contacts.add": "Add contact",
+@@ -26,7 +26,7 @@
+   "pins.confirm_label": "Confirm PIN",
    "pins.mismatch": "The two PINs do not match.",
    "pins.must_differ": "The two PINs must be different.",
+-  "pins.format": "PINs must be 4 to 8 digits.",
++  "pins.format": "Your PIN must be 4 digits.",
+   "perm.title": "Make Sentri work when your phone is locked",
+   "perm.location": "Location, all the time",
+   "perm.notifications": "Notifications",
 diff --git a/mobile/assets/i18n/ha.json b/mobile/assets/i18n/ha.json
 --- a/mobile/assets/i18n/ha.json
 +++ b/mobile/assets/i18n/ha.json
-@@ -29,7 +29,7 @@
-   "pins.title": "Lambar ci gaba",
-   "pins.cancel_label": "Kammala lambar",
-   "pins.cancel_help": "Yi sharadda za tashi.",
+@@ -13,7 +13,7 @@
+   "otp.sent_to": "An aika lamba zuwa {phone}",
+   "otp.verify": "Tabbatar",
+   "otp.format": "Lambar tabbatarwa tana da lambobi 6. Duba ka sake gwadawa.",
+-  "otp.invalid": "Lambar ba daidai ba ce ko ta ƙare.",
++  "otp.invalid": "Wannan ba sabuwar lambar ba ce. A nemi sabuwa daga Telegram a shigar da ita.",
+   "contacts.title": "Abokan gaggawa",
+   "contacts.help": "Waɗannan mutane ne ke samun gargaɗinka. Ana tambayar kowanne ya amince. Wanda ya ƙi ba zai sake samun gargaɗinka ba.",
+   "contacts.add": "Ƙara aboki",
+@@ -26,7 +26,7 @@
+   "pins.confirm_label": "Tabbatar da PIN",
+   "pins.mismatch": "PIN ɗin biyu ba su daidaita ba.",
+   "pins.must_differ": "PIN biyun dole su bambanta.",
 -  "pins.format": "PIN dole ya zama lambobi 4 zuwa 8.",
-+  "pins.format": "PIN take yi lambobi 4.",
-   "pins.mismatch": "Koyon lambobi ba su yi tsare ba.",
-   "pins.must_differ": "Koyon lambobi ba su dannu ba.",
++  "pins.format": "PIN dole ya zama lambobi 4.",
+   "perm.title": "Sa Sentri ya yi aiki ko da wayarka a kulle take",
+   "perm.location": "Wuri, kullum",
+   "perm.notifications": "Sanarwa",
 diff --git a/mobile/assets/i18n/ig.json b/mobile/assets/i18n/ig.json
 --- a/mobile/assets/i18n/ig.json
 +++ b/mobile/assets/i18n/ig.json
-@@ -29,7 +29,7 @@
-   "pins.title": "Koodu gaba gị",
-   "pins.cancel_label": "Koodu wepụta",
-   "pins.cancel_help": "Bụrụ ndị anyị agbaa.",
+@@ -13,7 +13,7 @@
+   "otp.sent_to": "Eziputara koodu na {phone}",
+   "otp.verify": "Nyochaa",
+   "otp.format": "Koodu ahu nwere onuogu isii. Lelee ya ma nwaa ozo.",
+-  "otp.invalid": "Koodu ahụ ezighị ezi ma ọ bụ ọ gwụla.",
++  "otp.invalid": "Nke a abụghị koodu kacha ọhụrụ. Rịọ koodu ọhụrụ na Telegram ma tinye nke kachasị ọhụrụ.",
+   "contacts.title": "Ndị ikpe mberede",
+   "contacts.help": "Ndị a na-enweta ọkwa gị. A na-ajụ onye ọ bụla ka ọ kwenye. Onye jụrụ agaghị enwe ọkwa gị ọzọ.",
+   "contacts.add": "Tinye onye",
+@@ -26,7 +26,7 @@
+   "pins.confirm_label": "Kwenye PIN",
+   "pins.mismatch": "PIN abụọ ahụ adịghị agbakọ.",
+   "pins.must_differ": "PIN abụọ ahụ ga-adị iche.",
 -  "pins.format": "PIN ga-abụ ọnụọgụ anọ ruo asatọ.",
 +  "pins.format": "PIN ga-abụ ọnụọgụ anọ.",
-   "pins.mismatch": "Koodu a ga-abụla.",
-   "pins.must_differ": "Koodu a huru.",
+   "perm.title": "Mee ka Sentri rụọ ọrụ ọbụna mgbe ekwentị gị mechiri",
+   "perm.location": "Ebe ị nọ, mgbe niile",
+   "perm.notifications": "Ọkwa",
 diff --git a/mobile/assets/i18n/pcm.json b/mobile/assets/i18n/pcm.json
 --- a/mobile/assets/i18n/pcm.json
 +++ b/mobile/assets/i18n/pcm.json
-@@ -29,7 +29,7 @@
-   "pins.title": "Your safety PIN",
-   "pins.cancel_label": "Cancel PIN",
-   "pins.cancel_help": "Stops the alert.",
+@@ -13,7 +13,7 @@
+   "otp.sent_to": "We don send code go {phone}",
+   "otp.verify": "Confirm",
+   "otp.format": "The code na 6 numbers. Check am, try again.",
+-  "otp.invalid": "The code no correct or e don expire.",
++  "otp.invalid": "That one no be the newest code. Ask Telegram for a new code and type the latest one.",
+   "contacts.title": "Emergency people",
+   "contacts.help": "Dis people dey get your alert. Dem go ask each one make e accept. Person wey refuse no go dey get your alert again.",
+   "contacts.add": "Add person",
+@@ -26,7 +26,7 @@
+   "pins.confirm_label": "Confirm PIN",
+   "pins.mismatch": "The two PIN no match.",
+   "pins.must_differ": "The two PIN must different.",
 -  "pins.format": "PIN must be 4 to 8 numbers.",
-+  "pins.format": "PIN must be 4 numbers.",
-   "pins.mismatch": "The two PINs do not match.",
-   "pins.must_differ": "The two PINs must be different.",
++  "pins.format": "Your PIN must be 4 numbers.",
+   "perm.title": "Make Sentri work even when phone lock",
+   "perm.location": "Location, all the time",
+   "perm.notifications": "Notifications",
 diff --git a/mobile/assets/i18n/yo.json b/mobile/assets/i18n/yo.json
 --- a/mobile/assets/i18n/yo.json
 +++ b/mobile/assets/i18n/yo.json
-@@ -29,7 +29,7 @@
-   "pins.title": "PIN tuntun rẹ",
-   "pins.cancel_label": "PIN kankan",
-   "pins.cancel_help": "Ṣe alaye àwọn àgbáyè rẹ jẹ́ kí ó jẹ́ kíkọ.",
+@@ -13,7 +13,7 @@
+   "otp.sent_to": "A ti fi kóòdù ránṣẹ́ sí {phone}",
+   "otp.verify": "Jẹ́rìísí",
+   "otp.format": "Koodu na ni nomba mefa. Sayewo ki o tun gbiyanju.",
+-  "otp.invalid": "Kóòdù náà kò tọ̀nà tàbí ó ti parí.",
++  "otp.invalid": "Kíìdí yìí kìí ṣe alámùtuntun. Gba kíìdí tuntun láti Telegram, tí ó sì tẹ tí ó tuntun jùlọ.",
+   "contacts.title": "Àwọn olùkàn sí pàjáwìrì",
+   "contacts.help": "Àwọn ènìyàn wọ̀nyí ni wọ́n ń gba ìkìlọ̀ rẹ. A ń béèrè lọ́wọ́ ẹnìkọ̀ọ̀kan láti gbà. Ẹni tó bá kọ̀ kò ní gba ìkìlọ̀ rẹ mọ́.",
+   "contacts.add": "Fi olùbásọ̀rọ̀ kún",
+@@ -26,7 +26,7 @@
+   "pins.confirm_label": "Jẹ́rìí PIN",
+   "pins.mismatch": "PIN méjèèjì kò bára mu.",
+   "pins.must_differ": "PIN méjèèjì gbọ́dọ̀ yàtọ̀.",
 -  "pins.format": "PIN gbọ́dọ̀ jẹ́ nọ́ńbà mẹ́rin sí mẹ́jọ.",
-+  "pins.format": "PIN gbọ́dọ̀ jẹ́ nọ́ńbà mẹ́rin.",
++  "pins.format": "PIN rẹ gbọdọ̀ jẹ́ nọ́ńbà mẹ́rin.",
+   "perm.title": "Jẹ́ kí Sentri ṣiṣẹ́ nígbà tí fóònù rẹ bá wà ní títì",
+   "perm.location": "Ibi tí o wà, nígbà gbogbo",
+   "perm.notifications": "Àwọn ìkìlọ̀",
