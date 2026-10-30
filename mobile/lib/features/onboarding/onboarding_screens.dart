@@ -125,6 +125,14 @@ class _PhoneStep extends StatefulWidget {
 
 class _PhoneStepState extends State<_PhoneStep> {
   final _ctl = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    // If the server forgot the session, start with the number they used last time filled in.
+    _ctl.text = widget.c.settings.lastPhone;
+  }
+
   @override
   void dispose() {
     _ctl.dispose();
@@ -351,7 +359,7 @@ class _PinsStepState extends State<_PinsStep> {
   Widget _field(BuildContext context, TextEditingController c, String label, String? help) => Padding(
         padding: const EdgeInsets.only(bottom: 16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          PillField(controller: c, label: label, keyboardType: TextInputType.number, obscure: true, maxLength: 8, inputFormatters: _digitFormatters),
+          PillField(controller: c, label: label, keyboardType: TextInputType.number, obscure: true, maxLength: 4, inputFormatters: _digitFormatters),
           if (help != null) Padding(padding: const EdgeInsets.only(left: 8, top: 4), child: Text(help, style: Theme.of(context).textTheme.bodySmall)),
         ]),
       );

@@ -145,6 +145,8 @@ class OnboardingController extends ChangeNotifier {
       devCode = r.devCode;
       telegramUrl = r.telegramUrl;
       phone = p;
+      // Remember it: if the server later forgets the session, the phone step starts filled in.
+      await settings.update(lastPhone: p);
       resendAt = DateTime.now().add(const Duration(seconds: 30));
       _go(OnboardingStep.otp);
       // Show the code screen first, then hand over to Telegram. If Telegram cannot be opened the person is
@@ -245,7 +247,7 @@ class OnboardingController extends ChangeNotifier {
     final rnd = Random.secure();
     var unused = '';
     do {
-      unused = List.generate(8, (_) => rnd.nextInt(10)).join();
+      unused = List.generate(4, (_) => rnd.nextInt(10)).join();
     } while (unused == cancelPin);
     await _run(() async {
       await api.savePins(cancelPin: cancelPin, duressPin: unused);

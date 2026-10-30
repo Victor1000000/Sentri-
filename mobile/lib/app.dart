@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'core/theme.dart';
 import 'core/widgets/brand.dart';
 import 'core/widgets/glass.dart';
-import 'core/widgets/waking_banner.dart';
 import 'package:flutter/services.dart' show rootBundle;
 
 import 'features/home/home_screen.dart';
@@ -106,16 +105,7 @@ class _RootState extends State<_Root> {
             },
           ),
         ),
-        // While a sleeping server wakes up, say so: the wait is not a fault.
-        Positioned(
-          top: 0,
-          left: 0,
-          right: 0,
-          child: ListenableBuilder(
-            listenable: s.i18n,
-            builder: (context, _) => WakingBanner(waking: s.waking, message: s.i18n.t('net.waking')),
-          ),
-        ),
+
       ],
     );
   }

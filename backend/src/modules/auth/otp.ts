@@ -14,6 +14,8 @@ export interface OtpRecord {
 export interface OtpStore {
   create(c: { id: string; phoneHmac: Buffer; codeHash: Buffer; createdAt: number; expiresAt: number }): Promise<void>;
   latest(phoneHmac: Buffer): Promise<OtpRecord | null>;
+  /** The `count` most recent challenges still open (unconsumed, unexpired) for one phone, newest first. */
+  recentOpen(phoneHmac: Buffer, nowMs: number, count: number): Promise<OtpRecord[]>;
   /** Adds one guess and returns the new total. Must be atomic, so guesses sent together can't each see the old count. */
   bumpAttempts(id: string): Promise<number>;
   /** Marks consumed; false if it was already consumed (so a code can't be used twice). */
@@ -84,18 +86,34 @@ export class OtpService {
     });
   }
 
-  /** True only for the latest, unexpired, unconsumed challenge with the right code. */
+  /** The named number's newest, unexpired, unconsumed challenge with the right code: counts the guess BEFORE
+   * checking it, so guesses sent together each get their own count. */
   async verify(phone: string, code: string): Promise<boolean> {
     const now = this.clock();
-    const rec = await this.store.latest(this.fc.blindIndex(phone));
-    if (!rec || rec.consumedAt || rec.expiresAt <= now || rec.attempts >= this.opts.maxAttempts) return false;
-    // Count the guess BEFORE checking it, and act on the new total. Guesses sent at the same moment each get
-    // their own number, so only the first few are ever compared, whatever the timing.
-    if ((await this.store.bumpAttempts(rec.id)) > this.opts.maxAttempts) return false;
     if (!/^\d{6}$/.test(code)) return false;
-    const given = this.hashCode(rec.id, code);
-    if (given.length !== rec.codeHash.length || !timingSafeEqual(given, rec.codeHash)) return false;
-    return this.store.consume(rec.id, now);
+    const latest = await this.store.latest(this.fc.blindIndex(phone));
+    if (
+      latest && !latest.consumedAt && latest.expiresAt > now && latest.attempts < this.opts.maxAttempts &&
+      (await this.store.bumpAttempts(latest.id)) <= this.opts.maxAttempts
+    ) {
+      const given = this.hashCode(latest.id, code);
+      if (given.length === latest.codeHash.length && timingSafeEqual(given, latest.codeHash)) {
+        return this.store.consume(latest.id, now);
+      }
+    }
+    // Telegram replaces a code when "Share my number" is tapped again, so the code being typed may be one
+    // challenge old. Try this number's other open codes; each record keeps its own guess count. A code made
+    // for one number still cannot sign in another: the records here all share the caller's phone HMAC.
+    // Guesses stay bounded: 6 digits, a 5-minute life, and the per-IP limiter on the route.
+    for (const rec of await this.store.recentOpen(this.fc.blindIndex(phone), now, 20)) {
+      if (latest && rec.id === latest.id) continue;
+      if (rec.attempts >= this.opts.maxAttempts) continue;
+      const given = this.hashCode(rec.id, code);
+      if (given.length === rec.codeHash.length && timingSafeEqual(given, rec.codeHash)) {
+        return this.store.consume(rec.id, now);
+      }
+    }
+    return false;
   }
 }
 
@@ -124,5 +142,12 @@ export class MemoryOtpStore implements OtpStore {
   }
   async countSince(phoneHmac: Buffer, sinceMs: number): Promise<number> {
     return this.rows.filter((r) => r.phoneHmac.equals(phoneHmac) && r.createdAt >= sinceMs).length;
+  }
+
+  async recentOpen(phoneHmac: Buffer, nowMs: number, count: number): Promise<OtpRecord[]> {
+    return this.rows
+      .filter((r) => r.phoneHmac.equals(phoneHmac) && !r.consumedAt && r.expiresAt > nowMs)
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, count);
   }
 }

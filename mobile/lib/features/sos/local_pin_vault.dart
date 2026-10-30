@@ -28,7 +28,7 @@ class LocalPinVault {
 
   static const _kPins = 'pin.v1';
   static const _kGuard = 'pin.guard.v1';
-  static final _format = RegExp(r'^\d{4,8}$');
+  static final _format = RegExp(r'^\d{4}$');
 
   static bool isValidFormat(String pin) => _format.hasMatch(pin);
 
@@ -40,7 +40,7 @@ class LocalPinVault {
   }
 
   Future<void> save(String cancelPin, String duressPin) async {
-    if (!isValidFormat(cancelPin) || !isValidFormat(duressPin)) throw ArgumentError('PIN must be 4 to 8 digits');
+    if (!isValidFormat(cancelPin) || !isValidFormat(duressPin)) throw ArgumentError('PIN must be 4 digits');
     if (cancelPin == duressPin) throw ArgumentError('PINs must differ');
     final rnd = Random.secure();
     final saltC = List<int>.generate(16, (_) => rnd.nextInt(256));

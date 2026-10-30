@@ -209,4 +209,17 @@ export class PgUserRepo implements UserRepo, OtpStore {
     ]);
     return r.rows[0].n;
   }
+
+  async recentOpen(phoneHmac: Buffer, nowMs: number, count: number): Promise<OtpRecord[]> {
+    const r = await this.pool.query(
+      'SELECT id, code_hash, attempts, expires_at FROM otp_challenges WHERE phone_hmac = $1 AND consumed_at IS NULL AND expires_at > $2 ORDER BY created_at DESC LIMIT $3',
+      [phoneHmac, nowMs, count],
+    );
+    return r.rows.map((row) => ({
+      id: row.id,
+      codeHash: row.code_hash,
+      attempts: row.attempts,
+      expiresAt: Number(row.expires_at),
+    }));
+  }
 }

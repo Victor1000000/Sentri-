@@ -172,8 +172,10 @@ class AppServices {
     final pending = await bridge.takePendingTrigger();
     if (pending != null) unawaited(sos.trigger(pending.name));
 
+    // Protection is the app's whole purpose: the triggers stay armed even when the session has
+    // slipped (for example after the server restarted), so help always works.
+    await bridge.startProtection(settings.triggers);
     if (settings.onboarded) {
-      await bridge.startProtection(settings.triggers);
       lowBattery.start();
       unawaited(_push.start());
       unawaited(inbox.refresh());
@@ -190,7 +192,7 @@ class AppServices {
     if (Platform.isIOS) {
       final detector = ShakeDetector();
       _accel = accelerometerEventStream().listen((e) {
-        if (settings.triggers.shake && settings.onboarded && detector.addSample(e.x, e.y, e.z, DateTime.now())) {
+        if (settings.triggers.shake && detector.addSample(e.x, e.y, e.z, DateTime.now())) {
           unawaited(sos.trigger('shake'));
         }
       });

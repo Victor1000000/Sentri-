@@ -125,13 +125,13 @@ describe('OTP service', () => {
     expect(await t.otp.verify(PHONE, c)).toBe(false);
   });
 
-  it('only the newest code works', async () => {
+  it('an older unexpired code still works, because Telegram replaces codes when asked again', async () => {
     const t = setup();
     await t.otp.request(PHONE);
     const first = t.code();
     await t.otp.request(PHONE);
     const second = t.code();
-    if (first !== second) expect(await t.otp.verify(PHONE, first)).toBe(false);
+    if (first !== second) expect(await t.otp.verify(PHONE, first)).toBe(true);
     expect(await t.otp.verify(PHONE, second)).toBe(true);
   });
 

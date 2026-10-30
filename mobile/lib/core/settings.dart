@@ -14,6 +14,10 @@ class AppSettings extends ChangeNotifier {
   TriggerSettings triggers = const TriggerSettings();
   bool dataSaver = false;
 
+  /// Their phone number from the last time they set up or signed in. When the server forgets a
+  /// session and the person has to sign in again, the phone step starts with this number filled in.
+  String lastPhone = '';
+
   bool onboarded = false;
   String language = 'en';
 
@@ -32,6 +36,7 @@ class AppSettings extends ChangeNotifier {
       shakeSensitivity: (j['sens'] as num?)?.toDouble() ?? 1.0,
     );
     dataSaver = j['dataSaver'] as bool? ?? false;
+    lastPhone = j['lastPhone'] as String? ?? '';
     onboarded = j['onboarded'] as bool? ?? false;
     language = j['lang'] as String? ?? 'en';
     theme = j['theme'] as String? ?? 'system';
@@ -40,12 +45,14 @@ class AppSettings extends ChangeNotifier {
   Future<void> update({
     TriggerSettings? triggers,
     bool? dataSaver,
+    String? lastPhone,
     bool? onboarded,
     String? language,
     String? theme,
   }) async {
     this.triggers = triggers ?? this.triggers;
     this.dataSaver = dataSaver ?? this.dataSaver;
+    this.lastPhone = lastPhone ?? this.lastPhone;
     this.onboarded = onboarded ?? this.onboarded;
     this.language = language ?? this.language;
     this.theme = theme ?? this.theme;
@@ -58,6 +65,7 @@ class AppSettings extends ChangeNotifier {
         'floating': this.triggers.floating,
         'sens': this.triggers.shakeSensitivity,
         'dataSaver': this.dataSaver,
+        'lastPhone': this.lastPhone,
         'onboarded': this.onboarded,
         'lang': this.language,
         'theme': this.theme,
