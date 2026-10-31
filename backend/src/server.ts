@@ -103,8 +103,14 @@ if (env.STORE === 'postgres') {
   directory = new PgDirectory(pool);
   users = repo;
   otpStore = repo;
-  bull = new BullScheduler(createRedis(env.REDIS_URL!), log);
-  scheduler = bull;
+  if (env.REDIS_URL) {
+    // The queue only drives the SOS repeat/offline timers; rate limits are already in-memory.
+    bull = new BullScheduler(createRedis(env.REDIS_URL), log);
+    scheduler = bull;
+  } else {
+    // No Redis: the same timers run in-process. Alerts still deliver; timers restart fresh on boot.
+    scheduler = new TimerScheduler((e) => log.error({ err: e instanceof Error ? e.message : 'unknown' }, 'job failed'));
+  }
 } else {
   memoryStore = new MemorySosStore();
   store = memoryStore;

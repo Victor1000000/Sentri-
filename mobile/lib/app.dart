@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'core/theme.dart';
@@ -124,14 +126,18 @@ class _Tabs extends StatefulWidget {
 class _TabsState extends State<_Tabs> {
   int _tab = 0;
   PoliceDirectory? _directory;
+  Future<PoliceDirectory>? _directoryFuture;
   String? _state;
 
   @override
   void initState() {
     super.initState();
-    rootBundle.loadString('assets/directory/police_directory.json').then((raw) {
-      if (mounted) setState(() => _directory = PoliceDirectory.parse(raw));
-    });
+    // The same parsed directory backs the Police tab and aims the map's directions at the closest
+    // command's post. Loading it once here keeps both users on one parse.
+    _directoryFuture = rootBundle.loadString('assets/directory/police_directory.json').then((raw) => PoliceDirectory.parse(raw));
+    unawaited(_directoryFuture!.then((d) {
+      if (mounted) setState(() => _directory = d);
+    }));
   }
 
   @override
@@ -139,7 +145,7 @@ class _TabsState extends State<_Tabs> {
     final s = widget.services;
     final t = s.i18n.t;
     final body = switch (_tab) {
-      1 => MapScreen(location: s.location, api: s.api, i18n: s.i18n, placeLookup: const DevicePlaceLookup(), onPlace: (p) => _state = p?.state),
+      1 => MapScreen(location: s.location, api: s.api, i18n: s.i18n, placeLookup: const DevicePlaceLookup(), onPlace: (p) => _state = p?.state, police: _directoryFuture),
       2 => PoliceScreen(directory: _directory, i18n: s.i18n, currentState: _state),
       _ => HomeScreen(sos: s.sos, settings: s.settings, i18n: s.i18n, bridge: s.bridge, api: s.api, inbox: s.inbox, share: s.share, police: s.police),
     };

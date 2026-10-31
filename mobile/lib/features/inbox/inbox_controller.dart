@@ -23,6 +23,10 @@ class InboxController extends ChangeNotifier {
   bool loading = false;
   bool failed = false;
 
+  /// True when the last refresh failed because this phone's session is no longer valid (401).
+  /// The screen then asks the person to sign in again instead of blaming the connection.
+  bool failedAuth = false;
+
   InboxList get data => _data;
   int get unread => _data.unread + _data.invites.length;
 
@@ -39,6 +43,7 @@ class InboxController extends ChangeNotifier {
     try {
       _data = await api.inbox();
       failed = false;
+      failedAuth = false;
       for (final e in _data.items) {
         if (e.urgent && e.state != 'active') unawaited(onOver?.call(e.id));
         // Only recent, still-unanswered emergencies ring again; the push may already have rung this phone.
@@ -46,8 +51,9 @@ class InboxController extends ChangeNotifier {
           unawaited(onUrgent?.call(e));
         }
       }
-    } catch (_) {
+    } catch (e) {
       failed = true;
+      failedAuth = e is ApiHttpError && e.status == 401;
     }
     loading = false;
     notifyListeners();

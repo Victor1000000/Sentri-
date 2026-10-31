@@ -73,7 +73,7 @@ class InboxScreen extends StatelessWidget {
             if (d.items.isEmpty && !inbox.loading)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 48),
-                child: Text(inbox.failed ? t('inbox.failed') : t('inbox.none'), textAlign: TextAlign.center, style: TextStyle(fontSize: 15, color: Flat.muted(context))),
+                child: Text(inbox.failed ? (inbox.failedAuth ? t('inbox.need_signin') : t('inbox.failed')) : t('inbox.none'), textAlign: TextAlign.center, style: TextStyle(fontSize: 15, color: Flat.muted(context))),
               )
             else
               FlatGroup(children: [for (final e in d.items) _tile(context, e)]),

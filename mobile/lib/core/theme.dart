@@ -67,6 +67,9 @@ ThemeData sentriTheme(Brightness b) {
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
         backgroundColor: const Color(0xFF0E08A3),
+        // The scheme picks a dark label when the app is dark, which disappeared on this dark
+        // button. White always reads on it, light and dark alike.
+        foregroundColor: Colors.white,
         minimumSize: const Size.fromHeight(52),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
         textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
@@ -80,7 +83,7 @@ ThemeData sentriTheme(Brightness b) {
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: dark ? const Color(0xFF1D2328) : Colors.white,
+      fillColor: dark ? const Color(0xFF1A1948) : Colors.white,
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(30), borderSide: BorderSide(color: base.outlineVariant)),
       enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(30), borderSide: BorderSide(color: base.outlineVariant)),
     ),

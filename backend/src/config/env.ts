@@ -96,8 +96,11 @@ export const EnvSchema = z
     OTP_DEV_ECHO: bool,
   })
   .superRefine((v, ctx) => {
+    // REDIS_URL stays optional on the permanent database: without it the SOS repeat/offline timers
+    // run in-process instead of in a queue. Sign-ups, alerts and sessions still live in Postgres, so
+    // a restart or a new deploy keeps every device signed in. Only the queued timers fall back.
     if (v.STORE === 'postgres') {
-      for (const k of ['DATABASE_URL', 'REDIS_URL', 'JWT_SECRET', 'DATA_KEY', 'PHONE_HMAC_KEY'] as const) {
+      for (const k of ['DATABASE_URL', 'JWT_SECRET', 'DATA_KEY', 'PHONE_HMAC_KEY'] as const) {
         if (!v[k]) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [k], message: `${k} is required when STORE=postgres` });
       }
     }
