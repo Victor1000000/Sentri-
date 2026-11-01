@@ -1,0 +1,76 @@
+diff --git a/mobile/lib/features/home/home_screen.dart b/mobile/lib/features/home/home_screen.dart
+--- a/mobile/lib/features/home/home_screen.dart
++++ b/mobile/lib/features/home/home_screen.dart
+@@ -104,7 +104,16 @@
+                   ),
+                 ),
+                 const SizedBox(height: 20),
+-                Row(mainAxisAlignment: MainAxisAlignment.center, children: [
++                  Padding(
++                    padding: const EdgeInsets.symmetric(horizontal: 26),
++                    child: Text(
++                      t('home.hero'),
++                      textAlign: TextAlign.center,
++                      style: const TextStyle(fontSize: 17.5, height: 1.35, fontWeight: FontWeight.w800, letterSpacing: -0.2),
++                    ),
++                  ),
++                  const SizedBox(height: 16),
++                  Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                   Container(width: 8, height: 8, decoration: BoxDecoration(shape: BoxShape.circle, color: Theme.of(context).colorScheme.tertiary)),
+                   const SizedBox(width: 8),
+                   Text(t('home.protected'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
+diff --git a/mobile/assets/i18n/en.json b/mobile/assets/i18n/en.json
+--- a/mobile/assets/i18n/en.json
++++ b/mobile/assets/i18n/en.json
+@@ -36,6 +36,7 @@
+   "perm.on": "On",
+   "perm.finish": "Finish setup",
+   "home.protected": "Protection is on",
++  "home.hero": "One hidden move. Your people already know where.",
+   "home.hold": "Hold to send alert",
+   "home.hold_help": "Hold for 1 second. You can also shake the phone, use the volume buttons, or the floating button.",
+   "triggers.title": "Ways to call for help",
+diff --git a/mobile/assets/i18n/ha.json b/mobile/assets/i18n/ha.json
+--- a/mobile/assets/i18n/ha.json
++++ b/mobile/assets/i18n/ha.json
+@@ -36,6 +36,7 @@
+   "perm.on": "A kunne",
+   "perm.finish": "Gama saiti",
+   "home.protected": "Kariya tana kunne",
++  "home.hero": "Motsi daya a boye. Mutanenka sun riga sun san inda ka ke.",
+   "home.hold": "Danna ka riƙe don aika gargaɗi",
+   "home.hold_help": "Riƙe na daƙiƙa 1. Kuma za ka iya girgiza waya, ko danna maɓallan ƙara, ko amfani da maɓallin shawagi.",
+   "triggers.title": "Hanyoyin neman taimako",
+diff --git a/mobile/assets/i18n/ig.json b/mobile/assets/i18n/ig.json
+--- a/mobile/assets/i18n/ig.json
++++ b/mobile/assets/i18n/ig.json
+@@ -36,6 +36,7 @@
+   "perm.on": "Agbanyere",
+   "perm.finish": "Mechaa nhazi",
+   "home.protected": "Nchekwa agbanyere",
++  "home.hero": "Ntu gharị otu ezoro ezo. Ndị gị amaala ebe ị nọ.",
+   "home.hold": "Jide ka ị zipu ọkwa",
+   "home.hold_help": "Jide otu sekọnd. Ị nwekwara ike ịmaa ekwentị, pịa bọtịnụ olu, ma ọ bụ jiri bọtịnụ na-ese n'elu.",
+   "triggers.title": "Ụzọ isi kpọọ enyemaka",
+diff --git a/mobile/assets/i18n/pcm.json b/mobile/assets/i18n/pcm.json
+--- a/mobile/assets/i18n/pcm.json
++++ b/mobile/assets/i18n/pcm.json
+@@ -36,6 +36,7 @@
+   "perm.on": "On",
+   "perm.finish": "Finish",
+   "home.protected": "Protection dey on",
++  "home.hero": "One hidden move. Your people don already sabi where you dey.",
+   "home.hold": "Hold to send alert",
+   "home.hold_help": "Hold for 1 second. You fit also shake phone, press volume button, or use the floating button.",
+   "triggers.title": "Ways to call for help",
+diff --git a/mobile/assets/i18n/yo.json b/mobile/assets/i18n/yo.json
+--- a/mobile/assets/i18n/yo.json
++++ b/mobile/assets/i18n/yo.json
+@@ -36,6 +36,7 @@
+   "perm.on": "Ó wà ní títan",
+   "perm.finish": "Parí ìṣètò",
+   "home.protected": "Ààbò wà ní títan",
++  "home.hero": "Ìfaradà kan tí a fi pamọ́. Àwọn ènìyàn rẹ ti mọ ibi tí o wà.",
+   "home.hold": "Dì mú láti fi ìkìlọ̀ ránṣẹ́",
+   "home.hold_help": "Dì mú fún ìṣẹ́jú-àáyá kan. O tún lè mi fóònù, tẹ bọ́tìnì ìró, tàbí lo bọ́tìnì tó ń léfòó.",
+   "triggers.title": "Àwọn ọ̀nà láti pe ìrànlọ́wọ́",
