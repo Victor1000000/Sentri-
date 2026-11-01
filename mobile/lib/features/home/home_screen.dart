@@ -104,7 +104,16 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   ),
                 ),
                 const SizedBox(height: 20),
-                Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 26),
+                    child: Text(
+                      t('home.hero'),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 17.5, height: 1.35, fontWeight: FontWeight.w800, letterSpacing: -0.2),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                   Container(width: 8, height: 8, decoration: BoxDecoration(shape: BoxShape.circle, color: Theme.of(context).colorScheme.tertiary)),
                   const SizedBox(width: 8),
                   Text(t('home.protected'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
