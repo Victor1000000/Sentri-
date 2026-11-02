@@ -1,0 +1,1048 @@
+diff --git a/mobile/lib/features/map/map_screen.dart b/mobile/lib/features/map/map_screen.dart
+--- a/mobile/lib/features/map/map_screen.dart
++++ b/mobile/lib/features/map/map_screen.dart
+@@ -3,7 +3,7 @@
+ 
+ import 'package:flutter/material.dart';
+ import 'package:flutter_map/flutter_map.dart';
+-import 'package:geolocator/geolocator.dart' show Geolocator;
++import 'package:geolocator/geolocator.dart' show Geolocator, Position, LocationSettings, LocationAccuracy;
+ import 'package:latlong2/latlong.dart';
+ import 'package:url_launcher/url_launcher.dart';
+ import 'package:http/http.dart' as http;
+@@ -15,16 +15,21 @@
+ import '../location/place_lookup.dart';
+ import '../police/nearest_police.dart';
+ import '../police/police_directory.dart';
++import 'nearby_places.dart';
++import 'step_voice.dart';
+ 
+ /// One planned route from the router: the line to draw, what it costs, and the step texts.
+ class _RoutePlan {
+-  const _RoutePlan({required this.points, required this.dest, required this.destName, required this.km, required this.mins, required this.stepTexts});
++  const _RoutePlan({required this.points, required this.dest, required this.destName, required this.km, required this.mins, required this.stepTexts, required this.stepLocs, required this.stepSay});
+   final List<LatLng> points;
+   final LatLng dest;
+   final String destName;
+   final double km;
+   final int mins;
+   final List<String> stepTexts;
++  /// Where each instruction happens (the maneuver point), so the voice can speak it on approach.
++  final List<LatLng> stepLocs;
++  final List<String> stepSay;
+   String get kmText => km >= 10 ? km.round().toString() : km.toStringAsFixed(1);
+   String get minText => '$mins';
+ }
+@@ -32,13 +37,13 @@
+ /// Shows where the user is, on OpenStreetMap tiles, with the street, area, LGA and state.
+ /// The place name is a convenience: if the lookup fails the coordinates still show.
+ class MapScreen extends StatefulWidget {
+-  const MapScreen({super.key, required this.location, required this.api, required this.i18n, this.placeLookup, this.onPlace, this.refresh = const Duration(seconds: 10), this.police});
++  const MapScreen({super.key, required this.location, required this.api, required this.i18n, this.placeLookup, this.onPlace, this.refresh = const Duration(seconds: 6), this.police});
+   final LocationSource location;
+   final SentriApi api;
+   final I18n i18n;
+ 
+-  /// The police commands, parsed once by the app shell. The directions button aims at the closest
+-  /// command's post. Null: the button then stays disabled.
++  /// The police commands, parsed once by the app shell. With no points picked, directions aim
++  /// at the closest command's post. Null: the button then stays disabled.
+   final Future<PoliceDirectory>? police;
+ 
+   /// The phone's own place lookup, tried first. The server is the fallback.
+@@ -52,6 +57,7 @@
+ 
+ class _MapScreenState extends State<MapScreen> {
+   final _map = MapController();
++  final _voice = StepVoice();
+   GeoFix? _fix;
+   Place? _place;
+   bool _denied = false;
+@@ -63,6 +69,23 @@
+   String? _routeError;
+   int _routeSeq = 0;
+ 
++  // -- picked points: directions work between any two spots on the map --
++  LatLng? _fromPick;
++  String? _fromName;
++  LatLng? _toPick;
++  String? _toName;
++  String? _pickMode; // 'from' | 'to' while waiting for a long-press
++
++  // -- spoken turn-by-turn --
++  bool _voiceOn = false;
++  int _nextStep = 0;
++  StreamSubscription<Position>? _posSub;
++
++  // -- what is around --
++  List<NearbyPlace> _near = const <NearbyPlace>[];
++  bool _nearBusy = false;
++  LatLng? _nearFetchedAt;
++
+   @override
+   void initState() {
+     super.initState();
+@@ -73,6 +96,8 @@
+   @override
+   void dispose() {
+     _timer?.cancel();
++    unawaited(_posSub?.cancel());
++    unawaited(_voice.stop());
+     _map.dispose();
+     super.dispose();
+   }
+@@ -89,7 +114,7 @@
+         if (!mounted) return;
+         if (quick != null) _apply(quick);
+       }
+-      final f = await widget.location.preciseFix(timeout: const Duration(seconds: 20));
++      final f = await widget.location.preciseFix(timeout: const Duration(seconds: 25));
+       if (!mounted) return;
+       if (f == null) {
+         if (_fix == null) setState(() => _denied = true);
+@@ -117,6 +142,11 @@
+       _lastLookedUp = here;
+       unawaited(_lookupPlace(f.lat, f.lon));
+     }
++    // Refresh the nearby list only after walking/driving far enough for it to matter.
++    if (_nearFetchedAt == null || const Distance()(_nearFetchedAt!, here) > 300) {
++      _nearFetchedAt = here;
++      unawaited(_fetchNearby(here));
++    }
+   }
+ 
+   /// The phone's own lookup first (the same names Google Maps shows), then the server.
+@@ -144,70 +174,304 @@
+     widget.onPlace?.call(_place);
+   }
+ 
++  /// A short name for a dropped point: the street or area, else plain "point".
++  Future<String> _pointName(double lat, double lon) async {
++    final t = widget.i18n.t;
++    final lookup = widget.placeLookup;
++    if (lookup != null) {
++      try {
++        final p = await lookup.lookup(lat, lon);
++        final name = p?.street ?? p?.area;
++        if (name != null && name.isNotEmpty) return name;
++      } catch (_) {}
++    }
++    try {
++      final p = await widget.api.reverseGeocode(lat, lon);
++      final name = p?.street ?? p?.area;
++      if (name != null && name.isNotEmpty) return name;
++    } catch (_) {}
++    return t('map.dropped');
++  }
++
++  // ---- nearby places ----
++
++  Future<void> _fetchNearby(LatLng here) async {
++    if (_nearBusy) return;
++    _nearBusy = true;
++    try {
++      final list = await NearbyPlaces.fetch(here);
++      list.sort((a, b) {
++        final d = const Distance();
++        return d(here, LatLng(a.lat, a.lon)).compareTo(d(here, LatLng(b.lat, b.lon)));
++      });
++      if (!mounted) return;
++      setState(() => _near = list.take(25).toList());
++    } catch (_) {
++      // The map stays useful without the list.
++    } finally {
++      _nearBusy = false;
++    }
++  }
++
++  void _showNearby() {
++    final t = widget.i18n.t;
++    final cs = Theme.of(context).colorScheme;
++    final here = _fix == null ? null : LatLng(_fix!.lat, _fix!.lon);
++    showModalBottomSheet<void>(
++      context: context,
++      showDragHandle: true,
++      builder: (ctx) => SafeArea(
++        child: _near.isEmpty
++            ? Padding(
++                padding: const EdgeInsets.all(22),
++                child: Text(t('map.nearby_none'), style: TextStyle(fontSize: 15, height: 1.35, color: cs.onSurface)),
++              )
++            : ListView.builder(
++                shrinkWrap: true,
++                itemCount: _near.length,
++                itemBuilder: (ctx, i) {
++                  final p = _near[i];
++                  final m = here == null ? null : const Distance()(here, LatLng(p.lat, p.lon)).round();
++                  return ListTile(
++                    dense: true,
++                    leading: Icon(_nearIcon(p.kind), size: 22, color: const Color(0xFF6A5FF0)),
++                    title: Text(p.name, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
++                    subtitle: Text(m == null ? p.kind : '${p.kind} - ${t('map.nearby_far', {'m': '$m'})}', style: TextStyle(fontSize: 12.5, color: cs.outline)),
++                    onTap: () {
++                      Navigator.of(ctx).pop();
++                      try {
++                        _map.move(LatLng(p.lat, p.lon), _map.camera.zoom < 17 ? 18 : _map.camera.zoom);
++                      } catch (_) {}
++                    },
++                  );
++                },
++              ),
++      ),
++    );
++  }
++
++  IconData _nearIcon(String kind) {
++    switch (kind) {
++      case 'hotel':
++        return Icons.hotel_outlined;
++      case 'gym':
++        return Icons.fitness_center;
++      case 'market' || 'shop' || 'store':
++        return Icons.storefront_outlined;
++      case 'hospital':
++        return Icons.local_hospital_outlined;
++      case 'police':
++        return Icons.local_police_outlined;
++      case 'petrol':
++        return Icons.local_gas_station_outlined;
++      case 'bank' || 'atm':
++        return Icons.account_balance_outlined;
++      case 'restaurant' || 'cafe' || 'bar' || 'food' || 'pub':
++        return Icons.restaurant_outlined;
++      case 'pharmacy':
++        return Icons.medication_outlined;
++      case 'school' || 'university':
++        return Icons.school_outlined;
++      case 'fuel':
++        return Icons.local_gas_station_outlined;
++      case 'park':
++        return Icons.park_outlined;
++      case 'cinema':
++        return Icons.movie_outlined;
++      case 'library':
++        return Icons.local_library_outlined;
++      default:
++        return Icons.place_outlined;
++    }
++  }
++
+   // ---- directions and street view ----
+ 
+-  /// Show or clear the route to the closest police command's post. The route comes from the open
+-  /// OSRM router: free, no key, drawn straight from the answer. Undoing is a second tap.
++  /// Folds an OSRM route answer into a drawable, speakable plan. Used as it is, free, no key.
++  static _RoutePlan _buildPlan(Map<String, dynamic> r, LatLng dest, String destName) {
++    final coords = ((r['geometry'] as Map<String, dynamic>)['coordinates'] ?? const <dynamic>[]) as List<dynamic>;
++    final points = [for (final c in coords) LatLng((c as List<dynamic>)[1] as double, c[0] as double)];
++    final km = (r['distance'] as num).toDouble() / 1000.0;
++    final mins = (((r['duration'] as num).toDouble()) / 60).round();
++    final leg = (r['legs'] as List<dynamic>).first as Map<String, dynamic>;
++    final stepTexts = <String>[];
++    final stepSay = <String>[];
++    final stepLocs = <LatLng>[];
++    for (final raw in (leg['steps'] ?? const <dynamic>[]) as List<dynamic>) {
++      final s = raw as Map<String, dynamic>;
++      final m = s['maneuver'] as Map<String, dynamic>;
++      final type = '${m['type']}';
++      final modifier = m['modifier'] == null ? '' : '${m['modifier']}';
++      final road = (s['name'] == null || '${s['name']}'.isEmpty) ? '' : ' to ${s['name']}';
++      final metres = (s['distance'] as num).toDouble();
++      final dist = metres < 950 ? '${metres.round()} m' : '${(metres / 1000).toStringAsFixed(1)} km';
++      stepTexts.add('${_arrow(type, modifier)}$road - $dist');
++      stepSay.add(_sayFor(type, modifier, road, metres));
++      final loc = (m['location'] as List<dynamic>);
++      stepLocs.add(LatLng(loc[1] as double, loc[0] as double));
++    }
++    return _RoutePlan(points: points, dest: dest, destName: destName, km: km, mins: mins, stepTexts: stepTexts, stepLocs: stepLocs, stepSay: stepSay);
++  }
++
++  /// Turn-by-turn through both open OSRM routers and spoken instructions.
+   Future<void> _toggleRoute() async {
+     final t = widget.i18n.t;
+     if (_route != null) {
+-      setState(() { _route = null; _routeError = null; });
++      await _clearRoute();
+       return;
+     }
+     final f = _fix;
+     final dir = widget.police;
+-    if (f == null || dir == null) return;
++    final to = _toPick;
++    if (f == null) return;
++    if (to == null && dir == null) return;
+     final seq = ++_routeSeq;
+     setState(() { _routeBusy = true; _routeError = null; });
+     try {
+-      final d = await dir;
+-      final near = nearestPolice(d, f.lat, f.lon);
+-      if (near == null) {
+-        if (mounted) setState(() { _routeBusy = false; _routeError = t('police.none_found'); });
+-        return;
++      LatLng from;
++      LatLng dest;
++      String destName;
++      if (to != null) {
++        from = _fromPick ?? LatLng(f.lat, f.lon);
++        dest = to;
++        destName = _toName ?? t('map.dropped');
++      } else {
++        final d = await dir!;
++        final near = nearestPolice(d, f.lat, f.lon);
++        if (near == null) {
++          if (mounted) setState(() { _routeBusy = false; _routeError = t('police.none_found'); });
++          return;
++        }
++        final stateName = near.primary.command.state;
++        final centre = stateCentres[stateName]!;
++        from = LatLng(f.lat, f.lon);
++        dest = LatLng(centre.$1, centre.$2);
++        destName = t('map.to_police', {'state': stateName});
+       }
+-      final stateName = near.primary.command.state;
+-      final centre = stateCentres[stateName]!;
+-      final dest = LatLng(centre.$1, centre.$2);
+-      final url = 'https://router.project-osrm.org/route/v1/driving/${f.lon},${f.lat};${dest.longitude},${dest.latitude}?overview=full&geometries=geojson&steps=true';
++      final url = 'https://router.project-osrm.org/route/v1/driving/${from.longitude},${from.latitude};${dest.longitude},${dest.latitude}?overview=full&geometries=geojson&steps=true';
+       final res = await http.get(Uri.parse(url), headers: const { 'User-Agent': 'Sentri/0.1' });
+       if (res.statusCode != 200) throw StateError('osrm http ${res.statusCode}');
+       final j = jsonDecode(res.body) as Map<String, dynamic>;
+       final routes = (j['routes'] ?? const <dynamic>[]) as List<dynamic>;
+       if (routes.isEmpty) throw StateError('osrm empty route');
+-      final r = routes.first as Map<String, dynamic>;
+-      final coords = ((r['geometry'] as Map<String, dynamic>)['coordinates'] ?? const <dynamic>[]) as List<dynamic>;
+-      final points = [for (final c in coords) LatLng((c as List<dynamic>)[1] as double, c[0] as double)];
+-      final km = (r['distance'] as num).toDouble() / 1000.0;
+-      final mins = (((r['duration'] as num).toDouble()) / 60).round();
+-      final leg = (r['legs'] as List<dynamic>).first as Map<String, dynamic>;
+-      final stepTexts = <String>[];
+-      for (final raw in (leg['steps'] ?? const <dynamic>[]) as List<dynamic>) {
+-        final s = raw as Map<String, dynamic>;
+-        final m = s['maneuver'] as Map<String, dynamic>;
+-        final type = '${m['type']}';
+-        final modifier = m['modifier'] == null ? '' : '${m['modifier']}';
+-        final road = (s['name'] == null || '${s['name']}'.isEmpty) ? '' : ' to ${s['name']}';
+-        final metres = (s['distance'] as num).toDouble();
+-        final dist = metres < 950 ? '${metres.round()} m' : '${(metres / 1000).toStringAsFixed(1)} km';
+-        stepTexts.add('${_arrow(type, modifier)}$road - $dist');
+-      }
+-      final plan = _RoutePlan(
+-        points: points,
+-        dest: dest,
+-        destName: t('map.to_police', {'state': stateName}),
+-        km: km,
+-        mins: mins,
+-        stepTexts: stepTexts,
+-      );
++      final plan = _buildPlan(routes.first as Map<String, dynamic>, dest, destName);
+       if (!mounted || seq != _routeSeq) return;
+-      setState(() { _route = plan; _routeBusy = false; });
++      setState(() { _route = plan; _routeBusy = false; _nextStep = 0; });
++      if (_voiceOn) {
++        await _voice.say(plan.destName);
++        await _voice.say('${plan.kmText} , ${plan.mins} minutes');
++        _speakNext(plan);
++      }
++      try {
++        final c = _map.camera;
++        // Fit the whole route on screen once.
++        final latitudes = [for (final p in plan.points) p.latitude];
++        final longitudes = [for (final p in plan.points) p.longitude];
++        final north = latitudes.reduce((a, b) => a > b ? a : b);
++        final south = latitudes.reduce((a, b) => a < b ? a : b);
++        final east = longitudes.reduce((a, b) => a > b ? a : b);
++        final west = longitudes.reduce((a, b) => a < b ? a : b);
++        final centre = LatLng((north + south) / 2, (east + west) / 2);
++        final zoom = _fitZoom(south, north, c.zoom);
++        _map.move(centre, zoom.clamp(11.0, 17.0));
++      } catch (_) {}
+     } catch (_) {
+       if (!mounted || seq != _routeSeq) return;
+       setState(() { _routeBusy = false; _routeError = t('map.route_failed'); });
+     }
+   }
+ 
++  double _fitZoom(double south, double north, double current) {
++    final span = north - south;
++    if (span <= 0.01) return current;
++    if (span > 0.5) return 11;
++    if (span > 0.2) return 12.5;
++    if (span > 0.08) return 14;
++    return 15.5;
++  }
++
++  Future<void> _clearRoute() async {
++    await _posSub?.cancel();
++    _posSub = null;
++    await _voice.stop();
++    if (mounted) setState(() { _route = null; _routeError = null; _voiceOn = false; _nextStep = 0; });
++  }
++
++  // ---- picked points ----
++
++  /// Long-press either fills the point type being picked, or drops a destination and routes at once.
++  Future<void> _onLongPress(LatLng pt) async {
++    final t = widget.i18n.t;
++    final mode = _pickMode;
++    if (mode == 'from') {
++      final seq = ++_routeSeq;
++      setState(() { _pickMode = null; _fromPick = pt; _fromName = t('map.dropped'); });
++      _fromName = await _pointName(pt.latitude, pt.longitude);
++      if (mounted && seq == _routeSeq) setState(() {});
++      return;
++    }
++    // Default long-press: set the destination (when no type was being picked, the same slot
++    // in 'to' mode) and route there right away.
++    if (mounted) setState(() { _pickMode = null; _toPick = pt; _toName = t('map.dropped'); });
++    _toName = await _pointName(pt.latitude, pt.longitude);
++    if (mounted) setState(() {});
++    await _toggleRoute();
++  }
++
++  void _startPick(String mode) {
++    setState(() => _pickMode = _pickMode == mode ? null : mode);
++  }
++
++  void _clearPoints() {
++    setState(() { _fromPick = null; _fromName = null; _toPick = null; _toName = null; _pickMode = null; });
++    unawaited(_clearRoute());
++  }
++
++  // ---- spoken guidance ----
++
++  void _toggleVoice() {
++    final plan = _route;
++    if (plan == null) return;
++    setState(() {
++      if (_voiceOn) {
++        _voiceOn = false;
++        unawaited(_voice.stop());
++        unawaited(_posSub?.cancel());
++        _posSub = null;
++      } else {
++        _voiceOn = true;
++        _startVoice(plan);
++      }
++    });
++  }
++
++  Future<void> _startVoice(_RoutePlan plan) async {
++    final t = widget.i18n.t;
++    await _voice.say(t('map.voice_ready', {'name': plan.destName, 'km': plan.kmText, 'min': plan.minText}));
++    _speakNext(plan);
++    if (_posSub != null) return;
++    _posSub = Geolocator.getPositionStream(
++      locationSettings: const LocationSettings(accuracy: LocationAccuracy.best, distanceFilter: 8),
++    ).listen((p) {
++      final planL = _route;
++      if (planL == null || !_voiceOn) return;
++      _speakNext(planL, at: LatLng(p.latitude, p.longitude));
++    }, onError: (Object _) {});
++  }
++
++  /// The first instruction sits 40 m ahead of the spoken one and each after it comes as the
++  /// maneuver point is reached.
++  void _speakNext(_RoutePlan plan, {LatLng? at}) {
++    final here = at;
++    if (here == null) return; // no fix on hand: the next stream reading speaks
++    final d = const Distance();
++    while (_nextStep < plan.stepLocs.length && d(here, plan.stepLocs[_nextStep]) < 40) {
++      final line = plan.stepSay[_nextStep];
++      _nextStep++;
++      if (line.isNotEmpty) unawaited(_voice.say(line));
++    }
++  }
++
+   /// Street-level look of the spot: the Google Maps app is asked for Street View (a plain intent,
+   /// no key and no billing); a browser street-view link is the fallback if the app is missing.
+   Future<void> _streetView(GeoFix f) async {
+@@ -246,7 +510,7 @@
+   }
+ 
+   /// Plain, calm words for a router maneuver, whatever the router calls it.
+-  String _arrow(String type, String modifier) {
++  static String _arrow(String type, String modifier) {
+     if (type == 'depart') return 'Start';
+     if (type == 'arrive') return 'Arrive';
+     if (type == 'roundabout' || type == 'rotary') return 'Roundabout';
+@@ -264,6 +528,40 @@
+     }
+   }
+ 
++  /// Words the phone speaks for a maneuver: distances and road names, like a car navigator.
++  static String _sayFor(String type, String modifier, String road, double metres) {
++    final dist = metres < 60 ? '' : metres < 950 ? 'in ${metres.round()} metres ' : 'in ${(metres / 1000).toStringAsFixed(1)} kilometres ';
++    final onto = road.replaceFirst(' to ', ' onto ');
++    switch (type) {
++      case 'depart':
++        return 'Start$onto';
++      case 'arrive':
++        return 'You have arrived';
++      case 'roundabout' || 'rotary':
++        return 'At the roundabout$onto';
++      case 'new name':
++        return 'Continue straight$onto';
++      case 'merge':
++        return 'Merge$onto';
++      case 'fork':
++        return 'Keep $modifier$onto';
++      case 'end of road':
++        return 'At the end of the road, turn $modifier$onto';
++    }
++    switch (modifier) {
++      case 'left':
++        return '${dist}turn left$onto';
++      case 'right':
++        return '${dist}turn right$onto';
++      case 'straight':
++        return 'Continue straight$onto';
++      case 'uturn':
++        return 'Make a U-turn$onto';
++      default:
++        return 'Continue$onto';
++    }
++  }
++
+   /// "Accuracy ±12 m" in green when it is as good as a phone gets, amber when so-so, red when it is only a rough area.
+   Widget _accuracy(GeoFix f, ColorScheme cs, String Function(String key, [Map<String, String> args]) t) {
+     final m = f.accuracyM;
+@@ -290,38 +588,90 @@
+       body: Column(
+         children: [
+           Expanded(
+-            child: FlutterMap(
+-              mapController: _map,
+-              options: MapOptions(initialCenter: here, initialZoom: f == null ? 5.5 : 17),
++            child: Stack(
+               children: [
+-                TileLayer(urlTemplate: AppConfig.tileUrl, userAgentPackageName: 'ng.sentri.sentri'),
+-                if (f != null)
+-                  CircleLayer(circles: [
+-                    CircleMarker(point: here, radius: (f.accuracyM ?? 20), useRadiusInMeter: true, color: cs.primary.withValues(alpha: 0.15), borderColor: cs.primary.withValues(alpha: 0.4), borderStrokeWidth: 1),
+-                  ]),
+-                if (f != null)
+-                  MarkerLayer(markers: [
+-                    Marker(
+-                      point: here,
+-                      width: 28,
+-                      height: 28,
+-                      child: Container(decoration: BoxDecoration(color: cs.primary, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 4))),
++                FlutterMap(
++                  mapController: _map,
++                  options: MapOptions(
++                    initialCenter: here,
++                    initialZoom: f == null ? 5.5 : 17,
++                    onLongPress: (_, pt) => unawaited(_onLongPress(pt)),
++                  ),
++                  children: [
++                    TileLayer(
++                      urlTemplate: AppConfig.tileUrl,
++                      subdomains: const ['a', 'b', 'c', 'd'],
++                      userAgentPackageName: 'ng.sentri.sentri',
+                     ),
+-                  ]),
+-                if (_route != null)
+-                  PolylineLayer(polylines: [
+-                    Polyline(points: _route!.points, strokeWidth: 5, color: const Color(0xFF6A5FF0)),
+-                  ]),
+-                if (_route != null)
+-                  MarkerLayer(markers: [
+-                    Marker(
+-                      point: _route!.dest,
+-                      width: 34,
+-                      height: 34,
+-                      child: const Icon(Icons.local_police, size: 30, color: Color(0xFF6A5FF0), shadows: [Shadow(blurRadius: 6, color: Colors.white)]),
++                    if (f != null)
++                      CircleLayer(circles: [
++                        CircleMarker(point: here, radius: (f.accuracyM ?? 20), useRadiusInMeter: true, color: cs.primary.withValues(alpha: 0.15), borderColor: cs.primary.withValues(alpha: 0.4), borderStrokeWidth: 1),
++                      ]),
++                    if (f != null)
++                      MarkerLayer(markers: [
++                        Marker(
++                          point: here,
++                          width: 28,
++                          height: 28,
++                          child: Container(decoration: BoxDecoration(color: cs.primary, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 4))),
++                        ),
++                      ]),
++                    MarkerLayer(
++                      markers: [
++                        for (final n in _near)
++                          Marker(
++                            point: LatLng(n.lat, n.lon),
++                            width: 30,
++                            height: 30,
++                            child: Icon(_nearIcon(n.kind), size: 20, color: const Color(0xFF6A5FF0), shadows: const [Shadow(blurRadius: 4, color: Colors.white)]),
++                          ),
++                      ],
+                     ),
+-                  ]),
+-                const RichAttributionWidget(attributions: [TextSourceAttribution('© OpenStreetMap contributors')]),
++                    if (_fromPick != null)
++                      MarkerLayer(markers: [
++                        Marker(
++                          point: _fromPick!,
++                          width: 34,
++                          height: 34,
++                          child: const Icon(Icons.trip_origin, size: 26, color: Color(0xFF2BB673), shadows: [Shadow(blurRadius: 6, color: Colors.white)]),
++                        ),
++                      ]),
++                    if (_toPick != null)
++                      MarkerLayer(markers: [
++                        Marker(
++                          point: _toPick!,
++                          width: 34,
++                          height: 34,
++                          child: const Icon(Icons.location_on, size: 30, color: Color(0xFFE2574C), shadows: [Shadow(blurRadius: 6, color: Colors.white)]),
++                        ),
++                      ]),
++                    if (_route != null)
++                      PolylineLayer(polylines: [
++                        Polyline(points: _route!.points, strokeWidth: 5, color: const Color(0xFF6A5FF0)),
++                      ]),
++                    if (_route != null)
++                      MarkerLayer(markers: [
++                        Marker(
++                          point: _route!.dest,
++                          width: 34,
++                          height: 34,
++                          child: const Icon(Icons.flag, size: 30, color: Color(0xFF6A5FF0), shadows: [Shadow(blurRadius: 6, color: Colors.white)]),
++                        ),
++                      ]),
++                    const RichAttributionWidget(attributions: [TextSourceAttribution('© OpenStreetMap contributors'), TextSourceAttribution('© CARTO')]),
++                  ],
++                ),
++                if (_pickMode != null)
++                  Positioned(
++                    top: 12,
++                    left: 20,
++                    right: 20,
++                    child: Container(
++                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
++                      decoration: BoxDecoration(color: cs.surface.withValues(alpha: 0.95), borderRadius: BorderRadius.circular(14), border: Border.all(color: cs.outlineVariant)),
++                      child: Text(t('map.pick_hint'), style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600), textAlign: TextAlign.center),
++                    ),
++                  ),
+               ],
+             ),
+           ),
+@@ -357,10 +707,31 @@
+                         label: Text(t('map.street_view')),
+                       ),
+                       OutlinedButton.icon(
+-                        onPressed: widget.police == null ? null : () => unawaited(_toggleRoute()),
++                        onPressed: widget.police == null && _toPick == null ? null : () => unawaited(_toggleRoute()),
+                         icon: _routeBusy ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.directions_outlined, size: 18),
+                         label: Text(t('map.directions')),
+                       ),
++                      OutlinedButton.icon(
++                        onPressed: () => _startPick('from'),
++                        icon: const Icon(Icons.trip_origin, size: 16, color: Color(0xFF2BB673)),
++                        label: Text(_fromPick == null ? t('map.pick_start') : t('map.pick_start_set', {'name': _fromName ?? ''})),
++                      ),
++                      OutlinedButton.icon(
++                        onPressed: () => _startPick('to'),
++                        icon: const Icon(Icons.location_on_outlined, size: 16, color: Color(0xFFE2574C)),
++                        label: Text(_toPick == null ? t('map.pick_end') : t('map.pick_end_set', {'name': _toName ?? ''})),
++                      ),
++                      OutlinedButton.icon(
++                        onPressed: () => _showNearby(),
++                        icon: const Icon(Icons.travel_explore_outlined, size: 18),
++                        label: Text(t('map.nearby')),
++                      ),
++                      if (_fromPick != null || _toPick != null)
++                        IconButton(
++                          tooltip: t('map.clear_point'),
++                          onPressed: _clearPoints,
++                          icon: const Icon(Icons.clear, size: 18),
++                        ),
+                     ]),
+                     if (_routeError != null)
+                       Padding(padding: const EdgeInsets.only(top: 8), child: Text(_routeError!, style: TextStyle(fontSize: 12.5, color: cs.error))),
+@@ -371,9 +742,14 @@
+                         Text(t('map.route_info', {'km': _route!.kmText, 'min': _route!.minText}), style: TextStyle(fontSize: 13, color: cs.outline)),
+                         const Spacer(),
+                         TextButton(onPressed: _showSteps, child: Text(t('map.route_steps'))),
++                        IconButton(
++                          tooltip: _voiceOn ? t('map.voice_off') : t('map.voice_on'),
++                          onPressed: _toggleVoice,
++                          icon: _voiceOn ? const Icon(Icons.volume_off, size: 18, color: Color(0xFF6A5FF0)) : const Icon(Icons.volume_up, size: 18),
++                        ),
+                       ]),
+                     ],
+-                    if ((f.accuracyM ?? 0) > 100) ...[
++                    if ((f.accuracyM ?? 0) > 60) ...[
+                       const SizedBox(height: 8),
+                       Text(t('map.approx_hint'), style: const TextStyle(fontSize: 12.5, height: 1.35)),
+                       Row(children: [
+diff --git a/mobile/lib/features/map/nearby_places.dart b/mobile/lib/features/map/nearby_places.dart
+--- a/mobile/lib/features/map/nearby_places.dart
++++ b/mobile/lib/features/map/nearby_places.dart
+@@ -0,0 +1,100 @@
++import 'dart:convert';
++
++import 'package:http/http.dart' as http;
++import 'package:latlong2/latlong.dart';
++
++/// One business or landmark around the person, straight from OpenStreetMap.
++class NearbyPlace {
++  const NearbyPlace({required this.name, required this.kind, required this.lat, required this.lon});
++  final String name;
++  final String kind; // grocery, hotel, gym, hospital...
++  final double lat;
++  final double lon;
++}
++
++/// Live "what is around me" from the free OpenStreetMap Overpass service: hotels, malls,
++/// gyms, markets, small shops, hospitals, fuel stations, banks. No key, no cost.
++class NearbyPlaces {
++  /// [parseOverpass] is pure so it can be tested without a network.
++  static Future<List<NearbyPlace>> fetch(LatLng at, {double radiusM = 700, http.Client? client}) async {
++    final q = '[out:json][timeout:25];('
++        'node(around:$radiusM,${at.latitude},${at.longitude})["amenity"];'
++        'node(around:$radiusM,${at.latitude},${at.longitude})["shop"];'
++        'node(around:$radiusM,${at.latitude},${at.longitude})["tourism"];'
++        'node(around:$radiusM,${at.latitude},${at.longitude})["leisure"];'
++        'way(around:$radiusM,${at.latitude},${at.longitude})["amenity"];'
++        'way(around:$radiusM,${at.latitude},${at.longitude})["shop"];'
++        'way(around:$radiusM,${at.latitude},${at.longitude})["tourism"];'
++        'way(around:$radiusM,${at.latitude},${at.longitude})["leisure"];'
++        ');out center 40;';
++    final uri = Uri.parse('https://overpass-api.de/api/interpreter');
++    final res = await (client ?? http.Client()).post(uri, body: {'data': q}, headers: const {'User-Agent': 'Sentri/0.1'});
++    if (res.statusCode != 200) return const <NearbyPlace>[];
++    return parseOverpass(res.body);
++  }
++
++  /// Names a place in everyday words from its OSM tags.
++  static String kindLabel(Map<String, String> tags) {
++    String? pick(String key, {bool shorten = true}) {
++      final v = tags[key];
++      if (v == null || v.isEmpty) return null;
++      if (!shorten) return v;
++      return switch (v) {
++        'fitness_centre' || 'sports_centre' => 'gym',
++        'marketplace' => 'market',
++        'supermarket' || 'convenience' || 'kiosk' || 'greengrocer' || 'bakery' || 'butcher' || 'clothes' || 'mobile_phone' || 'electronics' => 'shop',
++        'fast_food' || 'cafe' || 'restaurant' || 'bar' => v == 'fast_food' ? 'food' : v,
++        'guest_house' || 'hostel' => 'hotel',
++        'fuel' => 'petrol',
++        'clinic' || 'doctors' || 'dentist' => 'hospital',
++        'public_service' => 'office',
++        _ => v,
++      };
++    }
++
++    return pick('shop') ?? pick('amenity') ?? pick('tourism') ?? pick('leisure') ?? 'place';
++  }
++
++  /// Turns an Overpass JSON answer into named places, junk filtered out.
++  static List<NearbyPlace> parseOverpass(String body) {
++    List<NearbyPlace>? out;
++    try {
++      final j = jsonDecode(body) as Map<String, dynamic>;
++      final elements = (j['elements'] ?? const <dynamic>[]) as List<dynamic>;
++      out = <NearbyPlace>[];
++      for (final rawEl in elements) {
++        final el = rawEl as Map<String, dynamic>;
++        final tags = (el['tags'] ?? const <String, dynamic>{}) as Map<String, dynamic>;
++        final name = tags['name'];
++        if (name == null || '$name'.trim().isEmpty) continue;
++        final strTags = tags.map<String, String>((k, v) => MapEntry(k, '$v'));
++        final amenity = strTags['amenity'];
++        // Street furniture is not a nearby place a person wants to know about.
++        const junk = {'parking', 'parking_entrance', 'parking_space', 'bench', 'waste_basket', 'toilets', 'shelter', 'vending_machine', 'bicycle_parking', 'phone', 'atm', 'public_bookcase', 'recycling', 'grave_yard'};
++        if (amenity != null && junk.contains(amenity)) continue;
++        double lat;
++        double lon;
++        if (el['type'] == 'node') {
++          lat = (el['lat'] as num).toDouble();
++          lon = (el['lon'] as num).toDouble();
++        } else {
++          final c = el['center'] as Map<String, dynamic>?;
++          if (c == null) continue;
++          lat = (c['lat'] as num).toDouble();
++          lon = (c['lon'] as num).toDouble();
++        }
++        out!.add(NearbyPlace(name: '$name'.trim(), kind: kindLabel(strTags), lat: lat, lon: lon));
++      }
++    } catch (_) {
++      return const <NearbyPlace>[];
++    }
++    // Duplicates: the same shop can be node and way. Keep one per name per ~10 m.
++    final kept = <NearbyPlace>[];
++    final d = const Distance();
++    for (final p in out!) {
++      final same = kept.any((k) => k.name.toLowerCase() == p.name.toLowerCase() && d(LatLng(k.lat, k.lon), LatLng(p.lat, p.lon)) < 12);
++      if (!same) kept.add(p);
++    }
++    return kept;
++  }
++}
+diff --git a/mobile/lib/features/map/step_voice.dart b/mobile/lib/features/map/step_voice.dart
+--- a/mobile/lib/features/map/step_voice.dart
++++ b/mobile/lib/features/map/step_voice.dart
+@@ -0,0 +1,35 @@
++import 'dart:async';
++
++import 'package:flutter_tts/flutter_tts.dart';
++
++/// Speaks route instructions with the phone's own voice engine. Chosen over a bundled or
++/// generated voice on purpose: it is free, needs no data connection, and every Android phone
++/// already has one installed (Google TTS) - exactly what an emergency app should lean on.
++class StepVoice {
++  final _tts = FlutterTts();
++  bool _ready = false;
++
++  Future<void> _ensure() async {
++    if (_ready) return;
++    await _tts.setLanguage('en-US');
++    await _tts.setSpeechRate(0.5);
++    await _tts.setVolume(1.0);
++    await _tts.setQueueMode(1); // wait for the previous line instead of cutting it
++    _ready = true;
++  }
++
++  Future<void> say(String text) async {
++    try {
++      await _ensure();
++      await _tts.speak(text);
++    } catch (_) {
++      // A missing voice engine must never break the map.
++    }
++  }
++
++  Future<void> stop() async {
++    try {
++      await _tts.stop();
++    } catch (_) {}
++  }
++}
+diff --git a/mobile/test/nearby_places_test.dart b/mobile/test/nearby_places_test.dart
+--- a/mobile/test/nearby_places_test.dart
++++ b/mobile/test/nearby_places_test.dart
+@@ -0,0 +1,56 @@
++import 'package:flutter_test/flutter_test.dart';
++import 'package:latlong2/latlong.dart';
++
++import 'package:sentri/features/map/nearby_places.dart';
++
++void main() {
++  test('parseOverpass keeps named businesses and drops street furniture', () {
++    const body = '''
++{"elements":[
++ {"type":"node","id":1,"lat":6.45,"lon":3.39,"tags":{"name":"Mega Plaza","shop":"electronics"}},
++ {"type":"way","id":2,"lat":0,"lon":0,"center":{"lat":6.46,"lon":3.40},"tags":{"name":" Ikeja City Mall ","shop":"mall"}},
++ {"type":"node","id":3,"lat":6.47,"lon":3.41,"tags":{"name":"Bodyline Gym","leisure":"fitness_centre"}},
++ {"type":"node","id":4,"lat":6.48,"lon":3.42,"tags":{"name":"Guest Lodge","tourism":"hotel"}},
++ {"type":"node","id":5,"lat":6.49,"lon":3.43,"tags":{"amenity":"bench"}},
++ {"type":"node","id":6,"lat":6.50,"lon":3.44,"tags":{"amenity":"fuel"}},
++ {"type":"node","id":7,"lat":6.51,"lon":3.45}
++]}
++''';
++    final places = NearbyPlaces.parseOverpass(body);
++    final names = [for (final p in places) p.name];
++    expect(names, contains('Mega Plaza'));
++    expect(names, contains('Ikeja City Mall')); // trimmed
++    expect(names, contains('Bodyline Gym'));
++    expect(names, contains('Guest Lodge'));
++    expect(names, contains('fuel')); // amenity without a name keeps the tag word
++    expect(names, isNot(contains('bench')),
++        reason: 'benches, bins, parking and the like are not what a person is navigating to');
++    final mall = places.firstWhere((p) => p.name == 'Ikeja City Mall');
++    expect(mall.lat, 6.46);
++    expect(mall.lon, 3.40);
++    expect(mall.kind, 'shop');
++    final gym = places.firstWhere((p) => p.name == 'Bodyline Gym');
++    expect(gym.kind, 'gym');
++    final hotel = places.firstWhere((p) => p.name == 'Guest Lodge');
++    expect(hotel.kind, 'hotel');
++  });
++
++  test('parseOverpass survives broken input and dedupes the same shop', () {
++    expect(NearbyPlaces.parseOverpass('not json'), isEmpty);
++    expect(NearbyPlaces.parseOverpass('{"elements": []}'), isEmpty);
++    const dup = '''
++{"elements":[
++ {"type":"node","id":1,"lat":6.45,"lon":3.39,"tags":{"name":"X Bar","amenity":"bar"}},
++ {"type":"way","id":2,"center":{"lat":6.4500001,"lon":3.3900001},"tags":{"name":"X Bar","amenity":"bar"}}
++]}
++''';
++    expect(NearbyPlaces.parseOverpass(dup).length, 1);
++  });
++
++  test('kindLabel maps everyday kinds', () {
++    expect(NearbyPlaces.kindLabel({'leisure': 'fitness_centre'}), 'gym');
++    expect(NearbyPlaces.kindLabel({'shop': 'marketplace'}), 'market');
++    expect(NearbyPlaces.kindLabel({'tourism': 'guest_house'}), 'hotel');
++    expect(NearbyPlaces.kindLabel({'amenity': 'fuel'}), 'petrol');
++  });
++}
+diff --git a/mobile/lib/features/location/location.dart b/mobile/lib/features/location/location.dart
+--- a/mobile/lib/features/location/location.dart
++++ b/mobile/lib/features/location/location.dart
+@@ -42,7 +42,7 @@
+   /// Like [fix], but lets the GPS settle and returns the best reading it got. A phone's first reading is often a rough
+   /// one from Wi-Fi or mobile towers; the GPS needs a few seconds to do better. For screens where being exact matters
+   /// more than being instant (the map). Alerts keep using [fix], which is quick.
+-  Future<GeoFix?> preciseFix({Duration timeout = const Duration(seconds: 20)}) => fix(highAccuracy: true, timeout: timeout);
++  Future<GeoFix?> preciseFix({Duration timeout = const Duration(seconds: 25)}) => fix(highAccuracy: true, timeout: timeout);
+ }
+ 
+ class GeolocatorSource implements LocationSource {
+@@ -64,7 +64,7 @@
+   }
+ 
+   /// A reading this good (in metres) is as good as a phone gets outdoors, so there is no need to wait longer.
+-  static const _goodEnoughM = 15.0;
++  static const _goodEnoughM = 12.0;
+ 
+   @override
+   Future<GeoFix?> preciseFix({Duration timeout = const Duration(seconds: 20)}) async {
+@@ -73,7 +73,7 @@
+     StreamSubscription<Position>? sub;
+     try {
+       sub = Geolocator.getPositionStream(
+-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.best, distanceFilter: 0),
++        locationSettings: const LocationSettings(accuracy: LocationAccuracy.bestForNavigation, distanceFilter: 0),
+       ).listen(
+         (p) {
+           final f = _toFix(p);
+diff --git a/mobile/lib/core/config.dart b/mobile/lib/core/config.dart
+--- a/mobile/lib/core/config.dart
++++ b/mobile/lib/core/config.dart
+@@ -20,7 +20,7 @@
+ 
+   /// Map tiles. The public OSM server is for development only (its usage policy forbids heavy use);
+   /// point this at your own tile server or a paid provider for release.
+-  static const tileUrl = String.fromEnvironment('TILE_URL', defaultValue: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png');
++  static const tileUrl = String.fromEnvironment('TILE_URL', defaultValue: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png');
+ 
+   /// Cancel window shown to the user. Must match the server's CANCEL_WINDOW_MS.
+   static const cancelWindow = Duration(seconds: 5);
+diff --git a/mobile/pubspec.yaml b/mobile/pubspec.yaml
+--- a/mobile/pubspec.yaml
++++ b/mobile/pubspec.yaml
+@@ -27,6 +27,7 @@
+   share_plus: ^10.0.2
+   connectivity_plus: ^6.0.5
+   url_launcher: ^6.3.0
++  flutter_tts: ^4.1.0
+ 
+ dev_dependencies:
+   flutter_test:
+diff --git a/mobile/assets/i18n/en.json b/mobile/assets/i18n/en.json
+--- a/mobile/assets/i18n/en.json
++++ b/mobile/assets/i18n/en.json
+@@ -75,6 +75,19 @@
+   "map.open_app_settings": "Sentri permissions",
+   "map.near": "Near {name}",
+   "map.no_location": "Turn on location to see where you are.",
++  "map.pick_start": "Start point",
++  "map.pick_start_set": "Start: {name}",
++  "map.pick_end": "Destination",
++  "map.pick_end_set": "To: {name}",
++  "map.pick_hint": "Tap and hold a spot on the map.",
++  "map.dropped": "Dropped point",
++  "map.nearby": "Nearby",
++  "map.nearby_none": "No named places within a short walk. The map itself shows small streets and shops.",
++  "map.nearby_far": "{m} m away",
++  "map.voice_on": "Voice guidance",
++  "map.voice_off": "Stop voice",
++  "map.voice_ready": "Route to {name}: {km} km, about {min} minutes.",
++  "map.clear_point": "Clear points",
+   "police.your_state": "Your state",
+   "police.all": "All states and FCT",
+   "police.note": "Official Nigeria Police Force lines for every state and the FCT. If a line doesn't pick up, call 112.",
+diff --git a/mobile/assets/i18n/ha.json b/mobile/assets/i18n/ha.json
+--- a/mobile/assets/i18n/ha.json
++++ b/mobile/assets/i18n/ha.json
+@@ -75,6 +75,19 @@
+   "map.open_app_settings": "Izinin Sentri",
+   "map.near": "Kusa da {name}",
+   "map.no_location": "Kunna wuri don ganin inda kake.",
++  "map.pick_start": "Farkon tafiya",
++  "map.pick_start_set": "Farko: {name}",
++  "map.pick_end": "Wurin zuwa",
++  "map.pick_end_set": "Zuwa: {name}",
++  "map.pick_hint": "Rike wuri a kan taswira.",
++  "map.dropped": "Wuri da aka zaba",
++  "map.nearby": "Kusa da ka",
++  "map.nearby_none": "Babu wata kasuwa ko shagon da ake sani a kusa.",
++  "map.nearby_far": "nisan {m} m",
++  "map.voice_on": "Yi magana",
++  "map.voice_off": "Dakatar da magana",
++  "map.voice_ready": "Hanya zuwa {name}: kilomita {km}, minti {min}.",
++  "map.clear_point": "Share",
+   "police.your_state": "Jiharka",
+   "police.all": "Dukkan jihohi da FCT",
+   "police.note": "Lambobin hukuma na Rundunar 'Yan Sandan Najeriya na kowace jiha da FCT. Idan layi bai amsa ba, kira 112.",
+diff --git a/mobile/assets/i18n/ig.json b/mobile/assets/i18n/ig.json
+--- a/mobile/assets/i18n/ig.json
++++ b/mobile/assets/i18n/ig.json
+@@ -75,6 +75,19 @@
+   "map.open_app_settings": "Ikike Sentri",
+   "map.near": "Nso {name}",
+   "map.no_location": "Mepee ebe ị nọ ka ịhụ ebe ị nọ.",
++  "map.pick_start": "Ebe mmalite",
++  "map.pick_start_set": "Mmalite: {name}",
++  "map.pick_end": "Ebe njedebe",
++  "map.pick_end_set": "Debe: {name}",
++  "map.pick_hint": "Pia ma debe ebe n'elu maapu.",
++  "map.dropped": "Ebe a pia",
++  "map.nearby": "Nd\u1ecb d\u1ecb gburugburu",
++  "map.nearby_none": "O d\u1ecbghi ebe ama ama d\u1ecb nso.",
++  "map.nearby_far": "{m} m anya",
++  "map.voice_on": "Olu nkuzi",
++  "map.voice_off": "Kw\u1ee5s\u1ecb olu",
++  "map.voice_ready": "Uz\u1ecd gaa {name}: kilomita {km}, nkeji {min}.",
++  "map.clear_point": "Hichap\u1ee5",
+   "police.your_state": "Steeti gị",
+   "police.all": "Steeti niile na FCT",
+   "police.note": "Ọnụ ọgụgụ gọọmentị nke Ndị Uweojii Naịjirịa maka steeti ọ bụla na FCT. Ọ bụrụ na ahụ anabataghị oku, kpọọ 112.",
+diff --git a/mobile/assets/i18n/pcm.json b/mobile/assets/i18n/pcm.json
+--- a/mobile/assets/i18n/pcm.json
++++ b/mobile/assets/i18n/pcm.json
+@@ -75,6 +75,19 @@
+   "map.open_app_settings": "Sentri permissions",
+   "map.near": "Near {name}",
+   "map.no_location": "Put location on make you see where you dey.",
++  "map.pick_start": "Start point",
++  "map.pick_start_set": "Start: {name}",
++  "map.pick_end": "Where you dey go",
++  "map.pick_end_set": "Go: {name}",
++  "map.pick_hint": "Press and hold any place for map.",
++  "map.dropped": "Point wey you drop",
++  "map.nearby": "Wetin dey near you",
++  "map.nearby_none": "Nothing wey dem mark dey near here.",
++  "map.nearby_far": "{m} m away",
++  "map.voice_on": "Talk am",
++  "map.voice_off": "Stop am",
++  "map.voice_ready": "Road go {name}: {km} kilometers, {min} minutes.",
++  "map.clear_point": "Clear",
+   "police.your_state": "Your state",
+   "police.all": "All states and FCT",
+   "police.note": "Official Nigeria Police Force numbers for every state and FCT. If one no pick, call 112.",
+diff --git a/mobile/assets/i18n/yo.json b/mobile/assets/i18n/yo.json
+--- a/mobile/assets/i18n/yo.json
++++ b/mobile/assets/i18n/yo.json
+@@ -75,6 +75,19 @@
+   "map.open_app_settings": "Àṣẹ Sentri",
+   "map.near": "Nítòsí {name}",
+   "map.no_location": "Tan ibùdó láti rí ibi tí o wà.",
++  "map.pick_start": "Ib\u1eb9\u0300r\u1eb9\u0300",
++  "map.pick_start_set": "Ib\u1eb9\u0300r\u1eb9\u0300: {name}",
++  "map.pick_end": "\u00ccpar\u00ed",
++  "map.pick_end_set": "\u00ccpar\u00ed: {name}",
++  "map.pick_hint": "T\u1eb9 f\u1eb9\u0301r\u1eb9\u0301 \u1ecd\u0301w\u1ecd\u0301 r\u1eb9\u0301 l\u00f3ri maap\u00f9.",
++  "map.dropped": "\u00c0\u00e0y\u00e8 t\u00ed a y\u00e0n",
++  "map.nearby": "N\u00ed \u00e0gb\u00e8gb\u00e8 y\u00ec\u00ed",
++  "map.nearby_none": "K\u00f2 s\u00ed ibi t\u00ed m\u1ecd\u0300 n\u00ed t\u00ed w\u1ecd\u0301n j\u00ecn\u00e0 d\u00ed\u1eb9\u0300.",
++  "map.nearby_far": "j\u00ecn\u00e0 {m} m",
++  "map.voice_on": "Gb\u00e9 \u1ecd\u0300r\u1ecd\u0300 j\u00e1de",
++  "map.voice_off": "D\u1eb9\u0301k\u1eb9\u0301",
++  "map.voice_ready": "\u1ecc\u0300n\u00e0 d\u00e9 {name}: kilomita {km}, \u00ec\u1e63\u1eb9\u0301j\u00fa {min}.",
++  "map.clear_point": "Nu k\u00fbr\u00f2",
+   "police.your_state": "Ìpínlẹ̀ rẹ",
+   "police.all": "Gbogbo ìpínlẹ̀ àti FCT",
+   "police.note": "Àwọn nọ́ńbà àṣẹ ti Ọlọ́pàá Orílẹ̀-èdè Nàìjíríà fún gbogbo ìpínlẹ̀ àti FCT. Tí ọ̀kan kò bá gbà, pe 112.",
