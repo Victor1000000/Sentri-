@@ -42,7 +42,7 @@ abstract class LocationSource {
   /// Like [fix], but lets the GPS settle and returns the best reading it got. A phone's first reading is often a rough
   /// one from Wi-Fi or mobile towers; the GPS needs a few seconds to do better. For screens where being exact matters
   /// more than being instant (the map). Alerts keep using [fix], which is quick.
-  Future<GeoFix?> preciseFix({Duration timeout = const Duration(seconds: 20)}) => fix(highAccuracy: true, timeout: timeout);
+  Future<GeoFix?> preciseFix({Duration timeout = const Duration(seconds: 25)}) => fix(highAccuracy: true, timeout: timeout);
 }
 
 class GeolocatorSource implements LocationSource {
@@ -64,7 +64,7 @@ class GeolocatorSource implements LocationSource {
   }
 
   /// A reading this good (in metres) is as good as a phone gets outdoors, so there is no need to wait longer.
-  static const _goodEnoughM = 15.0;
+  static const _goodEnoughM = 12.0;
 
   @override
   Future<GeoFix?> preciseFix({Duration timeout = const Duration(seconds: 20)}) async {
@@ -73,7 +73,7 @@ class GeolocatorSource implements LocationSource {
     StreamSubscription<Position>? sub;
     try {
       sub = Geolocator.getPositionStream(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.best, distanceFilter: 0),
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.bestForNavigation, distanceFilter: 0),
       ).listen(
         (p) {
           final f = _toFix(p);

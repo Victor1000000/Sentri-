@@ -20,7 +20,7 @@ class AppConfig {
 
   /// Map tiles. The public OSM server is for development only (its usage policy forbids heavy use);
   /// point this at your own tile server or a paid provider for release.
-  static const tileUrl = String.fromEnvironment('TILE_URL', defaultValue: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png');
+  static const tileUrl = String.fromEnvironment('TILE_URL', defaultValue: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png');
 
   /// Cancel window shown to the user. Must match the server's CANCEL_WINDOW_MS.
   static const cancelWindow = Duration(seconds: 5);
