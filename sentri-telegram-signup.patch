@@ -676,7 +676,8 @@ diff --git a/mobile/lib/features/map/map_screen.dart b/mobile/lib/features/map/m
                        Text(t('map.approx_hint'), style: const TextStyle(fontSize: 12.5, height: 1.35)),
                        Row(children: [
 diff --git a/mobile/lib/features/map/nearby_places.dart b/mobile/lib/features/map/nearby_places.dart
---- a/mobile/lib/features/map/nearby_places.dart
+new file mode 100644
+--- /dev/null
 +++ b/mobile/lib/features/map/nearby_places.dart
 @@ -0,0 +1,100 @@
 +import 'dart:convert';
@@ -780,7 +781,8 @@ diff --git a/mobile/lib/features/map/nearby_places.dart b/mobile/lib/features/ma
 +  }
 +}
 diff --git a/mobile/lib/features/map/step_voice.dart b/mobile/lib/features/map/step_voice.dart
---- a/mobile/lib/features/map/step_voice.dart
+new file mode 100644
+--- /dev/null
 +++ b/mobile/lib/features/map/step_voice.dart
 @@ -0,0 +1,35 @@
 +import 'dart:async';
@@ -819,7 +821,8 @@ diff --git a/mobile/lib/features/map/step_voice.dart b/mobile/lib/features/map/s
 +  }
 +}
 diff --git a/mobile/test/nearby_places_test.dart b/mobile/test/nearby_places_test.dart
---- a/mobile/test/nearby_places_test.dart
+new file mode 100644
+--- /dev/null
 +++ b/mobile/test/nearby_places_test.dart
 @@ -0,0 +1,56 @@
 +import 'package:flutter_test/flutter_test.dart';
