@@ -78,10 +78,9 @@ class ProtectionService : Service() {
         SentriEngine.get(this)
 
         // Without this, many phones stop delivering motion events once the screen has been off for a while.
-        if (p.shake || p.power) holdWake() else releaseWake()
+        if (p.power) holdWake() else releaseWake()
 
         shake?.unregister(sm); shake = null
-        if (p.shake) shake = ShakeDetector(p.shakeSensitivity) { TriggerDispatcher.fire(this, "shake") }.also { it.register(sm) }
 
         power?.unregister(this); power = null
         if (p.power) power = ScreenToggleDetector { TriggerDispatcher.fire(this, "power") }.also { it.register(this) }

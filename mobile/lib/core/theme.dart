@@ -38,6 +38,9 @@ ThemeData sentriTheme(Brightness b) {
       );
   return ThemeData(
     useMaterial3: true,
+    // No ink splashes: the Android 12 sparkle ripple read as a glitch on these buttons.
+    splashFactory: NoSplash.splashFactory,
+    highlightColor: Colors.transparent,
     colorScheme: base,
     scaffoldBackgroundColor: base.surface,
     textTheme: text.copyWith(

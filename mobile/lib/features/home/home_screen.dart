@@ -206,6 +206,7 @@ class _ShortcutsPage extends StatelessWidget {
       listenable: Listenable.merge([w.settings, w.i18n]),
       builder: (context, _) {
         final s = w.settings;
+        final cs = Theme.of(context).colorScheme;
         final tr = s.triggers;
         return Scaffold(
           body: SentriBackground(
@@ -221,12 +222,11 @@ class _ShortcutsPage extends StatelessWidget {
                   const SizedBox(height: 16),
                   Card(
                     child: Column(children: [
-                      SwitchListTile(title: Text(t('triggers.shake')), value: tr.shake, onChanged: (v) => unawaited(home._setTriggers(tr.copyWith(shake: v)))),
                       if (Platform.isAndroid) ...[
                         SwitchListTile(title: Text(t('triggers.volume')), value: tr.volume, onChanged: (v) => unawaited(home._setTriggers(tr.copyWith(volume: v)))),
                         SwitchListTile(
                           title: Text(t('triggers.power')),
-                          subtitle: Text(t('triggers.power_note')),
+                          subtitle: Text(t('triggers.power_note'), style: TextStyle(fontSize: 12, height: 1.3, color: cs.onSurface.withValues(alpha: 0.55))),
                           value: tr.power,
                           onChanged: (v) => unawaited(home._setTriggers(tr.copyWith(power: v))),
                         ),

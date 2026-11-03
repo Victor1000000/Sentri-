@@ -4,7 +4,6 @@ import 'dart:io' show Platform;
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/services.dart' show rootBundle;
-import 'package:sensors_plus/sensors_plus.dart';
 
 import 'core/config.dart';
 import 'core/i18n/i18n.dart';
@@ -24,7 +23,6 @@ import 'features/onboarding/onboarding_controller.dart';
 import 'features/push/push_service.dart';
 import 'features/sos/local_pin_vault.dart';
 import 'features/sos/sos_controller.dart';
-import 'features/triggers/shake_detector.dart';
 
 /// Builds and wires everything once at start-up.
 class AppServices {
@@ -66,7 +64,6 @@ class AppServices {
 
   /// The police directory, loaded once; the SOS screen and alert screens use it to show who to call.
   final Future<PoliceDirectory> police = rootBundle.loadString('assets/directory/police_directory.json').then(PoliceDirectory.parse);
-  StreamSubscription<AccelerometerEvent>? _accel;
   StreamSubscription<List<ConnectivityResult>>? _net;
   late final PushService _push = PushService(api, onAlert: () => unawaited(inbox.refresh()));
 
@@ -188,19 +185,9 @@ class AppServices {
       }
     });
 
-    // iOS cannot watch sensors in the background, so shake works only while the app is open.
-    if (Platform.isIOS) {
-      final detector = ShakeDetector();
-      _accel = accelerometerEventStream().listen((e) {
-        if (settings.triggers.shake && detector.addSample(e.x, e.y, e.z, DateTime.now())) {
-          unawaited(sos.trigger('shake'));
-        }
-      });
-    }
   }
 
   Future<void> dispose() async {
-    await _accel?.cancel();
     await _net?.cancel();
     lowBattery.stop();
     sos.dispose();

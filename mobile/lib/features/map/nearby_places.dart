@@ -16,7 +16,7 @@ class NearbyPlace {
 /// gyms, markets, small shops, hospitals, fuel stations, banks. No key, no cost.
 class NearbyPlaces {
   /// [parseOverpass] is pure so it can be tested without a network.
-  static Future<List<NearbyPlace>> fetch(LatLng at, {double radiusM = 700, http.Client? client}) async {
+  static Future<List<NearbyPlace>> fetch(LatLng at, {double radiusM = 1200, http.Client? client}) async {
     final q = '[out:json][timeout:25];('
         'node(around:$radiusM,${at.latitude},${at.longitude})["amenity"];'
         'node(around:$radiusM,${at.latitude},${at.longitude})["shop"];'
@@ -26,7 +26,7 @@ class NearbyPlaces {
         'way(around:$radiusM,${at.latitude},${at.longitude})["shop"];'
         'way(around:$radiusM,${at.latitude},${at.longitude})["tourism"];'
         'way(around:$radiusM,${at.latitude},${at.longitude})["leisure"];'
-        ');out center 40;';
+        ');out center 80;';
     final uri = Uri.parse('https://overpass-api.de/api/interpreter');
     final res = await (client ?? http.Client()).post(uri, body: {'data': q}, headers: const {'User-Agent': 'Sentri/0.1'});
     if (res.statusCode != 200) return const <NearbyPlace>[];

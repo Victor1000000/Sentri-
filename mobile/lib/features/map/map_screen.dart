@@ -34,9 +34,21 @@ class _RoutePlan {
   String get minText => '$mins';
 }
 
+/// One answer from the place search: a typed name that resolved to a point on the map.
+class _SearchHit {
+  const _SearchHit({required this.name, required this.detail, required this.lat, required this.lon});
+  final String name;
+  final String detail;
+  final double lat;
+  final double lon;
+}
+
+bool _sameWord(String a, String b) => a.trim().toLowerCase() == b.trim().toLowerCase();
+
 /// The map, Google Maps-style: the map is the whole screen and every control is a floating
-/// round icon. Holding the map drops a destination; the icons handle street view, a chosen
-/// start point, a chosen destination and what is around. The bottom card is one slim line.
+/// round icon. The person can type where they are going (search picks the exact spot), or
+/// long-press the map to drop a point. Nearby named places are written on the map, the way
+/// Google Maps and Organic Maps show them.
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key, required this.location, required this.api, required this.i18n, this.placeLookup, this.onPlace, this.refresh = const Duration(seconds: 6), this.police});
   final LocationSource location;
@@ -76,6 +88,9 @@ class _MapScreenState extends State<MapScreen> {
   LatLng? _toPick;
   String? _toName;
   String? _pickMode; // 'from' | 'to' while waiting for a long-press
+
+  // -- typed destination search --
+  int _searchSeq = 0;
 
   // -- spoken turn-by-turn --
   bool _voiceOn = false;
@@ -282,6 +297,183 @@ class _MapScreenState extends State<MapScreen> {
       default:
         return Icons.place_outlined;
     }
+  }
+
+  // ---- typed destination search ----
+
+  /// Photon (Komoot) first: it ranks results around the phone's position, so a name typed in a
+  /// town brings up the place that is nearest. Nominatim is the fallback. Both are free OSM
+  /// search services, no key. Never throws; empty list when the data has no answer.
+  Future<List<_SearchHit>> _searchPlaces(String query, LatLng near) async {
+    final hits = <_SearchHit>[];
+    try {
+      final url = 'https://photon.komoot.io/api?limit=8&lang=en&lat=${near.latitude}&lon=${near.longitude}&q=${Uri.encodeQueryComponent(query)}';
+      final res = await http.get(Uri.parse(url), headers: const {'User-Agent': 'Sentri/0.1'}).timeout(const Duration(seconds: 10));
+      if (res.statusCode == 200) {
+        final j = jsonDecode(res.body) as Map<String, dynamic>;
+        for (final f in (j['features'] ?? const <dynamic>[]) as List<dynamic>) {
+          final props = ((f as Map<String, dynamic>)['properties'] ?? const <String, dynamic>{}) as Map<String, dynamic>;
+          final geo = f['geometry'] as Map<String, dynamic>;
+          final coords = (geo['coordinates'] ?? const <dynamic>[]) as List<dynamic>;
+          if (coords.length < 2) continue;
+          final name = '${props['name'] ?? ''}'.trim();
+          if (name.isEmpty) continue;
+          final parts = <String>['${props['street'] ?? ''}', '${props['city'] ?? ''}', '${props['county'] ?? ''}', '${props['state'] ?? ''}'];
+          final detail = [for (final x in parts) if (x.trim().isNotEmpty && !_sameWord(name, x)) x].join(', ');
+          hits.add(_SearchHit(name: name, detail: detail, lat: (coords[1] as num).toDouble(), lon: (coords[0] as num).toDouble()));
+        }
+      }
+    } catch (_) {}
+    if (hits.isNotEmpty) return hits;
+    try {
+      final url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8&countrycodes=ng&q=${Uri.encodeQueryComponent(query)}';
+      final res = await http.get(Uri.parse(url), headers: const {'User-Agent': 'Sentri/0.1'}).timeout(const Duration(seconds: 10));
+      if (res.statusCode == 200) {
+        for (final raw in (jsonDecode(res.body) ?? const <dynamic>[]) as List<dynamic>) {
+          final r = raw as Map<String, dynamic>;
+          final display = '${r['display_name'] ?? ''}'.trim();
+          if (display.isEmpty) continue;
+          final lat = double.tryParse('${r['lat'] ?? ''}');
+          final lon = double.tryParse('${r['lon'] ?? ''}');
+          if (lat == null || lon == null) continue;
+          final seg = display.split(', ');
+          hits.add(_SearchHit(name: seg.first, detail: seg.skip(1).take(2).join(', '), lat: lat, lon: lon));
+        }
+      }
+    } catch (_) {}
+    return hits;
+  }
+
+  /// "Where to?" — the person types where they are going, the app picks the exact spot and
+  /// routes there from the phone's current position right away.
+  Future<void> _searchDestination() async {
+    final t = widget.i18n.t;
+    final cs = Theme.of(context).colorScheme;
+    final near = _fix == null ? const LatLng(9.0820, 7.4730) : LatLng(_fix!.lat, _fix!.lon);
+    final controller = TextEditingController();
+    Timer? debounce;
+    var searched = false;
+    var busy = false;
+    final hits = <_SearchHit>[];
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) {
+        StateSetter refreshSheet = (fn) => {};
+        void run(String query) {
+          debounce?.cancel();
+          final q = query.trim();
+          if (q.length < 3) return;
+          debounce = Timer(const Duration(milliseconds: 600), () async {
+            final seq = ++_searchSeq;
+            if (!ctx.mounted) return;
+            refreshSheet(() { busy = true; searched = false; hits.clear(); });
+            final res = await _searchPlaces(q, near);
+            if (!ctx.mounted || seq != _searchSeq) return;
+            refreshSheet(() { busy = false; searched = true; hits.addAll(res.take(8)); });
+          });
+        }
+
+        return StatefulBuilder(
+          builder: (ctx, refresh) {
+            refreshSheet = refresh;
+            return Padding(
+            padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+            child: SafeArea(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(18, 0, 18, 8),
+                    child: TextField(
+                      controller: controller,
+                      autofocus: true,
+                      textInputAction: TextInputAction.search,
+                      onChanged: run,
+                      onSubmitted: run,
+                      decoration: InputDecoration(
+                        hintText: t('map.search_hint'),
+                        prefixIcon: const Icon(Icons.search),
+                        suffixIcon: ValueListenableBuilder<TextEditingValue>(
+                          valueListenable: controller,
+                          builder: (context, v, _) => v.text.isEmpty
+                              ? const SizedBox.shrink()
+                              : IconButton(
+                                  visualDensity: VisualDensity.compact,
+                                  onPressed: () {
+                                    controller.clear();
+                                    refreshSheet(() { searched = false; busy = false; hits.clear(); });
+                                  },
+                                  icon: const Icon(Icons.close, size: 20),
+                                ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (busy) ...[
+                    Padding(
+                      padding: const EdgeInsets.all(18),
+                      child: Row(children: [
+                        const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+                        const SizedBox(width: 12),
+                        Text(t('map.searching'), style: TextStyle(fontSize: 14, color: cs.onSurface.withValues(alpha: 0.65))),
+                      ]),
+                    ),
+                  ] else if (searched && controller.text.trim().length >= 3 && hits.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.all(18),
+                      child: Text(t('map.search_no_results'), style: TextStyle(fontSize: 14, height: 1.35, color: cs.onSurface.withValues(alpha: 0.65))),
+                    )
+                  else if (!searched && hits.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.all(18),
+                      child: Text(t('map.search_empty'), style: TextStyle(fontSize: 14, height: 1.35, color: cs.onSurface.withValues(alpha: 0.55))),
+                    ),
+                  Flexible(
+                    child: ListView(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.only(bottom: 8),
+                      children: [
+                        for (final hit in hits)
+                          ListTile(
+                            dense: true,
+                            leading: CircleAvatar(
+                              radius: 16,
+                              backgroundColor: cs.primary.withValues(alpha: 0.10),
+                              child: Icon(Icons.place_outlined, size: 18, color: cs.primary),
+                            ),
+                            title: Text(hit.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                            subtitle: hit.detail.isEmpty ? null : Text(hit.detail, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12.5, color: cs.outline)),
+                            onTap: () {
+                              Navigator.of(ctx).pop();
+                              _useHit(hit);
+                            },
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            );
+          },
+        );
+      },
+    );
+    debounce.cancel();
+  }
+
+  /// A typed place becomes the destination and the route starts immediately.
+  void _useHit(_SearchHit hit) {
+    _routeSeq++; // any run of directions still in flight is irrelevant now
+    setState(() {
+      _toPick = LatLng(hit.lat, hit.lon);
+      _toName = hit.name;
+      _pickMode = null;
+    });
+    unawaited(_toggleRoute());
   }
 
   // ---- directions: any point to any point ----
@@ -610,7 +802,6 @@ class _MapScreenState extends State<MapScreen> {
     final here = f == null ? const LatLng(9.0820, 7.4730) : LatLng(f.lat, f.lon);
     final p = _place;
     final topPad = MediaQuery.paddingOf(context).top;
-    final canRoute = widget.police != null || _toPick != null;
     return Scaffold(
       body: Stack(
         children: [
@@ -628,17 +819,41 @@ class _MapScreenState extends State<MapScreen> {
                   CircleLayer(circles: [
                     CircleMarker(point: here, radius: (f.accuracyM ?? 20), useRadiusInMeter: true, color: cs.primary.withValues(alpha: 0.15), borderColor: cs.primary.withValues(alpha: 0.4), borderStrokeWidth: 1),
                   ]),
-                MarkerLayer(
-                  markers: [
-                    for (final n in _near)
-                      Marker(
-                        point: LatLng(n.lat, n.lon),
-                        width: 30,
-                        height: 30,
-                        child: Icon(_nearIcon(n.kind), size: 20, color: const Color(0xFF6A5FF0), shadows: const [Shadow(blurRadius: 4, color: Colors.white)]),
-                      ),
-                  ],
-                ),
+                // Nearby places written on the map, the way Google Maps and Organic Maps draw
+                // them: a small icon with the place's name right beside it.
+                if (_near.isNotEmpty)
+                  MarkerLayer(
+                    markers: [
+                      for (final n in _near.take(18))
+                        Marker(
+                          point: LatLng(n.lat, n.lon),
+                          width: 140,
+                          height: 46,
+                          alignment: Alignment.bottomCenter,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                constraints: const BoxConstraints(maxWidth: 136),
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: dark ? const Color(0xDD18174D) : const Color(0xE6FFFFFF),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: dark ? Colors.white.withValues(alpha: 0.18) : Colors.black.withValues(alpha: 0.06)),
+                                ),
+                                child: Text(
+                                  n.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(fontSize: 10.5, height: 1.1, fontWeight: FontWeight.w600, color: dark ? Colors.white : const Color(0xFF2B2B3A)),
+                                ),
+                              ),
+                              Icon(_nearIcon(n.kind), size: 20, color: const Color(0xFF6A5FF0), shadows: const [Shadow(blurRadius: 4, color: Colors.white)]),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
                 if (f != null)
                   MarkerLayer(markers: [
                     Marker(
@@ -756,7 +971,7 @@ class _MapScreenState extends State<MapScreen> {
                 context,
                 icon: _routeBusy ? null : Icons.directions_outlined,
                 label: t('map.directions'),
-                onTap: canRoute || _route != null ? () => unawaited(_toggleRoute()) : null,
+                onTap: () => unawaited(_searchDestination()),
                 child: _routeBusy ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : null,
               ),
               const SizedBox(height: 10),
