@@ -34,8 +34,9 @@ class _RoutePlan {
   String get minText => '$mins';
 }
 
-/// Shows where the user is, on OpenStreetMap tiles, with the street, area, LGA and state.
-/// The place name is a convenience: if the lookup fails the coordinates still show.
+/// The map, Google Maps-style: the map is the whole screen and every control is a floating
+/// round icon. Holding the map drops a destination; the icons handle street view, a chosen
+/// start point, a chosen destination and what is around. The bottom card is one slim line.
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key, required this.location, required this.api, required this.i18n, this.placeLookup, this.onPlace, this.refresh = const Duration(seconds: 6), this.police});
   final LocationSource location;
@@ -262,7 +263,7 @@ class _MapScreenState extends State<MapScreen> {
         return Icons.local_hospital_outlined;
       case 'police':
         return Icons.local_police_outlined;
-      case 'petrol':
+      case 'petrol' || 'fuel':
         return Icons.local_gas_station_outlined;
       case 'bank' || 'atm':
         return Icons.account_balance_outlined;
@@ -272,8 +273,6 @@ class _MapScreenState extends State<MapScreen> {
         return Icons.medication_outlined;
       case 'school' || 'university':
         return Icons.school_outlined;
-      case 'fuel':
-        return Icons.local_gas_station_outlined;
       case 'park':
         return Icons.park_outlined;
       case 'cinema':
@@ -285,7 +284,7 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
-  // ---- directions and street view ----
+  // ---- directions: any point to any point ----
 
   /// Folds an OSRM route answer into a drawable, speakable plan. Used as it is, free, no key.
   static _RoutePlan _buildPlan(Map<String, dynamic> r, LatLng dest, String destName) {
@@ -313,7 +312,8 @@ class _MapScreenState extends State<MapScreen> {
     return _RoutePlan(points: points, dest: dest, destName: destName, km: km, mins: mins, stepTexts: stepTexts, stepLocs: stepLocs, stepSay: stepSay);
   }
 
-  /// Turn-by-turn through both open OSRM routers and spoken instructions.
+  /// Draw the route: picked start to picked destination, or the phone's position to the
+  /// picked destination, or (nothing picked) to the nearest police command's post.
   Future<void> _toggleRoute() async {
     final t = widget.i18n.t;
     if (_route != null) {
@@ -363,7 +363,6 @@ class _MapScreenState extends State<MapScreen> {
         _speakNext(plan);
       }
       try {
-        final c = _map.camera;
         // Fit the whole route on screen once.
         final latitudes = [for (final p in plan.points) p.latitude];
         final longitudes = [for (final p in plan.points) p.longitude];
@@ -372,8 +371,7 @@ class _MapScreenState extends State<MapScreen> {
         final east = longitudes.reduce((a, b) => a > b ? a : b);
         final west = longitudes.reduce((a, b) => a < b ? a : b);
         final centre = LatLng((north + south) / 2, (east + west) / 2);
-        final zoom = _fitZoom(south, north, c.zoom);
-        _map.move(centre, zoom.clamp(11.0, 17.0));
+        _map.move(centre, _fitZoom(south, north).clamp(11.0, 16.0));
       } catch (_) {}
     } catch (_) {
       if (!mounted || seq != _routeSeq) return;
@@ -381,9 +379,9 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
-  double _fitZoom(double south, double north, double current) {
+  double _fitZoom(double south, double north) {
     final span = north - south;
-    if (span <= 0.01) return current;
+    if (span <= 0.01) return 16;
     if (span > 0.5) return 11;
     if (span > 0.2) return 12.5;
     if (span > 0.08) return 14;
@@ -410,8 +408,7 @@ class _MapScreenState extends State<MapScreen> {
       if (mounted && seq == _routeSeq) setState(() {});
       return;
     }
-    // Default long-press: set the destination (when no type was being picked, the same slot
-    // in 'to' mode) and route there right away.
+    // Default long-press: set the destination and route there right away.
     if (mounted) setState(() { _pickMode = null; _toPick = pt; _toName = t('map.dropped'); });
     _toName = await _pointName(pt.latitude, pt.longitude);
     if (mounted) setState(() {});
@@ -459,8 +456,7 @@ class _MapScreenState extends State<MapScreen> {
     }, onError: (Object _) {});
   }
 
-  /// The first instruction sits 40 m ahead of the spoken one and each after it comes as the
-  /// maneuver point is reached.
+  /// Each instruction is spoken as the maneuver point is reached.
   void _speakNext(_RoutePlan plan, {LatLng? at}) {
     final here = at;
     if (here == null) return; // no fix on hand: the next stream reading speaks
@@ -562,203 +558,290 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
-  /// "Accuracy ±12 m" in green when it is as good as a phone gets, amber when so-so, red when it is only a rough area.
-  Widget _accuracy(GeoFix f, ColorScheme cs, String Function(String key, [Map<String, String> args]) t) {
-    final m = f.accuracyM;
-    final good = m != null && m <= 30;
-    final fair = m != null && m <= 100;
-    final color = good ? cs.tertiary : (fair ? const Color(0xFFE3A13A) : cs.error);
-    return Row(children: [
-      Icon(good ? Icons.gps_fixed : Icons.gps_not_fixed, size: 14, color: color),
-      const SizedBox(width: 4),
-      Text(m == null ? t('map.finding') : t('map.accuracy', {'m': '${m.round()}'}), style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: color)),
-      if (!good) ...[const SizedBox(width: 8), Text(t('map.improving'), style: TextStyle(fontSize: 12, color: cs.outline))],
-    ]);
+  // ---- the look: map full-screen, icon buttons floating, one slim card below ----
+
+  /// A round floating icon control, Google Maps style.
+  Widget _fab(BuildContext context, {required IconData? icon, required String label, required VoidCallback? onTap, Color? iconColor, bool filled = false, Widget? child}) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final cs = Theme.of(context).colorScheme;
+    return Semantics(
+      button: true,
+      label: label,
+      child: Material(
+        color: filled ? (iconColor ?? cs.primary) : (dark ? const Color(0xFF18174D) : Colors.white),
+        shape: CircleBorder(side: BorderSide(color: filled ? Colors.transparent : (dark ? Colors.white.withValues(alpha: 0.18) : Colors.black.withValues(alpha: 0.08)))),
+        elevation: 2,
+        shadowColor: Colors.black26,
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onTap,
+          child: SizedBox(
+            width: 46,
+            height: 46,
+            child: child ?? Icon(icon, size: 22, color: filled ? Colors.white : (iconColor ?? cs.primary)),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// "Accuracy ±12 m" pill: green when it is as good as a phone gets, amber so-so, red rough.
+  String _accuracyText(GeoFix? f, String Function(String key, [Map<String, String> args]) t) {
+    final m = f?.accuracyM;
+    if (m == null) return t('map.finding');
+    return t('map.accuracy', {'m': '${m.round()}'});
+  }
+
+  Color _accuracyColor(BuildContext context, GeoFix? f) {
+    final m = f?.accuracyM;
+    final cs = Theme.of(context).colorScheme;
+    if (m == null) return cs.outline;
+    if (m <= 30) return cs.tertiary;
+    if (m <= 100) return const Color(0xFFE3A13A);
+    return cs.error;
   }
 
   @override
   Widget build(BuildContext context) {
     final t = widget.i18n.t;
     final cs = Theme.of(context).colorScheme;
+    final dark = Theme.of(context).brightness == Brightness.dark;
     final f = _fix;
     final here = f == null ? const LatLng(9.0820, 7.4730) : LatLng(f.lat, f.lon);
     final p = _place;
+    final topPad = MediaQuery.paddingOf(context).top;
+    final canRoute = widget.police != null || _toPick != null;
     return Scaffold(
-      appBar: AppBar(title: Text(t('tabs.map'))),
-      body: Column(
+      body: Stack(
         children: [
-          Expanded(
-            child: Stack(
+          Positioned.fill(
+            child: FlutterMap(
+              mapController: _map,
+              options: MapOptions(
+                initialCenter: here,
+                initialZoom: f == null ? 5.5 : 17,
+                onLongPress: (_, pt) => unawaited(_onLongPress(pt)),
+              ),
               children: [
-                FlutterMap(
-                  mapController: _map,
-                  options: MapOptions(
-                    initialCenter: here,
-                    initialZoom: f == null ? 5.5 : 17,
-                    onLongPress: (_, pt) => unawaited(_onLongPress(pt)),
-                  ),
-                  children: [
-                    TileLayer(
-                      urlTemplate: AppConfig.tileUrl,
-                      subdomains: const ['a', 'b', 'c', 'd'],
-                      userAgentPackageName: 'ng.sentri.sentri',
-                    ),
-                    if (f != null)
-                      CircleLayer(circles: [
-                        CircleMarker(point: here, radius: (f.accuracyM ?? 20), useRadiusInMeter: true, color: cs.primary.withValues(alpha: 0.15), borderColor: cs.primary.withValues(alpha: 0.4), borderStrokeWidth: 1),
-                      ]),
-                    if (f != null)
-                      MarkerLayer(markers: [
-                        Marker(
-                          point: here,
-                          width: 28,
-                          height: 28,
-                          child: Container(decoration: BoxDecoration(color: cs.primary, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 4))),
-                        ),
-                      ]),
-                    MarkerLayer(
-                      markers: [
-                        for (final n in _near)
-                          Marker(
-                            point: LatLng(n.lat, n.lon),
-                            width: 30,
-                            height: 30,
-                            child: Icon(_nearIcon(n.kind), size: 20, color: const Color(0xFF6A5FF0), shadows: const [Shadow(blurRadius: 4, color: Colors.white)]),
-                          ),
-                      ],
-                    ),
-                    if (_fromPick != null)
-                      MarkerLayer(markers: [
-                        Marker(
-                          point: _fromPick!,
-                          width: 34,
-                          height: 34,
-                          child: const Icon(Icons.trip_origin, size: 26, color: Color(0xFF2BB673), shadows: [Shadow(blurRadius: 6, color: Colors.white)]),
-                        ),
-                      ]),
-                    if (_toPick != null)
-                      MarkerLayer(markers: [
-                        Marker(
-                          point: _toPick!,
-                          width: 34,
-                          height: 34,
-                          child: const Icon(Icons.location_on, size: 30, color: Color(0xFFE2574C), shadows: [Shadow(blurRadius: 6, color: Colors.white)]),
-                        ),
-                      ]),
-                    if (_route != null)
-                      PolylineLayer(polylines: [
-                        Polyline(points: _route!.points, strokeWidth: 5, color: const Color(0xFF6A5FF0)),
-                      ]),
-                    if (_route != null)
-                      MarkerLayer(markers: [
-                        Marker(
-                          point: _route!.dest,
-                          width: 34,
-                          height: 34,
-                          child: const Icon(Icons.flag, size: 30, color: Color(0xFF6A5FF0), shadows: [Shadow(blurRadius: 6, color: Colors.white)]),
-                        ),
-                      ]),
-                    const RichAttributionWidget(attributions: [TextSourceAttribution('© OpenStreetMap contributors'), TextSourceAttribution('© CARTO')]),
+                TileLayer(urlTemplate: AppConfig.tileUrl, userAgentPackageName: 'ng.sentri.sentri'),
+                if (f != null)
+                  CircleLayer(circles: [
+                    CircleMarker(point: here, radius: (f.accuracyM ?? 20), useRadiusInMeter: true, color: cs.primary.withValues(alpha: 0.15), borderColor: cs.primary.withValues(alpha: 0.4), borderStrokeWidth: 1),
+                  ]),
+                MarkerLayer(
+                  markers: [
+                    for (final n in _near)
+                      Marker(
+                        point: LatLng(n.lat, n.lon),
+                        width: 30,
+                        height: 30,
+                        child: Icon(_nearIcon(n.kind), size: 20, color: const Color(0xFF6A5FF0), shadows: const [Shadow(blurRadius: 4, color: Colors.white)]),
+                      ),
                   ],
                 ),
-                if (_pickMode != null)
-                  Positioned(
-                    top: 12,
-                    left: 20,
-                    right: 20,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                      decoration: BoxDecoration(color: cs.surface.withValues(alpha: 0.95), borderRadius: BorderRadius.circular(14), border: Border.all(color: cs.outlineVariant)),
-                      child: Text(t('map.pick_hint'), style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600), textAlign: TextAlign.center),
+                if (f != null)
+                  MarkerLayer(markers: [
+                    Marker(
+                      point: here,
+                      width: 28,
+                      height: 28,
+                      child: Container(decoration: BoxDecoration(color: cs.primary, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 4))),
                     ),
-                  ),
+                  ]),
+                if (_fromPick != null)
+                  MarkerLayer(markers: [
+                    Marker(
+                      point: _fromPick!,
+                      width: 34,
+                      height: 34,
+                      child: const Icon(Icons.trip_origin, size: 26, color: Color(0xFF2BB673), shadows: [Shadow(blurRadius: 6, color: Colors.white)]),
+                    ),
+                  ]),
+                if (_toPick != null)
+                  MarkerLayer(markers: [
+                    Marker(
+                      point: _toPick!,
+                      width: 34,
+                      height: 34,
+                      child: const Icon(Icons.location_on, size: 30, color: Color(0xFFE2574C), shadows: [Shadow(blurRadius: 6, color: Colors.white)]),
+                    ),
+                  ]),
+                if (_route != null)
+                  PolylineLayer(polylines: [
+                    Polyline(points: _route!.points, strokeWidth: 5, color: const Color(0xFF6A5FF0)),
+                  ]),
+                if (_route != null)
+                  MarkerLayer(markers: [
+                    Marker(
+                      point: _route!.dest,
+                      width: 34,
+                      height: 34,
+                      child: const Icon(Icons.flag, size: 30, color: Color(0xFF6A5FF0), shadows: [Shadow(blurRadius: 6, color: Colors.white)]),
+                    ),
+                  ]),
+                const RichAttributionWidget(attributions: [TextSourceAttribution('© OpenStreetMap contributors'), TextSourceAttribution('© CARTO')]),
               ],
             ),
           ),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-            decoration: BoxDecoration(color: cs.surface, border: Border(top: BorderSide(color: cs.outlineVariant))),
-            child: SafeArea(
-              top: false,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (_denied)
-                    Text(t('map.no_location'))
-                  else if (f == null)
-                    Text(t('map.finding'))
-                  else ...[
-                    Text(t('map.you_are_at'), style: TextStyle(fontSize: 12, color: cs.outline)),
-                    const SizedBox(height: 2),
-                    Text(p?.street ?? p?.area ?? t('map.unknown_place'), style: Theme.of(context).textTheme.titleMedium),
-                    if (p != null)
-                      Text([p.area, if (p.lga != null) '${p.lga} LGA', if (p.state != null) '${p.state} State'].whereType<String>().join(', ')),
-                    if (p?.landmark != null) Text(t('map.near', {'name': p!.landmark!}), style: TextStyle(fontSize: 13, color: cs.outline)),
-                    const SizedBox(height: 6),
-                    _accuracy(f, cs, t),
-                    Text('${f.lat.toStringAsFixed(5)}, ${f.lon.toStringAsFixed(5)}', style: TextStyle(fontSize: 12, color: cs.outline)),
-                    const SizedBox(height: 8),
-                    Wrap(alignment: WrapAlignment.start, spacing: 10, runSpacing: 6, children: [
-                      OutlinedButton.icon(
-                        onPressed: () => unawaited(_streetView(f)),
-                        icon: const Icon(Icons.visibility_outlined, size: 18),
-                        label: Text(t('map.street_view')),
+
+          // Address card, Google-style: what is under the pin, at the top.
+          Positioned(
+            top: topPad + 8,
+            left: 12,
+            right: 12,
+            child: Column(children: [
+              Material(
+                color: dark ? const Color(0xFF18174D) : Colors.white,
+                borderRadius: BorderRadius.circular(30),
+                elevation: 3,
+                shadowColor: Colors.black26,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(30),
+                  onTap: () {
+                    final fix = _fix;
+                    if (fix == null) return;
+                    try {
+                      _map.move(LatLng(fix.lat, fix.lon), 17);
+                    } catch (_) {}
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    child: Row(children: [
+                      Icon(Icons.location_on, size: 22, color: cs.primary),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text(
+                            _denied ? t('map.no_location') : (p?.street ?? p?.area ?? t('map.unknown_place')),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w600),
+                          ),
+                          if (!_denied)
+                            Text(
+                              [if (p?.area != null) p!.area!, _accuracyText(f, t)].join(' · '),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontSize: 12, color: cs.onSurface.withValues(alpha: 0.55)),
+                            ),
+                        ]),
                       ),
-                      OutlinedButton.icon(
-                        onPressed: widget.police == null && _toPick == null ? null : () => unawaited(_toggleRoute()),
-                        icon: _routeBusy ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.directions_outlined, size: 18),
-                        label: Text(t('map.directions')),
-                      ),
-                      OutlinedButton.icon(
-                        onPressed: () => _startPick('from'),
-                        icon: const Icon(Icons.trip_origin, size: 16, color: Color(0xFF2BB673)),
-                        label: Text(_fromPick == null ? t('map.pick_start') : t('map.pick_start_set', {'name': _fromName ?? ''})),
-                      ),
-                      OutlinedButton.icon(
-                        onPressed: () => _startPick('to'),
-                        icon: const Icon(Icons.location_on_outlined, size: 16, color: Color(0xFFE2574C)),
-                        label: Text(_toPick == null ? t('map.pick_end') : t('map.pick_end_set', {'name': _toName ?? ''})),
-                      ),
-                      OutlinedButton.icon(
-                        onPressed: () => _showNearby(),
-                        icon: const Icon(Icons.travel_explore_outlined, size: 18),
-                        label: Text(t('map.nearby')),
-                      ),
-                      if (_fromPick != null || _toPick != null)
-                        IconButton(
-                          tooltip: t('map.clear_point'),
-                          onPressed: _clearPoints,
-                          icon: const Icon(Icons.clear, size: 18),
-                        ),
                     ]),
-                    if (_routeError != null)
-                      Padding(padding: const EdgeInsets.only(top: 8), child: Text(_routeError!, style: TextStyle(fontSize: 12.5, color: cs.error))),
-                    if (_route != null) ...[
-                      const SizedBox(height: 10),
-                      Text(_route!.destName, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Color(0xFF6A5FF0))),
-                      Row(children: [
-                        Text(t('map.route_info', {'km': _route!.kmText, 'min': _route!.minText}), style: TextStyle(fontSize: 13, color: cs.outline)),
-                        const Spacer(),
-                        TextButton(onPressed: _showSteps, child: Text(t('map.route_steps'))),
-                        IconButton(
-                          tooltip: _voiceOn ? t('map.voice_off') : t('map.voice_on'),
-                          onPressed: _toggleVoice,
-                          icon: _voiceOn ? const Icon(Icons.volume_off, size: 18, color: Color(0xFF6A5FF0)) : const Icon(Icons.volume_up, size: 18),
-                        ),
-                      ]),
-                    ],
-                    if ((f.accuracyM ?? 0) > 60) ...[
-                      const SizedBox(height: 8),
-                      Text(t('map.approx_hint'), style: const TextStyle(fontSize: 12.5, height: 1.35)),
-                      Row(children: [
-                        TextButton(onPressed: () => unawaited(Geolocator.openLocationSettings()), child: Text(t('map.open_location_settings'))),
-                        TextButton(onPressed: () => unawaited(Geolocator.openAppSettings()), child: Text(t('map.open_app_settings'))),
-                      ]),
-                    ],
+                  ),
+                ),
+              ),
+              // The hint while a start/destination pick is waiting for a long-press.
+              if (_pickMode != null) ...[
+                const SizedBox(height: 8),
+                Material(
+                  color: cs.primary,
+                  borderRadius: BorderRadius.circular(30),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Text(t('map.pick_hint'), textAlign: TextAlign.center, style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w500)),
+                  ),
+                ),
+              ],
+            ]),
+          ),
+
+          // Round action buttons along the right edge.
+          Positioned(
+            right: 10,
+            bottom: MediaQuery.paddingOf(context).bottom + 118,
+            child: Column(children: [
+              _fab(context, icon: Icons.visibility_outlined, label: t('map.street_view'), onTap: f == null ? null : () => unawaited(_streetView(f))),
+              const SizedBox(height: 10),
+              _fab(
+                context,
+                icon: _routeBusy ? null : Icons.directions_outlined,
+                label: t('map.directions'),
+                onTap: canRoute || _route != null ? () => unawaited(_toggleRoute()) : null,
+                child: _routeBusy ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : null,
+              ),
+              const SizedBox(height: 10),
+              _fab(
+                context,
+                icon: Icons.trip_origin,
+                label: _fromPick == null ? t('map.pick_start') : t('map.pick_start_set', {'name': _fromName ?? ''}),
+                onTap: () => _startPick('from'),
+                filled: _fromPick != null,
+                iconColor: const Color(0xFF1F9A5B),
+              ),
+              const SizedBox(height: 10),
+              _fab(
+                context,
+                icon: Icons.location_on_outlined,
+                label: _toPick == null ? t('map.pick_end') : t('map.pick_end_set', {'name': _toName ?? ''}),
+                onTap: () => _startPick('to'),
+                filled: _toPick != null,
+                iconColor: const Color(0xFFE2574C),
+              ),
+              const SizedBox(height: 10),
+              _fab(context, icon: Icons.travel_explore_outlined, label: t('map.nearby'), onTap: () => _showNearby(), iconColor: cs.onSurface),
+            ]),
+          ),
+
+          // One slim card: the place, the route line, and nothing else.
+          Positioned(
+            left: 12,
+            right: 12,
+            bottom: MediaQuery.paddingOf(context).bottom + 8,
+            child: Material(
+              color: dark ? const Color(0xFF18174D) : Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              elevation: 4,
+              shadowColor: Colors.black26,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+                child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    // The dot: exact when green, amber when decent, red when only a rough area.
+                    Icon(_fix == null ? Icons.gps_not_fixed : ((_fix!.accuracyM ?? 999) <= 30 ? Icons.gps_fixed : Icons.gps_not_fixed), size: 16, color: _accuracyColor(context, f)),
+                    const SizedBox(width: 6),
+                    Text(_accuracyText(f, t), style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _accuracyColor(context, f))),
+                    const Spacer(),
+                    Text('${f?.lat.toStringAsFixed(5) ?? ''}, ${f?.lon.toStringAsFixed(5) ?? ''}', style: TextStyle(fontSize: 11.5, color: cs.onSurface.withValues(alpha: 0.5))),
+                  ]),
+                  if (_routeError != null)
+                    Padding(padding: const EdgeInsets.only(top: 6), child: Text(_routeError!, style: TextStyle(fontSize: 12.5, color: cs.error))),
+                  if (_route != null) ...[
+                    const SizedBox(height: 8),
+                    Row(children: [
+                      Container(width: 10, height: 10, decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: const Color(0xFF6A5FF0), width: 3))),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text(_route!.destName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700)),
+                          Text(t('map.route_info', {'km': _route!.kmText, 'min': _route!.minText}), style: TextStyle(fontSize: 12.5, color: cs.onSurface.withValues(alpha: 0.6))),
+                        ]),
+                      ),
+                      IconButton(
+                        tooltip: t('map.route_steps'),
+                        onPressed: _showSteps,
+                        icon: const Icon(Icons.list, size: 22, color: Color(0xFF6A5FF0)),
+                      ),
+                      IconButton(
+                        tooltip: _voiceOn ? t('map.voice_off') : t('map.voice_on'),
+                        onPressed: _toggleVoice,
+                        icon: _voiceOn ? const Icon(Icons.volume_up, size: 22, color: Color(0xFF6A5FF0)) : const Icon(Icons.volume_off_outlined, size: 22, color: Color(0xFF6A5FF0)),
+                      ),
+                      IconButton(
+                        tooltip: t('map.clear_point'),
+                        onPressed: _clearPoints,
+                        icon: Icon(Icons.close, size: 22, color: cs.onSurface.withValues(alpha: 0.6)),
+                      ),
+                    ]),
                   ],
-                ],
+                  if (_route == null && (f?.accuracyM ?? 0) > 100) ...[
+                    const SizedBox(height: 6),
+                    Text(t('map.approx_hint'), style: TextStyle(fontSize: 12, height: 1.3, color: cs.onSurface.withValues(alpha: 0.65))),
+                    Row(children: [
+                      TextButton(onPressed: () => unawaited(Geolocator.openLocationSettings()), child: Text(t('map.open_location_settings'))),
+                      TextButton(onPressed: () => unawaited(Geolocator.openAppSettings()), child: Text(t('map.open_app_settings'))),
+                    ]),
+                  ],
+                ]),
               ),
             ),
           ),

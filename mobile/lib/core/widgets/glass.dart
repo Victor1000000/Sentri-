@@ -53,10 +53,12 @@ class GlassBackdrop extends StatelessWidget {
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
     return Stack(children: [
-      Positioned.fill(child: ColoredBox(color: dark ? const Color(0xFF0B0B1A) : const Color(0xFFF2F2F7))),
-      Positioned(top: -80, right: -60, child: _blob(const Color(0xFF6A5FF0), dark ? 0.55 : 0.42, 320)),
-      Positioned(top: 260, left: -120, child: _blob(const Color(0xFF9B8CFF), dark ? 0.36 : 0.36, 300)),
-      Positioned(bottom: -60, right: -40, child: _blob(const Color(0xFF3B2FD9), dark ? 0.40 : 0.24, 300)),
+      Positioned.fill(child: ColoredBox(color: dark ? const Color(0xFF0B0B1A) : const Color(0xFFF7F8FA))),
+      if (dark) ...[
+        Positioned(top: -80, right: -60, child: _blob(const Color(0xFF6A5FF0), 0.55, 320)),
+        Positioned(top: 260, left: -120, child: _blob(const Color(0xFF9B8CFF), 0.36, 300)),
+        Positioned(bottom: -60, right: -40, child: _blob(const Color(0xFF3B2FD9), 0.40, 300)),
+      ],
       Positioned.fill(child: child),
     ]);
   }

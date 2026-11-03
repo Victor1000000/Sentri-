@@ -65,7 +65,7 @@ class SentriLogoTile extends StatelessWidget {
         padding: EdgeInsets.all(size * 0.17),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(size * 0.3),
-          gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Brand.indigoHi, Brand.indigo, Brand.indigoDeep], stops: [0, 0.45, 1]),
+          color: Brand.indigo,
           boxShadow: [BoxShadow(color: Brand.indigo.withValues(alpha: 0.28), blurRadius: 14, offset: const Offset(0, 5))],
         ),
         child: const SentriMark(color: Brand.mint),
@@ -104,19 +104,17 @@ class SentriBackground extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
-    final top = dark ? const Color(0xFF171452) : const Color(0xFFDDDBFF);
-    final mid = dark ? const Color(0xFF0D0C2E) : Colors.white;
-    final bot = dark ? const Color(0xFF131146) : const Color(0xFFE5E5FF);
+    // Light mode is flat and calm: plain surface, no gradients, no glow. Dark keeps its soft glow.
+    if (!dark) {
+      return DecoratedBox(decoration: const BoxDecoration(color: Color(0xFFF7F8FA)), child: child);
+    }
     return DecoratedBox(
-      decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [top, bot])),
-      child: DecoratedBox(
-        decoration: BoxDecoration(gradient: RadialGradient(center: const Alignment(0, 0.0), radius: 0.9, colors: [mid, mid.withValues(alpha: 0)])),
-        child: Stack(children: [
-          Positioned(top: -90, right: -70, child: IgnorePointer(child: Container(width: 320, height: 320, decoration: BoxDecoration(shape: BoxShape.circle, gradient: RadialGradient(colors: [Brand.indigoHi.withValues(alpha: dark ? 0.5 : 0.32), Brand.indigoHi.withValues(alpha: 0)]))))),
-          Positioned(bottom: -80, left: -90, child: IgnorePointer(child: Container(width: 300, height: 300, decoration: BoxDecoration(shape: BoxShape.circle, gradient: RadialGradient(colors: [const Color(0xFF9B8CFF).withValues(alpha: dark ? 0.35 : 0.3), const Color(0xFF9B8CFF).withValues(alpha: 0)]))))),
-          Positioned.fill(child: child),
-        ]),
-      ),
+      decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF171452), Color(0xFF131146)])),
+      child: Stack(children: [
+        Positioned(top: -90, right: -70, child: IgnorePointer(child: Container(width: 320, height: 320, decoration: BoxDecoration(shape: BoxShape.circle, gradient: RadialGradient(colors: [Brand.indigoHi.withValues(alpha: 0.5), Brand.indigoHi.withValues(alpha: 0)]))))),
+        Positioned(bottom: -80, left: -90, child: IgnorePointer(child: Container(width: 300, height: 300, decoration: BoxDecoration(shape: BoxShape.circle, gradient: RadialGradient(colors: [const Color(0xFF9B8CFF).withValues(alpha: 0.35), const Color(0xFF9B8CFF).withValues(alpha: 0)]))))),
+        Positioned.fill(child: child),
+      ]),
     );
   }
 }
@@ -248,7 +246,7 @@ class _LangOption extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 20),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(30),
-          gradient: selected ? gradientFill : null,
+          color: selected ? Brand.indigo : null,
           border: selected ? null : Border.all(color: ink, width: 2.5),
         ),
         child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
@@ -259,13 +257,6 @@ class _LangOption extends StatelessWidget {
     );
   }
 }
-
-const gradientFill = LinearGradient(
-  begin: Alignment.topCenter,
-  end: Alignment.bottomCenter,
-  colors: [Brand.indigoHi, Brand.indigo, Brand.indigoDeep],
-  stops: [0, 0.4, 1],
-);
 
 /// Primary action: glossy indigo pill with a lavender halo.
 class PillButton extends StatelessWidget {
@@ -281,9 +272,8 @@ class PillButton extends StatelessWidget {
         height: 58,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(30),
-          border: Border.all(color: Brand.lavender.withValues(alpha: 0.75), width: 3),
-          gradient: gradientFill,
-          boxShadow: [BoxShadow(color: Brand.indigo.withValues(alpha: 0.25), blurRadius: 20, offset: const Offset(0, 10))],
+          color: Brand.indigo,
+          boxShadow: [BoxShadow(color: Brand.indigo.withValues(alpha: 0.22), blurRadius: 18, offset: const Offset(0, 8))],
         ),
         child: Material(
           type: MaterialType.transparency,

@@ -28,7 +28,7 @@ ThemeData sentriTheme(Brightness b) {
     seedColor: const Color(0xFF0E08A3),
     brightness: b,
   ).copyWith(
-    surface: dark ? const Color(0xFF0D0C2E) : const Color(0xFFEDEDFF),
+    surface: dark ? const Color(0xFF0D0C2E) : const Color(0xFFF7F8FA),
     error: dark ? SentriColors.alarmDark : SentriColors.alarm,
     tertiary: dark ? SentriColors.safeDark : SentriColors.safe,
   );

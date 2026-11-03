@@ -66,6 +66,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     if (pin != null) await widget.sos.submitPin(pin);
   }
 
+  /// The whole screen is one column that scrolls if a small phone needs it, so no part ever
+  /// overlaps another. The SOS button stays where it is on normal screens.
   @override
   Widget build(BuildContext context) {
     final t = widget.i18n.t;
@@ -73,37 +75,38 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       listenable: Listenable.merge([widget.settings, widget.i18n, widget.inbox, widget.share]),
       builder: (context, _) {
         final s = widget.settings;
-        final dark = Theme.of(context).brightness == Brightness.dark;
         final alarm = Theme.of(context).colorScheme.error;
         final muted = Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6);
         return Scaffold(
           backgroundColor: Colors.transparent,
-          body: GlassBackdrop(child: SafeArea(
-            child: Column(
-              children: [
-                SentriTopBar(
-                  i18n: widget.i18n,
-                  compact: true,
-                  onLogoTap: () {
-                    if (++_titleTaps >= 5) {
-                      _titleTaps = 0;
-                      unawaited(_hiddenPin());
-                    }
-                  },
-                  onLanguage: (c) async {
-                    await widget.i18n.setLanguage(c);
-                    await s.update(language: c);
-                  },
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(22, 10, 22, 0),
-                  child: _MessageBar(
-                    inbox: widget.inbox,
+          body: GlassBackdrop(child: SingleChildScrollView(
+            child: SafeArea(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SentriTopBar(
                     i18n: widget.i18n,
-                    onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => InboxScreen(inbox: widget.inbox, api: widget.api, i18n: widget.i18n, police: widget.police))),
+                    compact: true,
+                    onLogoTap: () {
+                      if (++_titleTaps >= 5) {
+                        _titleTaps = 0;
+                        unawaited(_hiddenPin());
+                      }
+                    },
+                    onLanguage: (c) async {
+                      await widget.i18n.setLanguage(c);
+                      await s.update(language: c);
+                    },
                   ),
-                ),
-                const SizedBox(height: 20),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(22, 10, 22, 0),
+                    child: _MessageBar(
+                      inbox: widget.inbox,
+                      i18n: widget.i18n,
+                      onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => InboxScreen(inbox: widget.inbox, api: widget.api, i18n: widget.i18n, police: widget.police))),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 26),
                     child: Text(
@@ -112,82 +115,77 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                       style: const TextStyle(fontSize: 17.5, height: 1.35, fontWeight: FontWeight.w800, letterSpacing: -0.2),
                     ),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 14),
                   Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                  Container(width: 8, height: 8, decoration: BoxDecoration(shape: BoxShape.circle, color: Theme.of(context).colorScheme.tertiary)),
-                  const SizedBox(width: 8),
-                  Text(t('home.protected'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
-                ]),
-                Expanded(
-                  child: Center(
-                    child: SingleChildScrollView(
-                      child: Column(mainAxisSize: MainAxisSize.min, children: [
-                        Semantics(
-                          button: true,
-                          label: 'SOS',
-                          child: GestureDetector(
-                            onTapDown: (_) => _hold.forward(),
-                            onTapUp: (_) => _hold.reset(),
-                            onTapCancel: _hold.reset,
-                            child: AnimatedBuilder(
-                              animation: _hold,
-                              builder: (context, _) => SizedBox(
-                                width: 220,
-                                height: 220,
-                                child: Stack(alignment: Alignment.center, children: [
-                                  Container(
-                                    width: 196 + 24 * _hold.value,
-                                    height: 196 + 24 * _hold.value,
-                                    decoration: BoxDecoration(shape: BoxShape.circle, color: alarm.withValues(alpha: 0.08 + 0.08 * _hold.value)),
-                                  ),
-                                  SizedBox(width: 214, height: 214, child: CircularProgressIndicator(value: _hold.value, strokeWidth: 5, color: alarm, backgroundColor: Colors.transparent)),
-                                  Container(
-                                    width: 170,
-                                    height: 170,
-                                    decoration: BoxDecoration(color: alarm, shape: BoxShape.circle, boxShadow: [BoxShadow(color: alarm.withValues(alpha: 0.3), blurRadius: 26, offset: const Offset(0, 10))]),
-                                    alignment: Alignment.center,
-                                    child: const Text('SOS', style: TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.w600, letterSpacing: 1)),
-                                  ),
-                                ]),
-                              ),
+                    Container(width: 8, height: 8, decoration: BoxDecoration(shape: BoxShape.circle, color: Theme.of(context).colorScheme.tertiary)),
+                    const SizedBox(width: 8),
+                    Text(t('home.protected'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
+                  ]),
+                  const SizedBox(height: 22),
+                  Semantics(
+                    button: true,
+                    label: 'SOS',
+                    child: GestureDetector(
+                      onTapDown: (_) => _hold.forward(),
+                      onTapUp: (_) => _hold.reset(),
+                      onTapCancel: _hold.reset,
+                      child: AnimatedBuilder(
+                        animation: _hold,
+                        builder: (context, _) => SizedBox(
+                          width: 214,
+                          height: 214,
+                          child: Stack(alignment: Alignment.center, children: [
+                            Container(
+                              width: 190 + 22 * _hold.value,
+                              height: 190 + 22 * _hold.value,
+                              decoration: BoxDecoration(shape: BoxShape.circle, color: alarm.withValues(alpha: 0.08 + 0.08 * _hold.value)),
                             ),
-                          ),
+                            SizedBox(width: 210, height: 210, child: CircularProgressIndicator(value: _hold.value, strokeWidth: 5, color: alarm, backgroundColor: Colors.transparent)),
+                            Container(
+                              width: 166,
+                              height: 166,
+                              decoration: BoxDecoration(color: alarm, shape: BoxShape.circle, boxShadow: [BoxShadow(color: alarm.withValues(alpha: 0.3), blurRadius: 26, offset: const Offset(0, 10))]),
+                              alignment: Alignment.center,
+                              child: const Text('SOS', style: TextStyle(color: Colors.white, fontSize: 34, fontWeight: FontWeight.w600, letterSpacing: 1)),
+                            ),
+                          ]),
                         ),
-                        const SizedBox(height: 18),
-                        Text(t('home.hold'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
-                        const SizedBox(height: 8),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 48),
-                          child: Text(t('home.hold_help'), textAlign: TextAlign.center, style: TextStyle(fontSize: 13, height: 1.4, color: muted)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(t('home.hold'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 6),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 44),
+                    child: Text(t('home.hold_help'), textAlign: TextAlign.center, style: TextStyle(fontSize: 13, height: 1.4, color: muted)),
+                  ),
+                  const SizedBox(height: 18),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(22, 0, 22, 16),
+                    child: Glass(
+                      radius: 18,
+                      child: Column(children: [
+                        _MenuRow(
+                          label: t('share.title'),
+                          trailing: widget.share.active != null ? const _SharingTag() : null,
+                          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ShareScreen(share: widget.share, api: widget.api, i18n: widget.i18n))),
+                        ),
+                        const Divider(height: 0.5, thickness: 0.5, indent: 16),
+                        _MenuRow(
+                          label: t('contacts.title'),
+                          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ContactsScreen(api: widget.api, i18n: widget.i18n))),
+                        ),
+                        const Divider(height: 0.5, thickness: 0.5, indent: 16),
+                        _MenuRow(
+                          label: t('triggers.title'),
+                          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => _ShortcutsPage(home: this))),
                         ),
                       ]),
                     ),
                   ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(22, 0, 22, 14),
-                  child: Glass(
-                    radius: 18,
-                    child: Column(children: [
-                      _MenuRow(
-                        label: t('share.title'),
-                        trailing: widget.share.active != null ? const _SharingTag() : null,
-                        onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ShareScreen(share: widget.share, api: widget.api, i18n: widget.i18n))),
-                      ),
-                      const Divider(height: 0.5, thickness: 0.5, indent: 16),
-                      _MenuRow(
-                        label: t('contacts.title'),
-                        onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ContactsScreen(api: widget.api, i18n: widget.i18n))),
-                      ),
-                      const Divider(height: 0.5, thickness: 0.5, indent: 16),
-                      _MenuRow(
-                        label: t('triggers.title'),
-                        onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => _ShortcutsPage(home: this))),
-                      ),
-                    ]),
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
           )),
         );

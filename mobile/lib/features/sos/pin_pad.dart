@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 
-/// Number pad for entering a PIN. PINs are 4-8 digits, so there is an explicit OK key.
+/// Number pad for the cancel PIN. The PIN is exactly 4 digits: the fourth digit submits at
+/// once, like a bank card machine, so there is no OK key and no way to type more.
 /// Dots (not digits) are shown, and haptics/sounds are left off so nothing draws attention.
 class PinPad extends StatefulWidget {
-  const PinPad({super.key, required this.onSubmit, this.maxLength = 8, this.enabled = true});
+  const PinPad({super.key, required this.onSubmit, this.enabled = true});
   final void Function(String pin) onSubmit;
-  final int maxLength;
   final bool enabled;
 
   @override
@@ -13,14 +13,17 @@ class PinPad extends StatefulWidget {
 }
 
 class PinPadState extends State<PinPad> {
+  static const int _length = 4;
   String _pin = '';
 
   /// Clears the entry (used after a wrong PIN).
   void clear() => setState(() => _pin = '');
 
   void _add(String d) {
-    if (!widget.enabled || _pin.length >= widget.maxLength) return;
-    setState(() => _pin += d);
+    if (!widget.enabled || _pin.length >= _length) return;
+    final next = _pin + d;
+    setState(() => _pin = next);
+    if (next.length == _length) widget.onSubmit(next);
   }
 
   void _back() {
@@ -28,26 +31,18 @@ class PinPadState extends State<PinPad> {
     setState(() => _pin = _pin.substring(0, _pin.length - 1));
   }
 
-  void _ok() {
-    if (!widget.enabled || _pin.length < 4) return;
-    final p = _pin;
-    setState(() => _pin = '');
-    widget.onSubmit(p);
-  }
-
-  Widget _key(BuildContext context, String label, VoidCallback onTap, {IconData? icon, bool primary = false}) {
-    final cs = Theme.of(context).colorScheme;
+  Widget _key(BuildContext context, String label, VoidCallback onTap, {IconData? icon}) {
     return Expanded(
       child: Padding(
         padding: const EdgeInsets.all(5),
         child: SizedBox(
-          height: 60,
+          height: 62,
           child: FilledButton(
             onPressed: widget.enabled ? onTap : null,
             style: FilledButton.styleFrom(
               minimumSize: Size.zero,
-              backgroundColor: primary ? cs.primary : cs.surfaceContainerHighest,
-              foregroundColor: primary ? cs.onPrimary : cs.onSurface,
+              backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+              foregroundColor: Theme.of(context).colorScheme.onSurface,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             ),
             child: icon != null ? Icon(icon) : Text(label, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w500)),
@@ -61,17 +56,16 @@ class PinPadState extends State<PinPad> {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 320),
+      constraints: const BoxConstraints(maxWidth: 300),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Eight slots so the layout never jumps as digits are added.
           SizedBox(
             height: 28,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                for (var i = 0; i < widget.maxLength; i++)
+                for (var i = 0; i < _length; i++)
                   AnimatedContainer(
                     duration: const Duration(milliseconds: 120),
                     margin: const EdgeInsets.symmetric(horizontal: 5),
@@ -93,13 +87,11 @@ class PinPadState extends State<PinPad> {
             ['7', '8', '9'],
           ])
             Row(children: [for (final d in row) _key(context, d, () => _add(d))]),
-          Row(
-            children: [
-              _key(context, '', _back, icon: Icons.backspace_outlined),
-              _key(context, '0', () => _add('0')),
-              _key(context, '', _ok, icon: Icons.check, primary: true),
-            ],
-          ),
+          Row(children: [
+            const Expanded(child: SizedBox(height: 62)),
+            _key(context, '0', () => _add('0')),
+            _key(context, '', _back, icon: Icons.backspace_outlined),
+          ]),
         ],
       ),
     );
