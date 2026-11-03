@@ -462,7 +462,7 @@ class _MapScreenState extends State<MapScreen> {
         );
       },
     );
-    debounce.cancel();
+    debounce?.cancel();
   }
 
   /// A typed place becomes the destination and the route starts immediately.
