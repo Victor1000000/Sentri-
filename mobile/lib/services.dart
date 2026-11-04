@@ -15,6 +15,7 @@ import 'core/storage/key_value_store.dart';
 import 'core/timers.dart';
 import 'features/battery/battery.dart';
 import 'features/battery/low_battery_alerter.dart';
+import 'features/checkin/checkin_controller.dart';
 import 'features/inbox/inbox_controller.dart';
 import 'features/location/location.dart';
 import 'features/police/police_directory.dart';
@@ -41,6 +42,7 @@ class AppServices {
     required this.location,
     required this.inbox,
     required this.share,
+    required this.checkin,
     required this.waking,
   });
 
@@ -58,6 +60,9 @@ class AppServices {
   final LocationSource location;
   final InboxController inbox;
   final ShareController share;
+
+  /// The "Check on me" watch: a timed safety check that raises a full alert when missed.
+  final CheckInController checkin;
 
   /// True while the app waits for a sleeping server to wake up.
   final ValueListenable<bool> waking;
@@ -105,6 +110,8 @@ class AppServices {
     );
     final share = ShareController(api: api, location: location, battery: battery, timers: timers, store: store, dataSaver: () => settings.dataSaver);
 
+    final checkin = CheckInController(sos: sos, timers: timers, store: store);
+
     final lowBattery = LowBatteryAlerter(
       api: api,
       battery: battery,
@@ -143,6 +150,7 @@ class AppServices {
       location: location,
       inbox: inbox,
       share: share,
+      checkin: checkin,
       waking: httpApi.waking,
     );
     // Start waking a sleeping server now, so it is ready by the time the person taps anything.
@@ -168,6 +176,8 @@ class AppServices {
     bridge.onTrigger((t) => unawaited(sos.trigger(t.name)));
     final pending = await bridge.takePendingTrigger();
     if (pending != null) unawaited(sos.trigger(pending.name));
+    // A "check on me" window armed before the app last closed re-arms (or fires if it just ended).
+    if (settings.onboarded) unawaited(checkin.resume());
 
     // Protection is the app's whole purpose: the triggers stay armed even when the session has
     // slipped (for example after the server restarted), so help always works.
@@ -190,6 +200,7 @@ class AppServices {
   Future<void> dispose() async {
     await _net?.cancel();
     lowBattery.stop();
+    checkin.dispose();
     sos.dispose();
     share.dispose();
   }

@@ -30,7 +30,7 @@ const Geo = z.object({
 });
 
 const StartBody = Geo.partial().extend({
-  trigger: z.enum(['floating', 'volume', 'shake', 'power', 'widget']),
+  trigger: z.enum(['floating', 'volume', 'shake', 'power', 'widget', 'checkin']),
 });
 
 export function buildApp(d: AppDeps): FastifyInstance {

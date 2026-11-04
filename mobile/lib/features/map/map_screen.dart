@@ -625,16 +625,16 @@ class _MapScreenState extends State<MapScreen> {
         destName = t('map.to_police', {'state': stateName});
       }
       // The free OSM router carries separate road networks for car, foot and bike, so the phone
-      // asks for the one matching how the person is travelling. The shared free server says no
-      // now and then when it is busy, so the ask waits a little and tries again twice; car trips
-      // also have a second free server answering as the spare. No key, no charge, no timeout trap.
+      // asks for the one matching how the person is travelling. (Its servers are named routed-car,
+      // routed-foot and routed-bike - not by travel-word, so the name is mapped here.)
+      const slug = switch (_mode) { 'driving' => 'car', 'walking' => 'foot', _ => 'bike' };
       const headers = {'User-Agent': 'Sentri/0.1'};
       final query = '${from.longitude},${from.latitude};${dest.longitude},${dest.latitude}?overview=full&geometries=geojson&steps=true';
       Map<String, dynamic>? body;
       for (var attempt = 1; attempt <= 3 && body == null; attempt++) {
         if (attempt > 1) await Future.delayed(Duration(milliseconds: attempt == 2 ? 900 : 2200));
         try {
-          final res = await http.get(Uri.parse('https://routing.openstreetmap.de/routed-$_mode/route/v1/driving/$query'), headers: headers).timeout(const Duration(seconds: 20));
+          final res = await http.get(Uri.parse('https://routing.openstreetmap.de/routed-$slug/route/v1/driving/$query'), headers: headers).timeout(const Duration(seconds: 20));
           if (res.statusCode != 200) continue;
           final parsed = jsonDecode(res.body);
           if (parsed is Map<String, dynamic> && parsed['routes'] is List && (parsed['routes'] as List).isNotEmpty) body = parsed;

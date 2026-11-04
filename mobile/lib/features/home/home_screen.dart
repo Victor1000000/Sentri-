@@ -16,15 +16,18 @@ import '../share/share_controller.dart';
 import '../share/share_screen.dart';
 import '../../core/widgets/flat.dart';
 import '../../core/widgets/glass.dart';
+import 'package:url_launcher/url_launcher.dart';
+import '../checkin/checkin_controller.dart';
 import '../onboarding/permissions_panel.dart';
 import '../sos/pin_pad.dart';
 import '../sos/sos_controller.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key, required this.sos, required this.settings, required this.i18n, required this.bridge, required this.api, required this.inbox, required this.share, required this.police});
+  const HomeScreen({super.key, required this.sos, required this.settings, required this.i18n, required this.bridge, required this.api, required this.inbox, required this.share, required this.checkin, required this.police});
   final SentriApi api;
   final InboxController inbox;
   final ShareController share;
+  final CheckInController checkin;
   final Future<PoliceDirectory> police;
   final SosController sos;
   final AppSettings settings;
@@ -72,7 +75,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   Widget build(BuildContext context) {
     final t = widget.i18n.t;
     return ListenableBuilder(
-      listenable: Listenable.merge([widget.settings, widget.i18n, widget.inbox, widget.share]),
+      listenable: Listenable.merge([widget.settings, widget.i18n, widget.inbox, widget.share, widget.checkin]),
       builder: (context, _) {
         final s = widget.settings;
         final alarm = Theme.of(context).colorScheme.error;
@@ -161,6 +164,17 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                     child: Text(t('home.hold_help'), textAlign: TextAlign.center, style: TextStyle(fontSize: 13, height: 1.4, color: muted)),
                   ),
                   const SizedBox(height: 18),
+                  // "Check on me": a timed safety watch. Contacts get a full alert if the
+                  // person has not marked themselves safe when the window ends.
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(22, 0, 22, 12),
+                    child: CheckInCard(checkin: widget.checkin, sos: widget.sos, i18n: widget.i18n),
+                  ),
+                  // Emergency numbers: free to call from any phone, data or no data.
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(22, 0, 22, 12),
+                    child: EmergencyNumbersCard(i18n: widget.i18n),
+                  ),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(22, 0, 22, 16),
                     child: Glass(
@@ -276,6 +290,144 @@ class _SharingTag extends StatelessWidget {
         SizedBox(width: 2),
         Text('Live', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Flat.live)),
       ]);
+}
+
+/// The "Check on me" card. Idle: pick a window and it is armed at once. Running: shows when the
+/// alert would go out and one big "I'm safe" button. Nothing here overlaps: the whole home screen
+/// is a scrolling column and this card lays out in strict top-down rows.
+class CheckInCard extends StatelessWidget {
+  const CheckInCard({super.key, required this.checkin, required this.sos, required this.i18n});
+  final CheckInController checkin;
+  final SosController sos;
+  final I18n i18n;
+
+  static const _windows = [Duration(minutes: 10), Duration(minutes: 20), Duration(minutes: 30)];
+
+  @override
+  Widget build(BuildContext context) {
+    final t = i18n.t;
+    final cs = Theme.of(context).colorScheme;
+    final muted = cs.onSurface.withValues(alpha: 0.55);
+    return ListenableBuilder(
+      listenable: checkin,
+      builder: (context, _) {
+        final running = checkin.running;
+        return Glass(
+          radius: 18,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Icon(running ? Icons.timer : Icons.timer_outlined, size: 20, color: cs.primary),
+                const SizedBox(width: 8),
+                Expanded(child: Text(t('home.check_title'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600))),
+              ]),
+              const SizedBox(height: 4),
+              Text(
+                running
+                    ? t('home.check_until', {'time': TimeOfDay.fromDateTime(checkin.endsAt!).format(context)})
+                    : t('home.check_sub'),
+                style: TextStyle(fontSize: 12.5, height: 1.35, color: muted),
+              ),
+              const SizedBox(height: 8),
+              if (running) ...[
+                Row(children: [
+                  Expanded(
+                    child: FilledButton.icon(
+                      style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(44), backgroundColor: cs.primary),
+                      onPressed: () => unawaited(checkin.cancel()),
+                      icon: const Icon(Icons.task_alt, size: 20),
+                      label: Text(t('home.check_safe'), style: const TextStyle(fontSize: 15)),
+                    ),
+                  ),
+                ]),
+              ] else ...[
+                Row(children: [
+                  for (final w in _windows) ...[
+                    Expanded(
+                      child: OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size.fromHeight(40),
+                          padding: EdgeInsets.zero,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                        ),
+                        onPressed: () => unawaited(checkin.start(w)),
+                        child: Text('${w.inMinutes} min', style: const TextStyle(fontSize: 14)),
+                      ),
+                    ),
+                    if (w != _windows.last) const SizedBox(width: 8),
+                  ],
+                ]),
+              ],
+            ]),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// The emergency numbers card: national line, FRSC and the Lagos line. All are free calls from
+/// any phone, so they work even with no data connection. Each row dials straight away.
+class EmergencyNumbersCard extends StatelessWidget {
+  const EmergencyNumbersCard({super.key, required this.i18n});
+  final I18n i18n;
+
+  Future<void> _call(String number) async {
+    try {
+      await launchUrl(Uri.parse('tel:$number'), mode: LaunchMode.externalApplication);
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = i18n.t;
+    final cs = Theme.of(context).colorScheme;
+    final muted = cs.onSurface.withValues(alpha: 0.55);
+    final rows = <(String, String, String)>[
+      ('112', t('home.em_national'), Icons.local_police_outlined),
+      ('122', t('home.em_frsc'), Icons.traffic_outlined),
+      ('767', t('home.em_lagos'), Icons.sos_outlined),
+    ];
+    return Glass(
+      radius: 18,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Icon(Icons.emergency_outlined, size: 20, color: cs.error),
+            const SizedBox(width: 8),
+            Expanded(child: Text(t('home.em_title'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600))),
+          ]),
+          const SizedBox(height: 4),
+          Text(t('home.em_sub'), style: TextStyle(fontSize: 12.5, height: 1.35, color: muted)),
+          const SizedBox(height: 6),
+          for (final r in rows) ...[
+            InkWell(
+              onTap: () => unawaited(_call(r.$1)),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 9),
+                child: Row(children: [
+                  Container(
+                    width: 34,
+                    height: 34,
+                    decoration: BoxDecoration(shape: BoxShape.circle, color: cs.error.withValues(alpha: 0.1)),
+                    child: Icon(r.$3, size: 18, color: cs.error),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(child: Text(r.$2, style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600))),
+                  Text(r.$1, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: cs.primary)),
+                  const SizedBox(width: 10),
+                  Icon(Icons.phone_outlined, size: 19, color: cs.primary),
+                ]),
+              ),
+            ),
+            if (r != rows.last) Divider(height: 0.5, thickness: 0.5, color: cs.onSurface.withValues(alpha: 0.08)),
+          ],
+        ]),
+      ),
+    );
+  }
 }
 
 /// The message bar. Calm when there is nothing new; turns red and names the person when a live alert needs a response.

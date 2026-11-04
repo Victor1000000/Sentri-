@@ -3,7 +3,7 @@
 
 export type Locale = 'en' | 'ha' | 'yo' | 'ig' | 'pcm';
 export type SosState = 'countdown' | 'active' | 'acknowledged' | 'cancelled' | 'expired';
-export type TriggerType = 'floating' | 'volume' | 'shake' | 'power' | 'widget';
+export type TriggerType = 'floating' | 'volume' | 'shake' | 'power' | 'widget' | 'checkin';
 export type MessageKind = 'sos' | 'duress' | 'offline' | 'low_battery' | 'test' | 'share_start' | 'share_stop';
 
 export interface GeoPoint {

@@ -147,7 +147,7 @@ class _TabsState extends State<_Tabs> {
     final body = switch (_tab) {
       1 => MapScreen(location: s.location, api: s.api, i18n: s.i18n, placeLookup: const DevicePlaceLookup(), onPlace: (p) => _state = p?.state, police: _directoryFuture),
       2 => PoliceScreen(directory: _directory, i18n: s.i18n, currentState: _state),
-      _ => HomeScreen(sos: s.sos, settings: s.settings, i18n: s.i18n, bridge: s.bridge, api: s.api, inbox: s.inbox, share: s.share, police: s.police),
+      _ => HomeScreen(sos: s.sos, settings: s.settings, i18n: s.i18n, bridge: s.bridge, api: s.api, inbox: s.inbox, share: s.share, checkin: s.checkin, police: s.police),
     };
     return Scaffold(
       body: body,
