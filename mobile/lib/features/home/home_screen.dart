@@ -384,7 +384,7 @@ class EmergencyNumbersCard extends StatelessWidget {
     final t = i18n.t;
     final cs = Theme.of(context).colorScheme;
     final muted = cs.onSurface.withValues(alpha: 0.55);
-    final rows = <(String, String, String)>[
+    final rows = <(String, String, IconData)>[
       ('112', t('home.em_national'), Icons.local_police_outlined),
       ('122', t('home.em_frsc'), Icons.traffic_outlined),
       ('767', t('home.em_lagos'), Icons.sos_outlined),

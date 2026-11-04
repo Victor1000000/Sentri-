@@ -627,7 +627,7 @@ class _MapScreenState extends State<MapScreen> {
       // The free OSM router carries separate road networks for car, foot and bike, so the phone
       // asks for the one matching how the person is travelling. (Its servers are named routed-car,
       // routed-foot and routed-bike - not by travel-word, so the name is mapped here.)
-      const slug = switch (_mode) { 'driving' => 'car', 'walking' => 'foot', _ => 'bike' };
+      final slug = switch (_mode) { 'driving' => 'car', 'walking' => 'foot', _ => 'bike' };
       const headers = {'User-Agent': 'Sentri/0.1'};
       final query = '${from.longitude},${from.latitude};${dest.longitude},${dest.latitude}?overview=full&geometries=geojson&steps=true';
       Map<String, dynamic>? body;
