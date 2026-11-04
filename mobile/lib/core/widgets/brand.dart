@@ -104,18 +104,8 @@ class SentriBackground extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
-    // Light mode is flat and calm: plain surface, no gradients, no glow. Dark keeps its soft glow.
-    if (!dark) {
-      return DecoratedBox(decoration: const BoxDecoration(color: Color(0xFFF7F8FA)), child: child);
-    }
-    return DecoratedBox(
-      decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFF171452), Color(0xFF131146)])),
-      child: Stack(children: [
-        Positioned(top: -90, right: -70, child: IgnorePointer(child: Container(width: 320, height: 320, decoration: BoxDecoration(shape: BoxShape.circle, gradient: RadialGradient(colors: [Brand.indigoHi.withValues(alpha: 0.5), Brand.indigoHi.withValues(alpha: 0)]))))),
-        Positioned(bottom: -80, left: -90, child: IgnorePointer(child: Container(width: 300, height: 300, decoration: BoxDecoration(shape: BoxShape.circle, gradient: RadialGradient(colors: [const Color(0xFF9B8CFF).withValues(alpha: 0.35), const Color(0xFF9B8CFF).withValues(alpha: 0)]))))),
-        Positioned.fill(child: child),
-      ]),
-    );
+    // Both modes stay flat and calm: plain surface, no gradients, no glow spots.
+    return DecoratedBox(decoration: BoxDecoration(color: dark ? const Color(0xFF141519) : const Color(0xFFF7F8FA)), child: child);
   }
 }
 
@@ -154,7 +144,7 @@ class SentriTopBar extends StatelessWidget {
             button: true,
             label: i18n.t('lang.title'),
             child: Material(
-              color: compact ? (Theme.of(context).brightness == Brightness.dark ? const Color(0xFF18174D) : Colors.white) : Brand.indigo,
+              color: compact ? (Theme.of(context).brightness == Brightness.dark ? const Color(0xFF1B1D23) : Colors.white) : Brand.indigo,
               shape: CircleBorder(side: compact ? BorderSide(color: Colors.black.withValues(alpha: 0.12)) : BorderSide.none),
               elevation: compact ? 0 : 4,
               shadowColor: Brand.indigo.withValues(alpha: 0.4),
@@ -218,7 +208,7 @@ class ThemeButton extends StatelessWidget {
       button: true,
       label: dark ? 'Light mode' : 'Dark mode',
       child: Material(
-        color: dark ? const Color(0xFF18174D) : Colors.white,
+        color: dark ? const Color(0xFF1B1D23) : Colors.white,
         shape: CircleBorder(side: BorderSide(color: (dark ? Colors.white : Colors.black).withValues(alpha: 0.14))),
         child: InkWell(
           customBorder: const CircleBorder(),

@@ -28,7 +28,7 @@ ThemeData sentriTheme(Brightness b) {
     seedColor: const Color(0xFF0E08A3),
     brightness: b,
   ).copyWith(
-    surface: dark ? const Color(0xFF0D0C2E) : const Color(0xFFF7F8FA),
+    surface: dark ? const Color(0xFF141519) : const Color(0xFFF7F8FA),
     error: dark ? SentriColors.alarmDark : SentriColors.alarm,
     tertiary: dark ? SentriColors.safeDark : SentriColors.safe,
   );
@@ -61,7 +61,7 @@ ThemeData sentriTheme(Brightness b) {
     cardTheme: CardThemeData(
       elevation: 0,
       margin: EdgeInsets.zero,
-      color: dark ? const Color(0xFF18174D) : Colors.white,
+      color: dark ? const Color(0xFF1B1D23) : Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(24),
         side: BorderSide(color: base.outlineVariant),
@@ -86,7 +86,7 @@ ThemeData sentriTheme(Brightness b) {
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: dark ? const Color(0xFF1A1948) : Colors.white,
+      fillColor: dark ? const Color(0xFF20232A) : Colors.white,
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(30), borderSide: BorderSide(color: base.outlineVariant)),
       enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(30), borderSide: BorderSide(color: base.outlineVariant)),
     ),

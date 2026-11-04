@@ -20,7 +20,7 @@ class Glass extends StatelessWidget {
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
     final solid = MediaQuery.of(context).highContrast;
-    final base = dark ? const Color(0xFFB9B5FF) : Colors.white;
+    final base = dark ? const Color(0xFFD8DADF) : Colors.white;
     final fill = Color.alphaBlend((tint ?? Colors.transparent).withValues(alpha: 0.12), base.withValues(alpha: solid ? (dark ? 0.16 : 1) : (dark ? 0.12 : 0.42)));
     final r = BorderRadius.circular(radius);
     final box = Container(
@@ -52,22 +52,10 @@ class GlassBackdrop extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
+    // Flat and calm in both modes; the glass panels blur this single calm colour.
     return Stack(children: [
-      Positioned.fill(child: ColoredBox(color: dark ? const Color(0xFF0B0B1A) : const Color(0xFFF7F8FA))),
-      if (dark) ...[
-        Positioned(top: -80, right: -60, child: _blob(const Color(0xFF6A5FF0), 0.55, 320)),
-        Positioned(top: 260, left: -120, child: _blob(const Color(0xFF9B8CFF), 0.36, 300)),
-        Positioned(bottom: -60, right: -40, child: _blob(const Color(0xFF3B2FD9), 0.40, 300)),
-      ],
+      Positioned.fill(child: ColoredBox(color: dark ? const Color(0xFF141519) : const Color(0xFFF7F8FA))),
       Positioned.fill(child: child),
     ]);
   }
-
-  Widget _blob(Color c, double a, double size) => IgnorePointer(
-        child: Container(
-          width: size,
-          height: size,
-          decoration: BoxDecoration(shape: BoxShape.circle, gradient: RadialGradient(colors: [c.withValues(alpha: a), c.withValues(alpha: 0)])),
-        ),
-      );
 }

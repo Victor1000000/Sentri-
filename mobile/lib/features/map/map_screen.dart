@@ -83,6 +83,8 @@ class _MapScreenState extends State<MapScreen> {
   _RoutePlan? _route;
   bool _routeBusy = false;
   String? _routeError;
+  /// True when the error on the card is one touching Retry can actually fix (network or GPS).
+  bool _routeRetry = false;
   int _routeSeq = 0;
 
   // -- picked points: directions work between any two spots on the map --
@@ -560,7 +562,7 @@ class _MapScreenState extends State<MapScreen> {
   /// Folds an OSRM route answer into a drawable, speakable plan. Used as it is, free, no key.
   static _RoutePlan _buildPlan(Map<String, dynamic> r, LatLng dest, String destName) {
     final coords = ((r['geometry'] as Map<String, dynamic>)['coordinates'] ?? const <dynamic>[]) as List<dynamic>;
-    final points = [for (final c in coords) LatLng((c as List<dynamic>)[1] as double, c[0] as double)];
+    final points = [for (final c in coords) LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble())];
     final km = (r['distance'] as num).toDouble() / 1000.0;
     final mins = (((r['duration'] as num).toDouble()) / 60).round();
     final leg = (r['legs'] as List<dynamic>).first as Map<String, dynamic>;
@@ -578,7 +580,7 @@ class _MapScreenState extends State<MapScreen> {
       stepTexts.add('${_arrow(type, modifier)}$road - $dist');
       stepSay.add(_sayFor(type, modifier, road, metres));
       final loc = (m['location'] as List<dynamic>);
-      stepLocs.add(LatLng(loc[1] as double, loc[0] as double));
+      stepLocs.add(LatLng((loc[1] as num).toDouble(), (loc[0] as num).toDouble()));
     }
     return _RoutePlan(points: points, dest: dest, destName: destName, km: km, mins: mins, stepTexts: stepTexts, stepLocs: stepLocs, stepSay: stepSay);
   }
@@ -592,7 +594,12 @@ class _MapScreenState extends State<MapScreen> {
     final f = _fix;
     final dir = widget.police;
     final to = _toPick;
-    if (f == null) return;
+    if (f == null) {
+      // Directions need a starting point. The phone has not settled on its position yet: say so
+      // instead of doing nothing, with a Retry for once the GPS finds it.
+      if (mounted && to != null) setState(() { _routeError = t('map.route_fix_gps'); _routeRetry = true; _routeBusy = false; });
+      return;
+    }
     if (to == null && dir == null) return;
     final seq = ++_routeSeq;
     setState(() { _routeBusy = true; _routeError = null; });
@@ -608,7 +615,7 @@ class _MapScreenState extends State<MapScreen> {
         final d = await dir!;
         final near = nearestPolice(d, f.lat, f.lon);
         if (near == null) {
-          if (mounted) setState(() { _routeBusy = false; _routeError = t('police.none_found'); });
+          if (mounted) setState(() { _routeBusy = false; _routeError = t('police.none_found'); _routeRetry = false; });
           return;
         }
         final stateName = near.primary.command.state;
@@ -618,16 +625,40 @@ class _MapScreenState extends State<MapScreen> {
         destName = t('map.to_police', {'state': stateName});
       }
       // The free OSM router carries separate road networks for car, foot and bike, so the phone
-      // asks for the one matching how the person is travelling.
-      final url = 'https://routing.openstreetmap.de/routed-$_mode/route/v1/driving/${from.longitude},${from.latitude};${dest.longitude},${dest.latitude}?overview=full&geometries=geojson&steps=true';
-      final res = await http.get(Uri.parse(url), headers: const { 'User-Agent': 'Sentri/0.1' });
-      if (res.statusCode != 200) throw StateError('osrm http ${res.statusCode}');
-      final j = jsonDecode(res.body) as Map<String, dynamic>;
-      final routes = (j['routes'] ?? const <dynamic>[]) as List<dynamic>;
-      if (routes.isEmpty) throw StateError('osrm empty route');
-      final plan = _buildPlan(routes.first as Map<String, dynamic>, dest, destName);
+      // asks for the one matching how the person is travelling. The shared free server says no
+      // now and then when it is busy, so the ask waits a little and tries again twice; car trips
+      // also have a second free server answering as the spare. No key, no charge, no timeout trap.
+      const headers = {'User-Agent': 'Sentri/0.1'};
+      final query = '${from.longitude},${from.latitude};${dest.longitude},${dest.latitude}?overview=full&geometries=geojson&steps=true';
+      Map<String, dynamic>? body;
+      for (var attempt = 1; attempt <= 3 && body == null; attempt++) {
+        if (attempt > 1) await Future.delayed(Duration(milliseconds: attempt == 2 ? 900 : 2200));
+        try {
+          final res = await http.get(Uri.parse('https://routing.openstreetmap.de/routed-$_mode/route/v1/driving/$query'), headers: headers).timeout(const Duration(seconds: 20));
+          if (res.statusCode != 200) continue;
+          final parsed = jsonDecode(res.body);
+          if (parsed is Map<String, dynamic> && parsed['routes'] is List && (parsed['routes'] as List).isNotEmpty) body = parsed;
+        } catch (_) {}
+      }
+      if (body == null && _mode == 'driving') {
+        // The car's spare server: same free OSM roads, only ever used for driving, so the trip
+        // time it gives is as honest as the main one.
+        try {
+          final res = await http.get(Uri.parse('https://router.project-osrm.org/route/v1/driving/$query'), headers: headers).timeout(const Duration(seconds: 20));
+          if (res.statusCode == 200) {
+            final parsed = jsonDecode(res.body);
+            if (parsed is Map<String, dynamic> && parsed['routes'] is List && (parsed['routes'] as List).isNotEmpty) body = parsed;
+          }
+        } catch (_) {}
+      }
+      if (body == null) {
+        if (!mounted || seq != _routeSeq) return;
+        setState(() { _routeBusy = false; _routeError = t('map.route_failed'); _routeRetry = true; });
+        return;
+      }
+      final plan = _buildPlan(body['routes'].first as Map<String, dynamic>, dest, destName);
       if (!mounted || seq != _routeSeq) return;
-      setState(() { _route = plan; _routeBusy = false; _nextStep = 0; });
+      setState(() { _route = plan; _routeBusy = false; _nextStep = 0; _routeRetry = false; });
       if (_voiceOn) {
         await _voice.say(plan.destName);
         await _voice.say('${plan.kmText} , ${plan.mins} minutes');
@@ -663,7 +694,7 @@ class _MapScreenState extends State<MapScreen> {
     await _posSub?.cancel();
     _posSub = null;
     await _voice.stop();
-    if (mounted) setState(() { _route = null; _routeError = null; _voiceOn = false; _nextStep = 0; });
+    if (mounted) setState(() { _route = null; _routeError = null; _routeRetry = false; _voiceOn = false; _nextStep = 0; });
   }
 
   // ---- picked points ----
@@ -706,6 +737,7 @@ class _MapScreenState extends State<MapScreen> {
       _mode = profile;
       _route = null;
       _routeError = null;
+      _routeRetry = false;
       _voiceOn = false;
       _nextStep = 0;
     });
@@ -883,7 +915,7 @@ class _MapScreenState extends State<MapScreen> {
       button: true,
       label: label,
       child: Material(
-        color: filled ? (iconColor ?? cs.primary) : (dark ? const Color(0xFF18174D) : Colors.white),
+        color: filled ? (iconColor ?? cs.primary) : (dark ? const Color(0xFF1B1D23) : Colors.white),
         shape: CircleBorder(side: BorderSide(color: filled ? Colors.transparent : (dark ? Colors.white.withValues(alpha: 0.18) : Colors.black.withValues(alpha: 0.08)))),
         elevation: 2,
         shadowColor: Colors.black26,
@@ -1029,7 +1061,7 @@ class _MapScreenState extends State<MapScreen> {
             right: 12,
             child: Column(children: [
               Material(
-                color: dark ? const Color(0xFF18174D) : Colors.white,
+                color: dark ? const Color(0xFF1B1D23) : Colors.white,
                 borderRadius: BorderRadius.circular(30),
                 elevation: 3,
                 shadowColor: Colors.black26,
@@ -1127,7 +1159,7 @@ class _MapScreenState extends State<MapScreen> {
             right: 12,
             bottom: MediaQuery.paddingOf(context).bottom + 8,
             child: Material(
-              color: dark ? const Color(0xFF18174D) : Colors.white,
+              color: dark ? const Color(0xFF1B1D23) : Colors.white,
               borderRadius: BorderRadius.circular(20),
               elevation: 4,
               shadowColor: Colors.black26,
@@ -1143,7 +1175,20 @@ class _MapScreenState extends State<MapScreen> {
                     Text('${f?.lat.toStringAsFixed(5) ?? ''}, ${f?.lon.toStringAsFixed(5) ?? ''}', style: TextStyle(fontSize: 11.5, color: cs.onSurface.withValues(alpha: 0.5))),
                   ]),
                   if (_routeError != null)
-                    Padding(padding: const EdgeInsets.only(top: 6), child: Text(_routeError!, style: TextStyle(fontSize: 12.5, color: cs.error))),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+                        Icon(Icons.error_outline, size: 15, color: cs.error),
+                        const SizedBox(width: 6),
+                        Expanded(child: Text(_routeError!, style: TextStyle(fontSize: 12.5, height: 1.3, color: cs.error))),
+                        if (_routeRetry)
+                          TextButton(
+                            onPressed: () => unawaited(_planRoute()),
+                            style: TextButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 10), minimumSize: const Size(0, 32)),
+                            child: Text(t('map.route_retry'), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+                          ),
+                      ]),
+                    ),
                   // Travel modes: car, foot and bike, each with its own route and estimated time.
                   if (_route != null || _toPick != null)
                     Padding(
