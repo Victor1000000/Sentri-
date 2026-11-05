@@ -102,6 +102,10 @@ class _MapScreenState extends State<MapScreen> {
 
   int _searchSeq = 0;
 
+  /// The phone's own street finder - the database the position card names streets from, used when
+  /// the free map indexes have no local answer.
+  final _streetSearch = const DeviceStreetSearch();
+
   /// A short "2.1 km" / "1,204 km" distance for a search hit.
   static String _kmText(double km) => km >= 100 ? '${km.round()} km' : '${km.toStringAsFixed(1)} km';
 
@@ -375,8 +379,10 @@ class _MapScreenState extends State<MapScreen> {
 
   /// Local-first search for a typed name. Street names, area names and POIs around the phone are
   /// asked first (roads, areas, everything else in parallel), then the name service inside a box
-  /// around the phone. Only if not a single thing answers nearby do the worldwide answers appear,
-  /// sorted by distance and shown with how far each one is, under an honest note.
+  /// around the phone. When none of the free map indexes knows something near the phone, the
+  /// phone's own street finder gets the last word - it carries the streets the free maps miss.
+  /// Only if not a single thing answers nearby do the worldwide answers appear, sorted by
+  /// distance and shown with how far each one is, under an honest note.
   Future<List<_SearchHit>> _searchPlaces(String query, LatLng near) async {
     final hits = <_SearchHit>[];
     await Future.wait([
@@ -385,15 +391,35 @@ class _MapScreenState extends State<MapScreen> {
       _searchPhoton(query, near, null, hits),
     ]);
     if (hits.isEmpty) await _searchNominatim(query, _bbox(near), hits, near);
+    var hasLocal = hits.any((h) => h.km <= _searchLocalKm);
+    if (!hasLocal) {
+      // The free map indexes are one street database; the position card names streets from the
+      // phone's own database (Google's), which carries local streets the free maps never mapped.
+      // Asking it here is why the same street that shows on the position card also answers in the
+      // search bar.
+      final p = _place;
+      final bias = [for (final x in <String?>[p?.area, p?.lga, p?.state, 'Nigeria']) if (x != null && x.trim().isNotEmpty) x].join(', ');
+      final phone = await _streetSearch.search(query, bias: bias);
+      final seen = <String>{};
+      for (final s in phone) {
+        var name = s.place.street ?? s.place.landmark ?? s.place.area;
+        if (name == null || name.trim().isEmpty) continue;
+        name = name.trim();
+        final key = '${name.toLowerCase()}|${s.lat.toStringAsFixed(3)}|${s.lon.toStringAsFixed(3)}';
+        if (!seen.add(key)) continue;
+        final detail = [for (final x in <String?>[s.place.area, s.place.lga, s.place.state]) if (x != null && x.trim().isNotEmpty && !_sameWord(name, x)) x].join(', ');
+        hits.add(_SearchHit(name: name, detail: detail, lat: s.lat, lon: s.lon, km: const Distance()(near, LatLng(s.lat, s.lon)) / 1000.0));
+      }
+    }
     // The same road can come back from the street index and the ordinary index.
-    final seen = <String>{};
+    final dedup = <String>{};
     hits.retainWhere((h) {
       final key = '${h.name.toLowerCase()}|${h.lat.toStringAsFixed(3)}|${h.lon.toStringAsFixed(3)}';
-      if (seen.contains(key)) return false;
-      seen.add(key);
+      if (dedup.contains(key)) return false;
+      dedup.add(key);
       return true;
     });
-    final hasLocal = hits.any((h) => h.km <= _searchLocalKm);
+    hasLocal = hits.any((h) => h.km <= _searchLocalKm);
     if (hasLocal) hits.retainWhere((h) => h.km <= _searchLocalKm);
     hits.sort((a, b) => a.km.compareTo(b.km));
     return hits.take(hasLocal ? 12 : 6).toList();

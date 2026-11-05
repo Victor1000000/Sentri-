@@ -36,6 +36,48 @@ String? _stripSuffix(String? s, RegExp suffix) {
   return c == null ? null : _clean(c.replaceAll(suffix, ''));
 }
 
+/// One answer from the phone's own street finder: a named position.
+class StreetHit {
+  const StreetHit(this.place, this.lat, this.lon);
+  final Place place;
+  final double lat, lon;
+}
+
+/// Searches street names with the phone's own geocoder - the same street service that names the
+/// streets on the position card. The free map search carries one street database and the phone
+/// carries another, so a local street the free one never mapped - names like 'Adatan' or 'Aregbe'
+/// in Abeokuta - still answers here. Never throws; an empty list means the phone has no answer.
+class DeviceStreetSearch {
+  const DeviceStreetSearch();
+
+  /// [bias] steers the phone's finder toward the person's own city: it is the area / state from
+  /// the position card ('Aregbe, Abeokuta, Ogun State'), so 'Aregbe' means the one near the phone.
+  Future<List<StreetHit>> search(String query, {required String bias, int max = 5}) async {
+    if (query.trim().isEmpty) return const <StreetHit>[];
+    try {
+      final found = await locationFromAddress('$query, $bias').timeout(const Duration(seconds: 8));
+      final out = <StreetHit>[];
+      for (final l in found.take(max)) {
+        final p = await _reverse(l.latitude, l.longitude);
+        if (p == null) continue;
+        out.add(StreetHit(p, l.latitude, l.longitude));
+      }
+      return out;
+    } catch (_) {
+      return const <StreetHit>[];
+    }
+  }
+
+  Future<Place?> _reverse(double lat, double lon) async {
+    try {
+      final marks = await placemarkFromCoordinates(lat, lon).timeout(const Duration(seconds: 6));
+      return placeFromPlacemarks(marks);
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
 /// Picks the best name for each part from what the phone returned. Pure, so it can be tested without a phone.
 Place? placeFromPlacemarks(List<Placemark> marks) {
   String? first(String? Function(Placemark m) pick) {

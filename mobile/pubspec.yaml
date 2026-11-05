@@ -26,6 +26,7 @@ dependencies:
   flutter_local_notifications: ^17.2.3
   share_plus: ^10.0.2
   connectivity_plus: ^6.0.5
+  google_fonts: ^6.2.1
   url_launcher: ^6.3.0
   flutter_tts: ^4.1.0
 

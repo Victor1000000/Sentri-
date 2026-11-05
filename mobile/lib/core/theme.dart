@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 /// Sentri's look. One calm base, one alarm colour used only for SOS, one reassurance colour.
 /// Both themes share the same roles so screens never hard-code colours.
@@ -10,11 +11,14 @@ class SentriColors {
 }
 
 /// Light / dark / follow the phone. The language sheet changes it, and the choice is saved with the settings.
+/// Light is the default: safety apps should read clearly in daylight, and a tap on the mode button
+/// still flips to dark for night use.
 class ThemeChoice {
-  static final mode = ValueNotifier<ThemeMode>(ThemeMode.system);
+  static final mode = ValueNotifier<ThemeMode>(ThemeMode.light);
   static Future<void> Function(String name)? persist;
 
-  static ThemeMode parse(String? s) => switch (s) { 'light' => ThemeMode.light, 'dark' => ThemeMode.dark, _ => ThemeMode.system };
+  // 'system' was the old default; it now counts as unset so light is the default for everyone.
+  static ThemeMode parse(String? s) => switch (s) { 'dark' => ThemeMode.dark, _ => ThemeMode.light };
 
   static Future<void> set(ThemeMode m) async {
     mode.value = m;
@@ -32,7 +36,10 @@ ThemeData sentriTheme(Brightness b) {
     error: dark ? SentriColors.alarmDark : SentriColors.alarm,
     tertiary: dark ? SentriColors.safeDark : SentriColors.safe,
   );
-  final text = (dark ? ThemeData.dark() : ThemeData.light()).textTheme.apply(
+  // Inter everywhere: the calm, grid-like letterforms Google Maps and Uber use, so every screen
+  // reads as one family. The font is fetched once and cached on the phone (falls back to the
+  // system face when the phone is offline on first launch).
+  final text = GoogleFonts.interTextTheme((dark ? ThemeData.dark() : ThemeData.light()).textTheme).apply(
         bodyColor: base.onSurface,
         displayColor: base.onSurface,
       );

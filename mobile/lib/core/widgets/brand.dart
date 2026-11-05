@@ -81,19 +81,13 @@ class SentriWordmark extends StatelessWidget {
       Text('Sentri', style: TextStyle(fontSize: size, fontWeight: FontWeight.w500, letterSpacing: -size * 0.035, height: 1, color: color));
 }
 
-/// Indigo splash with the green mark and white wordmark.
+/// Clean opening: the wordmark alone on the indigo splash, no decorative stripes - just "Sentri".
 class SplashView extends StatelessWidget {
   const SplashView({super.key});
   @override
   Widget build(BuildContext context) => const ColoredBox(
         color: Brand.splash,
-        child: Center(
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            SentriMark(size: 60, color: Brand.mint),
-            SizedBox(width: 12),
-            SentriWordmark(size: 50, color: Colors.white),
-          ]),
-        ),
+        child: Center(child: SentriWordmark(size: 44, color: Colors.white)),
       );
 }
 
