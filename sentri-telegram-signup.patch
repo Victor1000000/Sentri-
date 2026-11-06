@@ -1,0 +1,456 @@
+diff --git a/mobile/lib/features/map/map_screen.dart b/mobile/lib/features/map/map_screen.dart
+--- a/mobile/lib/features/map/map_screen.dart
++++ b/mobile/lib/features/map/map_screen.dart
+@@ -385,46 +385,49 @@
+   /// distance and shown with how far each one is, under an honest note.
+   Future<List<_SearchHit>> _searchPlaces(String query, LatLng near) async {
+     final hits = <_SearchHit>[];
++    // The free map indexes and the phone's own street finder are different street databases;
++    // both are asked at once and their answers are merged, because streets the free maps never
++    // mapped (Abeokuta's 'Adatan', 'Aregbe', 'Abiola Way') are on the phone's database - the
++    // same one the position card names streets from.
++    final p = _place;
++    final bias = [for (final x in <String?>[p?.area, p?.lga, p?.state, 'Nigeria']) if (x != null && x.trim().isNotEmpty) x].join(', ');
+     await Future.wait([
+       _searchPhoton(query, near, 'highway', hits),
+       _searchPhoton(query, near, 'place', hits),
+       _searchPhoton(query, near, null, hits),
++      _searchDevice(query, near, bias, hits),
+     ]);
+     if (hits.isEmpty) await _searchNominatim(query, _bbox(near), hits, near);
+-    var hasLocal = hits.any((h) => h.km <= _searchLocalKm);
+-    if (!hasLocal) {
+-      // The free map indexes are one street database; the position card names streets from the
+-      // phone's own database (Google's), which carries local streets the free maps never mapped.
+-      // Asking it here is why the same street that shows on the position card also answers in the
+-      // search bar.
+-      final p = _place;
+-      final bias = [for (final x in <String?>[p?.area, p?.lga, p?.state, 'Nigeria']) if (x != null && x.trim().isNotEmpty) x].join(', ');
+-      final phone = await _streetSearch.search(query, bias: bias);
+-      final seen = <String>{};
+-      for (final s in phone) {
+-        var name = s.place.street ?? s.place.landmark ?? s.place.area;
+-        if (name == null || name.trim().isEmpty) continue;
+-        name = name.trim();
+-        final key = '${name.toLowerCase()}|${s.lat.toStringAsFixed(3)}|${s.lon.toStringAsFixed(3)}';
+-        if (!seen.add(key)) continue;
+-        final detail = [for (final x in <String?>[s.place.area, s.place.lga, s.place.state]) if (x != null && x.trim().isNotEmpty && !_sameWord(name, x)) x].join(', ');
+-        hits.add(_SearchHit(name: name, detail: detail, lat: s.lat, lon: s.lon, km: const Distance()(near, LatLng(s.lat, s.lon)) / 1000.0));
+-      }
+-    }
+-    // The same road can come back from the street index and the ordinary index.
+-    final dedup = <String>{};
++    // The same road can come back from more than one index.
++    final seen = <String>{};
+     hits.retainWhere((h) {
+       final key = '${h.name.toLowerCase()}|${h.lat.toStringAsFixed(3)}|${h.lon.toStringAsFixed(3)}';
+-      if (dedup.contains(key)) return false;
+-      dedup.add(key);
++      if (seen.contains(key)) return false;
++      seen.add(key);
+       return true;
+     });
+-    hasLocal = hits.any((h) => h.km <= _searchLocalKm);
++    final hasLocal = hits.any((h) => h.km <= _searchLocalKm);
+     if (hasLocal) hits.retainWhere((h) => h.km <= _searchLocalKm);
+     hits.sort((a, b) => a.km.compareTo(b.km));
+     return hits.take(hasLocal ? 12 : 6).toList();
+   }
+ 
++  /// Asks the phone's own street finder and folds its answers into the shared hit list. Silent
++  /// on phones without the service, so the free indexes still carry the search alone.
++  Future<void> _searchDevice(String query, LatLng near, String bias, List<_SearchHit> hits) async {
++    final phone = await _streetSearch.search(query, bias: bias);
++    final seen = <String>{};
++    for (final s in phone) {
++      var name = s.place.street ?? s.place.landmark ?? s.place.area;
++      if (name == null || name.trim().isEmpty) continue;
++      name = name.trim();
++      final key = '${name.toLowerCase()}|${s.lat.toStringAsFixed(3)}|${s.lon.toStringAsFixed(3)}';
++      if (!seen.add(key)) continue;
++      final detail = [for (final x in <String?>[s.place.area, s.place.lga, s.place.state]) if (x != null && x.trim().isNotEmpty && !_sameWord(name, x)) x].join(', ');
++      hits.add(_SearchHit(name: name, detail: detail, lat: s.lat, lon: s.lon, km: const Distance()(near, LatLng(s.lat, s.lon)) / 1000.0));
++    }
++  }
++
+   /// "Where to?" — the person types where they are going, the app picks the exact spot and
+   /// routes there from the phone's current position right away.
+   Future<void> _searchDestination() async {
+@@ -586,11 +589,14 @@
+   // ---- directions: any point to any point ----
+ 
+   /// Folds an OSRM route answer into a drawable, speakable plan. Used as it is, free, no key.
+-  static _RoutePlan _buildPlan(Map<String, dynamic> r, LatLng dest, String destName) {
++  /// [paceMps] replaces the router's minutes with an honest count for walking and cycling:
++  /// the time is simply the path length walked or cycled at a normal Nigerian pace.
++  static _RoutePlan _buildPlan(Map<String, dynamic> r, LatLng dest, String destName, {double? paceMps}) {
+     final coords = ((r['geometry'] as Map<String, dynamic>)['coordinates'] ?? const <dynamic>[]) as List<dynamic>;
+     final points = [for (final c in coords) LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble())];
+     final km = (r['distance'] as num).toDouble() / 1000.0;
+-    final mins = (((r['duration'] as num).toDouble()) / 60).round();
++    final osrmMins = (((r['duration'] as num).toDouble()) / 60).round();
++    final mins = paceMps == null ? osrmMins : ((km * 1000.0 / paceMps) / 60.0).ceil().clamp(1, 1440).toInt();
+     final leg = (r['legs'] as List<dynamic>).first as Map<String, dynamic>;
+     final stepTexts = <String>[];
+     final stepSay = <String>[];
+@@ -612,9 +618,9 @@
+   }
+ 
+   /// Draw the route: picked start to picked destination, or the phone's position to the
+-  /// picked destination, or (nothing picked) to the nearest police command's post. The chosen
+-  /// way of travelling decides the router profile, so every mode gets its own honest paths
+-  /// and estimated time.
++  /// picked destination, or (nothing picked) to the nearest police command's post. Every way of
++  /// travelling plans on the same street map; the minutes come from travel pace, so walking and
++  /// cycling read as a person's time, not a machine's.
+   Future<void> _planRoute() async {
+     final t = widget.i18n.t;
+     final f = _fix;
+@@ -650,10 +656,13 @@
+         dest = LatLng(centre.$1, centre.$2);
+         destName = t('map.to_police', {'state': stateName});
+       }
+-      // The free OSM router carries separate road networks for car, foot and bike, so the phone
+-      // asks for the one matching how the person is travelling. (Its servers are named routed-car,
+-      // routed-foot and routed-bike - not by travel-word, so the name is mapped here.)
+-      final slug = switch (_mode) { 'driving' => 'car', 'walking' => 'foot', _ => 'bike' };
++      // Walking and cycling in Nigeria happen on the same streets cars use, and the free router's
++      // separate foot/bike path maps are thin here - it once turned a 2 km street trip into a
++      // 15 km "walk" through paths that exist only as mapping stubs (that was the impossible
++      // "94 minutes"). So every mode plans on the real street map. Driving keeps the router's
++      // own car minutes; walking and cycling get honest minutes from the path length at a normal
++      // Nigerian pace (ambling 1.35 m/s, riding 4.17 m/s), so a 2 km trip never reads as hours.
++      const slug = 'car';
+       const headers = {'User-Agent': 'Sentri/0.1'};
+       final query = '${from.longitude},${from.latitude};${dest.longitude},${dest.latitude}?overview=full&geometries=geojson&steps=true';
+       Map<String, dynamic>? body;
+@@ -666,9 +675,9 @@
+           if (parsed is Map<String, dynamic> && parsed['routes'] is List && (parsed['routes'] as List).isNotEmpty) body = parsed;
+         } catch (_) {}
+       }
+-      if (body == null && _mode == 'driving') {
+-        // The car's spare server: same free OSM roads, only ever used for driving, so the trip
+-        // time it gives is as honest as the main one.
++      if (body == null) {
++        // The spare server: same free OSM street network, car-founded exactly like the main one
++        // here, so the trip time it gives is as honest as the main one.
+         try {
+           final res = await http.get(Uri.parse('https://router.project-osrm.org/route/v1/driving/$query'), headers: headers).timeout(const Duration(seconds: 20));
+           if (res.statusCode == 200) {
+@@ -682,7 +691,12 @@
+         setState(() { _routeBusy = false; _routeError = t('map.route_failed'); _routeRetry = true; });
+         return;
+       }
+-      final plan = _buildPlan(body['routes'].first as Map<String, dynamic>, dest, destName);
++      final plan = _buildPlan(
++        body['routes'].first as Map<String, dynamic>,
++        dest,
++        destName,
++        paceMps: switch (_mode) { 'walking' => 1.35, 'cycling' => 4.17, _ => null },
++      );
+       if (!mounted || seq != _routeSeq) return;
+       setState(() { _route = plan; _routeBusy = false; _nextStep = 0; _routeRetry = false; });
+       if (_voiceOn) {
+diff --git a/mobile/lib/app.dart b/mobile/lib/app.dart
+--- a/mobile/lib/app.dart
++++ b/mobile/lib/app.dart
+@@ -114,8 +114,8 @@
+ }
+ 
+ 
+-/// Home, Map and Police. The map is built only while its tab is open, so it does not use GPS or
+-/// battery in the background.
++/// Home, Map and Police. The pages stay built inside an IndexedStack, so directions, pins and
++/// route voice plans survive a switch to Home and back.
+ class _Tabs extends StatefulWidget {
+   const _Tabs({required this.services});
+   final AppServices services;
+@@ -144,11 +144,16 @@
+   Widget build(BuildContext context) {
+     final s = widget.services;
+     final t = s.i18n.t;
+-    final body = switch (_tab) {
+-      1 => MapScreen(location: s.location, api: s.api, i18n: s.i18n, placeLookup: const DevicePlaceLookup(), onPlace: (p) => _state = p?.state, police: _directoryFuture),
+-      2 => PoliceScreen(directory: _directory, i18n: s.i18n, currentState: _state),
+-      _ => HomeScreen(sos: s.sos, settings: s.settings, i18n: s.i18n, bridge: s.bridge, api: s.api, inbox: s.inbox, share: s.share, checkin: s.checkin, police: s.police),
+-    };
++    // All three tabs stay built inside an IndexedStack, so switching to Home and back no longer
++    // tears down the Map tab: an active route, its pin and its voice plan survive the switch.
++    final body = IndexedStack(
++      index: _tab,
++      children: [
++        HomeScreen(sos: s.sos, settings: s.settings, i18n: s.i18n, bridge: s.bridge, api: s.api, inbox: s.inbox, share: s.share, checkin: s.checkin, police: s.police),
++        MapScreen(location: s.location, api: s.api, i18n: s.i18n, placeLookup: const DevicePlaceLookup(), onPlace: (p) => _state = p?.state, police: _directoryFuture),
++        PoliceScreen(directory: _directory, i18n: s.i18n, currentState: _state),
++      ],
++    );
+     return Scaffold(
+       body: body,
+       bottomNavigationBar: Glass(
+diff --git a/mobile/lib/features/home/home_screen.dart b/mobile/lib/features/home/home_screen.dart
+--- a/mobile/lib/features/home/home_screen.dart
++++ b/mobile/lib/features/home/home_screen.dart
+@@ -16,7 +16,6 @@
+ import '../share/share_screen.dart';
+ import '../../core/widgets/flat.dart';
+ import '../../core/widgets/glass.dart';
+-import 'package:url_launcher/url_launcher.dart';
+ import '../checkin/checkin_controller.dart';
+ import '../onboarding/permissions_panel.dart';
+ import '../sos/pin_pad.dart';
+@@ -170,12 +169,7 @@
+                     padding: const EdgeInsets.fromLTRB(22, 0, 22, 12),
+                     child: CheckInCard(checkin: widget.checkin, sos: widget.sos, i18n: widget.i18n),
+                   ),
+-                  // Emergency numbers: free to call from any phone, data or no data.
+                   Padding(
+-                    padding: const EdgeInsets.fromLTRB(22, 0, 22, 12),
+-                    child: EmergencyNumbersCard(i18n: widget.i18n),
+-                  ),
+-                  Padding(
+                     padding: const EdgeInsets.fromLTRB(22, 0, 22, 16),
+                     child: Glass(
+                       radius: 18,
+@@ -292,20 +286,38 @@
+       ]);
+ }
+ 
+-/// The "Check on me" card. Idle: pick a window and it is armed at once. Running: shows when the
+-/// alert would go out and one big "I'm safe" button. Nothing here overlaps: the whole home screen
+-/// is a scrolling column and this card lays out in strict top-down rows.
+-class CheckInCard extends StatelessWidget {
++/// The "Check on me" card. Idle: one button opens the phone's time picker, so the person chooses
++/// exactly when their contacts should check on them - tonight's walk, the bus ride, whatever.
++/// Running: shows when the alert would go out and one big "I'm safe" button. Nothing here
++/// overlaps: the whole home screen is a scrolling column and this card lays out top-down rows.
++class CheckInCard extends StatefulWidget {
+   const CheckInCard({super.key, required this.checkin, required this.sos, required this.i18n});
+   final CheckInController checkin;
+   final SosController sos;
+   final I18n i18n;
++  @override
++  State<CheckInCard> createState() => _CheckInCardState();
++}
+ 
+-  static const _windows = [Duration(minutes: 10), Duration(minutes: 20), Duration(minutes: 30)];
++class _CheckInCardState extends State<CheckInCard> {
++  /// A picked wall-clock time becomes a window from now. A time already past today means
++  /// tomorrow at that time, which is what a person means when they pick "10:15 PM" at 9:40 PM.
++  Future<void> _pickTime() async {
++    final now = DateTime.now();
++    final picked = await showTimePicker(
++      context: context,
++      initialTime: TimeOfDay.fromDateTime(now.add(const Duration(minutes: 30))),
++    );
++    if (picked == null || !mounted) return;
++    var start = DateTime(now.year, now.month, now.day, picked.hour, picked.minute);
++    if (!start.isAfter(now)) start = start.add(const Duration(days: 1));
++    await widget.checkin.start(start.difference(now));
++  }
+ 
+   @override
+   Widget build(BuildContext context) {
+-    final t = i18n.t;
++    final checkin = widget.checkin;
++    final t = widget.i18n.t;
+     final cs = Theme.of(context).colorScheme;
+     final muted = cs.onSurface.withValues(alpha: 0.55);
+     return ListenableBuilder(
+@@ -343,20 +355,14 @@
+                 ]),
+               ] else ...[
+                 Row(children: [
+-                  for (final w in _windows) ...[
+-                    Expanded(
+-                      child: OutlinedButton(
+-                        style: OutlinedButton.styleFrom(
+-                          minimumSize: const Size.fromHeight(40),
+-                          padding: EdgeInsets.zero,
+-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+-                        ),
+-                        onPressed: () => unawaited(checkin.start(w)),
+-                        child: Text('${w.inMinutes} min', style: const TextStyle(fontSize: 14)),
+-                      ),
++                  Expanded(
++                    child: FilledButton.icon(
++                      style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(44), backgroundColor: cs.primary),
++                      onPressed: _pickTime,
++                      icon: const Icon(Icons.schedule, size: 20),
++                      label: Text(t('home.check_pick'), style: const TextStyle(fontSize: 15)),
+                     ),
+-                    if (w != _windows.last) const SizedBox(width: 8),
+-                  ],
++                  ),
+                 ]),
+               ],
+             ]),
+@@ -367,69 +373,6 @@
+   }
+ }
+ 
+-/// The emergency numbers card: national line, FRSC and the Lagos line. All are free calls from
+-/// any phone, so they work even with no data connection. Each row dials straight away.
+-class EmergencyNumbersCard extends StatelessWidget {
+-  const EmergencyNumbersCard({super.key, required this.i18n});
+-  final I18n i18n;
+-
+-  Future<void> _call(String number) async {
+-    try {
+-      await launchUrl(Uri.parse('tel:$number'), mode: LaunchMode.externalApplication);
+-    } catch (_) {}
+-  }
+-
+-  @override
+-  Widget build(BuildContext context) {
+-    final t = i18n.t;
+-    final cs = Theme.of(context).colorScheme;
+-    final muted = cs.onSurface.withValues(alpha: 0.55);
+-    final rows = <(String, String, IconData)>[
+-      ('112', t('home.em_national'), Icons.local_police_outlined),
+-      ('122', t('home.em_frsc'), Icons.traffic_outlined),
+-      ('767', t('home.em_lagos'), Icons.sos_outlined),
+-    ];
+-    return Glass(
+-      radius: 18,
+-      child: Padding(
+-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+-          Row(children: [
+-            Icon(Icons.emergency_outlined, size: 20, color: cs.error),
+-            const SizedBox(width: 8),
+-            Expanded(child: Text(t('home.em_title'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600))),
+-          ]),
+-          const SizedBox(height: 4),
+-          Text(t('home.em_sub'), style: TextStyle(fontSize: 12.5, height: 1.35, color: muted)),
+-          const SizedBox(height: 6),
+-          for (final r in rows) ...[
+-            InkWell(
+-              onTap: () => unawaited(_call(r.$1)),
+-              child: Padding(
+-                padding: const EdgeInsets.symmetric(vertical: 9),
+-                child: Row(children: [
+-                  Container(
+-                    width: 34,
+-                    height: 34,
+-                    decoration: BoxDecoration(shape: BoxShape.circle, color: cs.error.withValues(alpha: 0.1)),
+-                    child: Icon(r.$3, size: 18, color: cs.error),
+-                  ),
+-                  const SizedBox(width: 10),
+-                  Expanded(child: Text(r.$2, style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600))),
+-                  Text(r.$1, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: cs.primary)),
+-                  const SizedBox(width: 10),
+-                  Icon(Icons.phone_outlined, size: 19, color: cs.primary),
+-                ]),
+-              ),
+-            ),
+-            if (r != rows.last) Divider(height: 0.5, thickness: 0.5, color: cs.onSurface.withValues(alpha: 0.08)),
+-          ],
+-        ]),
+-      ),
+-    );
+-  }
+-}
+-
+ /// The message bar. Calm when there is nothing new; turns red and names the person when a live alert needs a response.
+ class _MessageBar extends StatelessWidget {
+   const _MessageBar({required this.inbox, required this.i18n, required this.onTap});
+diff --git a/mobile/assets/i18n/en.json b/mobile/assets/i18n/en.json
+--- a/mobile/assets/i18n/en.json
++++ b/mobile/assets/i18n/en.json
+@@ -40,14 +40,10 @@
+   "home.hold": "Hold to send alert",
+   "home.hold_help": "",
+   "home.check_title": "Check on me",
+-  "home.check_sub": "Before a trip or a night walk, arm a window. If you don't mark yourself safe when it ends, your contacts get a full alert.",
++  "home.check_sub": "Before you set out, choose the time your contacts should check on you. If you do not mark yourself safe by then, they get a full alert.",
+   "home.check_until": "If you're not safe by {time}, an alert goes to your contacts.",
+   "home.check_safe": "I'm safe",
+-  "home.em_title": "Emergency numbers",
+-  "home.em_sub": "Free to call from any phone, even without data.",
+-  "home.em_national": "National emergency line",
+-  "home.em_frsc": "Road safety (FRSC)",
+-  "home.em_lagos": "Lagos State emergency line",
++  "home.check_pick": "Choose a time",
+   "triggers.title": "Ways to call for help",
+   "triggers.shake": "Shake the phone",
+   "triggers.volume": "Volume buttons (up, down, up, down)",
+diff --git a/mobile/assets/i18n/ha.json b/mobile/assets/i18n/ha.json
+--- a/mobile/assets/i18n/ha.json
++++ b/mobile/assets/i18n/ha.json
+@@ -40,14 +40,10 @@
+   "home.hold": "Danna ka riƙe don aika gargaɗi",
+   "home.hold_help": "",
+   "home.check_title": "Duba ni",
+-  "home.check_sub": "Kafata lokaci kafin tafiya ko tafiya da dare. Idan ba ka tabbatar da lafiyarka ba idan lokaci ya kare, gargadi zai tafi kontak dinka.",
++  "home.check_sub": "Kafin ka tafi, zaba lokacin da za a duba ka. Idan ba ka tabbatar da lafiyarka a wancan lokaci ba, gargadi zai tafi kontak dinka.",
+   "home.check_until": "Idan ba ka tabbatar ba zuwa {time}, gargadi zai tafi kontak dinka.",
+   "home.check_safe": "Ina lafiya",
+-  "home.em_title": "Lambar gaggawa",
+-  "home.em_sub": "Ana kiranta kyauta daga kowane waya, ko da ba da data.",
+-  "home.em_national": "Lambar gaggawa ta kasa",
+-  "home.em_frsc": "Kare hanya (FRSC)",
+-  "home.em_lagos": "Lambar gaggawa ta Jihar Legas",
++  "home.check_pick": "Zaba lokaci",
+   "triggers.title": "Hanyoyin neman taimako",
+   "triggers.shake": "Girgiza waya",
+   "triggers.volume": "Maɓallan ƙara (sama, ƙasa, sama, ƙasa)",
+diff --git a/mobile/assets/i18n/ig.json b/mobile/assets/i18n/ig.json
+--- a/mobile/assets/i18n/ig.json
++++ b/mobile/assets/i18n/ig.json
+@@ -40,14 +40,10 @@
+   "home.hold": "Jide ka ị zipu ọkwa",
+   "home.hold_help": "",
+   "home.check_title": "Lelee m",
+-  "home.check_sub": "Towardi oge tupu i gaa njem ma o bụ ije n' abali. Ọ bụrụ na ị gaghị akọ na ị dị mma mgbe oge gọchara, dara gị ga-anata ọkwa.",
++  "home.check_sub": "Tupu ị gaa, họrọ oge ndị mmadụ gị ga-elelee gị. Ọ bụrụ na ị gaghị akọ na ị dị mma n'oge ahụ, ọkwa ga-aga ndị mmadụ gị.",
+   "home.check_until": "Ọ bụrụ na ị gaghị akọ na ị dị mma na {time}, ọkwa ga-aga ndị mmadụ gị.",
+   "home.check_safe": "Adị m mma",
+-  "home.em_title": "Nọmba mberede",
+-  "home.em_sub": "N' efu ịkụ oku site n' ekwentị ọ bụla, ọbụlagodi na-enweghị data.",
+-  "home.em_national": "Nọmba mberede mba",
+-  "home.em_frsc": "Nchekwa okporo ụzọ (FRSC)",
+-  "home.em_lagos": "Nọmba mberede Steeti Legọs",
++  "home.check_pick": "Họrọ oge",
+   "triggers.title": "Ụzọ isi kpọọ enyemaka",
+   "triggers.shake": "Maa ekwentị",
+   "triggers.volume": "Bọtịnụ olu (elu, ala, elu, ala)",
+diff --git a/mobile/assets/i18n/pcm.json b/mobile/assets/i18n/pcm.json
+--- a/mobile/assets/i18n/pcm.json
++++ b/mobile/assets/i18n/pcm.json
+@@ -40,14 +40,10 @@
+   "home.hold": "Hold to send alert",
+   "home.hold_help": "",
+   "home.check_title": "Check on me",
+-  "home.check_sub": "Before you waka or travel for night set di window. If you no press I dey safe before di time finish, alert go enter your contact dem.",
++  "home.check_sub": "Before you waka go anywhere, choose di time wey your contact dem go check on you. If you no press I dey safe before that time, alert go enter dia side.",
+   "home.check_until": "If you no mark safe before {time}, alert go enter your contact dem.",
+   "home.check_safe": "I dey safe",
+-  "home.em_title": "Emergency numbers",
+-  "home.em_sub": "Free to call from any phone, even without data.",
+-  "home.em_national": "National emergency number",
+-  "home.em_frsc": "Road safety (FRSC)",
+-  "home.em_lagos": "Lagos State emergency number",
++  "home.check_pick": "Choose time",
+   "triggers.title": "Ways to call for help",
+   "triggers.shake": "Shake phone",
+   "triggers.volume": "Volume buttons (up, down, up, down)",
+diff --git a/mobile/assets/i18n/yo.json b/mobile/assets/i18n/yo.json
+--- a/mobile/assets/i18n/yo.json
++++ b/mobile/assets/i18n/yo.json
+@@ -40,14 +40,10 @@
+   "home.hold": "Dì mú láti fi ìkìlọ̀ ránṣẹ́",
+   "home.hold_help": "",
+   "home.check_title": "Tójú mí",
+-  "home.check_sub": "Ṣètò àkókò kí o tó rin ìrìn àjò tàbí rìn ní òru. Bí o kò bá sopé o dàrada nígbà tí àkókò bá parí, ìkìlọ̀ yóò tàn fún àwọn asọ́ rẹ.",
++  "home.check_sub": "Kí o tó lọ, yan àkókò tí àwọn asọ́ rẹ yóò tójú ọ. Bí o kò bá sopé o dàrada nígbà yẹn, ìkìlọ̀ yóò tàn fún wọn.",
+   "home.check_until": "Bí o kò bá sopé o dàrada lẹ́yìn {time}, ìkìlọ̀ yóò tàn fún àwọn asọ́ rẹ.",
+   "home.check_safe": "Mo dàrada",
+-  "home.em_title": "Nọ́mbà pàjáwìrì",
+-  "home.em_sub": "Ní ọ́fẹ́ láti pè láti fónù máyẹ́ẹ̀sí èyíkéyìí, pẹ̀lú tàbí láìní data.",
+-  "home.em_national": "Nọ́mbà pàjáwìrì orílẹ̀- èdè",
+-  "home.em_frsc": "Ààbò ọ̀nà ìrìnàjò (FRSC)",
+-  "home.em_lagos": "Nọ́mbà pàjáwìrì Èkó",
++  "home.check_pick": "Yan àkókò",
+   "triggers.title": "Àwọn ọ̀nà láti pe ìrànlọ́wọ́",
+   "triggers.shake": "Mi fóònù",
+   "triggers.volume": "Bọ́tìnì ìró (sókè, ìsàlẹ̀, sókè, ìsàlẹ̀)",
