@@ -385,44 +385,47 @@ class _MapScreenState extends State<MapScreen> {
   /// distance and shown with how far each one is, under an honest note.
   Future<List<_SearchHit>> _searchPlaces(String query, LatLng near) async {
     final hits = <_SearchHit>[];
+    // The free map indexes and the phone's own street finder are different street databases;
+    // both are asked at once and their answers are merged, because streets the free maps never
+    // mapped (Abeokuta's 'Adatan', 'Aregbe', 'Abiola Way') are on the phone's database - the
+    // same one the position card names streets from.
+    final p = _place;
+    final bias = [for (final x in <String?>[p?.area, p?.lga, p?.state, 'Nigeria']) if (x != null && x.trim().isNotEmpty) x].join(', ');
     await Future.wait([
       _searchPhoton(query, near, 'highway', hits),
       _searchPhoton(query, near, 'place', hits),
       _searchPhoton(query, near, null, hits),
+      _searchDevice(query, near, bias, hits),
     ]);
     if (hits.isEmpty) await _searchNominatim(query, _bbox(near), hits, near);
-    var hasLocal = hits.any((h) => h.km <= _searchLocalKm);
-    if (!hasLocal) {
-      // The free map indexes are one street database; the position card names streets from the
-      // phone's own database (Google's), which carries local streets the free maps never mapped.
-      // Asking it here is why the same street that shows on the position card also answers in the
-      // search bar.
-      final p = _place;
-      final bias = [for (final x in <String?>[p?.area, p?.lga, p?.state, 'Nigeria']) if (x != null && x.trim().isNotEmpty) x].join(', ');
-      final phone = await _streetSearch.search(query, bias: bias);
-      final seen = <String>{};
-      for (final s in phone) {
-        var name = s.place.street ?? s.place.landmark ?? s.place.area;
-        if (name == null || name.trim().isEmpty) continue;
-        name = name.trim();
-        final key = '${name.toLowerCase()}|${s.lat.toStringAsFixed(3)}|${s.lon.toStringAsFixed(3)}';
-        if (!seen.add(key)) continue;
-        final detail = [for (final x in <String?>[s.place.area, s.place.lga, s.place.state]) if (x != null && x.trim().isNotEmpty && !_sameWord(name, x)) x].join(', ');
-        hits.add(_SearchHit(name: name, detail: detail, lat: s.lat, lon: s.lon, km: const Distance()(near, LatLng(s.lat, s.lon)) / 1000.0));
-      }
-    }
-    // The same road can come back from the street index and the ordinary index.
-    final dedup = <String>{};
+    // The same road can come back from more than one index.
+    final seen = <String>{};
     hits.retainWhere((h) {
       final key = '${h.name.toLowerCase()}|${h.lat.toStringAsFixed(3)}|${h.lon.toStringAsFixed(3)}';
-      if (dedup.contains(key)) return false;
-      dedup.add(key);
+      if (seen.contains(key)) return false;
+      seen.add(key);
       return true;
     });
-    hasLocal = hits.any((h) => h.km <= _searchLocalKm);
+    final hasLocal = hits.any((h) => h.km <= _searchLocalKm);
     if (hasLocal) hits.retainWhere((h) => h.km <= _searchLocalKm);
     hits.sort((a, b) => a.km.compareTo(b.km));
     return hits.take(hasLocal ? 12 : 6).toList();
+  }
+
+  /// Asks the phone's own street finder and folds its answers into the shared hit list. Silent
+  /// on phones without the service, so the free indexes still carry the search alone.
+  Future<void> _searchDevice(String query, LatLng near, String bias, List<_SearchHit> hits) async {
+    final phone = await _streetSearch.search(query, bias: bias);
+    final seen = <String>{};
+    for (final s in phone) {
+      var name = s.place.street ?? s.place.landmark ?? s.place.area;
+      if (name == null || name.trim().isEmpty) continue;
+      name = name.trim();
+      final key = '${name.toLowerCase()}|${s.lat.toStringAsFixed(3)}|${s.lon.toStringAsFixed(3)}';
+      if (!seen.add(key)) continue;
+      final detail = [for (final x in <String?>[s.place.area, s.place.lga, s.place.state]) if (x != null && x.trim().isNotEmpty && !_sameWord(name, x)) x].join(', ');
+      hits.add(_SearchHit(name: name, detail: detail, lat: s.lat, lon: s.lon, km: const Distance()(near, LatLng(s.lat, s.lon)) / 1000.0));
+    }
   }
 
   /// "Where to?" — the person types where they are going, the app picks the exact spot and
@@ -586,11 +589,14 @@ class _MapScreenState extends State<MapScreen> {
   // ---- directions: any point to any point ----
 
   /// Folds an OSRM route answer into a drawable, speakable plan. Used as it is, free, no key.
-  static _RoutePlan _buildPlan(Map<String, dynamic> r, LatLng dest, String destName) {
+  /// [paceMps] replaces the router's minutes with an honest count for walking and cycling:
+  /// the time is simply the path length walked or cycled at a normal Nigerian pace.
+  static _RoutePlan _buildPlan(Map<String, dynamic> r, LatLng dest, String destName, {double? paceMps}) {
     final coords = ((r['geometry'] as Map<String, dynamic>)['coordinates'] ?? const <dynamic>[]) as List<dynamic>;
     final points = [for (final c in coords) LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble())];
     final km = (r['distance'] as num).toDouble() / 1000.0;
-    final mins = (((r['duration'] as num).toDouble()) / 60).round();
+    final osrmMins = (((r['duration'] as num).toDouble()) / 60).round();
+    final mins = paceMps == null ? osrmMins : ((km * 1000.0 / paceMps) / 60.0).ceil().clamp(1, 1440).toInt();
     final leg = (r['legs'] as List<dynamic>).first as Map<String, dynamic>;
     final stepTexts = <String>[];
     final stepSay = <String>[];
@@ -612,9 +618,9 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   /// Draw the route: picked start to picked destination, or the phone's position to the
-  /// picked destination, or (nothing picked) to the nearest police command's post. The chosen
-  /// way of travelling decides the router profile, so every mode gets its own honest paths
-  /// and estimated time.
+  /// picked destination, or (nothing picked) to the nearest police command's post. Every way of
+  /// travelling plans on the same street map; the minutes come from travel pace, so walking and
+  /// cycling read as a person's time, not a machine's.
   Future<void> _planRoute() async {
     final t = widget.i18n.t;
     final f = _fix;
@@ -650,10 +656,13 @@ class _MapScreenState extends State<MapScreen> {
         dest = LatLng(centre.$1, centre.$2);
         destName = t('map.to_police', {'state': stateName});
       }
-      // The free OSM router carries separate road networks for car, foot and bike, so the phone
-      // asks for the one matching how the person is travelling. (Its servers are named routed-car,
-      // routed-foot and routed-bike - not by travel-word, so the name is mapped here.)
-      final slug = switch (_mode) { 'driving' => 'car', 'walking' => 'foot', _ => 'bike' };
+      // Walking and cycling in Nigeria happen on the same streets cars use, and the free router's
+      // separate foot/bike path maps are thin here - it once turned a 2 km street trip into a
+      // 15 km "walk" through paths that exist only as mapping stubs (that was the impossible
+      // "94 minutes"). So every mode plans on the real street map. Driving keeps the router's
+      // own car minutes; walking and cycling get honest minutes from the path length at a normal
+      // Nigerian pace (ambling 1.35 m/s, riding 4.17 m/s), so a 2 km trip never reads as hours.
+      const slug = 'car';
       const headers = {'User-Agent': 'Sentri/0.1'};
       final query = '${from.longitude},${from.latitude};${dest.longitude},${dest.latitude}?overview=full&geometries=geojson&steps=true';
       Map<String, dynamic>? body;
@@ -666,9 +675,9 @@ class _MapScreenState extends State<MapScreen> {
           if (parsed is Map<String, dynamic> && parsed['routes'] is List && (parsed['routes'] as List).isNotEmpty) body = parsed;
         } catch (_) {}
       }
-      if (body == null && _mode == 'driving') {
-        // The car's spare server: same free OSM roads, only ever used for driving, so the trip
-        // time it gives is as honest as the main one.
+      if (body == null) {
+        // The spare server: same free OSM street network, car-founded exactly like the main one
+        // here, so the trip time it gives is as honest as the main one.
         try {
           final res = await http.get(Uri.parse('https://router.project-osrm.org/route/v1/driving/$query'), headers: headers).timeout(const Duration(seconds: 20));
           if (res.statusCode == 200) {
@@ -682,7 +691,12 @@ class _MapScreenState extends State<MapScreen> {
         setState(() { _routeBusy = false; _routeError = t('map.route_failed'); _routeRetry = true; });
         return;
       }
-      final plan = _buildPlan(body['routes'].first as Map<String, dynamic>, dest, destName);
+      final plan = _buildPlan(
+        body['routes'].first as Map<String, dynamic>,
+        dest,
+        destName,
+        paceMps: switch (_mode) { 'walking' => 1.35, 'cycling' => 4.17, _ => null },
+      );
       if (!mounted || seq != _routeSeq) return;
       setState(() { _route = plan; _routeBusy = false; _nextStep = 0; _routeRetry = false; });
       if (_voiceOn) {

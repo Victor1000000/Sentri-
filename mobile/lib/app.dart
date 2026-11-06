@@ -114,8 +114,8 @@ class _RootState extends State<_Root> {
 }
 
 
-/// Home, Map and Police. The map is built only while its tab is open, so it does not use GPS or
-/// battery in the background.
+/// Home, Map and Police. The pages stay built inside an IndexedStack, so directions, pins and
+/// route voice plans survive a switch to Home and back.
 class _Tabs extends StatefulWidget {
   const _Tabs({required this.services});
   final AppServices services;
@@ -144,11 +144,16 @@ class _TabsState extends State<_Tabs> {
   Widget build(BuildContext context) {
     final s = widget.services;
     final t = s.i18n.t;
-    final body = switch (_tab) {
-      1 => MapScreen(location: s.location, api: s.api, i18n: s.i18n, placeLookup: const DevicePlaceLookup(), onPlace: (p) => _state = p?.state, police: _directoryFuture),
-      2 => PoliceScreen(directory: _directory, i18n: s.i18n, currentState: _state),
-      _ => HomeScreen(sos: s.sos, settings: s.settings, i18n: s.i18n, bridge: s.bridge, api: s.api, inbox: s.inbox, share: s.share, checkin: s.checkin, police: s.police),
-    };
+    // All three tabs stay built inside an IndexedStack, so switching to Home and back no longer
+    // tears down the Map tab: an active route, its pin and its voice plan survive the switch.
+    final body = IndexedStack(
+      index: _tab,
+      children: [
+        HomeScreen(sos: s.sos, settings: s.settings, i18n: s.i18n, bridge: s.bridge, api: s.api, inbox: s.inbox, share: s.share, checkin: s.checkin, police: s.police),
+        MapScreen(location: s.location, api: s.api, i18n: s.i18n, placeLookup: const DevicePlaceLookup(), onPlace: (p) => _state = p?.state, police: _directoryFuture),
+        PoliceScreen(directory: _directory, i18n: s.i18n, currentState: _state),
+      ],
+    );
     return Scaffold(
       body: body,
       bottomNavigationBar: Glass(

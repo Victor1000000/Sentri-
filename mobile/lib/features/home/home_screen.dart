@@ -16,7 +16,6 @@ import '../share/share_controller.dart';
 import '../share/share_screen.dart';
 import '../../core/widgets/flat.dart';
 import '../../core/widgets/glass.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../checkin/checkin_controller.dart';
 import '../onboarding/permissions_panel.dart';
 import '../sos/pin_pad.dart';
@@ -170,11 +169,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                     padding: const EdgeInsets.fromLTRB(22, 0, 22, 12),
                     child: CheckInCard(checkin: widget.checkin, sos: widget.sos, i18n: widget.i18n),
                   ),
-                  // Emergency numbers: free to call from any phone, data or no data.
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(22, 0, 22, 12),
-                    child: EmergencyNumbersCard(i18n: widget.i18n),
-                  ),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(22, 0, 22, 16),
                     child: Glass(
@@ -292,20 +286,38 @@ class _SharingTag extends StatelessWidget {
       ]);
 }
 
-/// The "Check on me" card. Idle: pick a window and it is armed at once. Running: shows when the
-/// alert would go out and one big "I'm safe" button. Nothing here overlaps: the whole home screen
-/// is a scrolling column and this card lays out in strict top-down rows.
-class CheckInCard extends StatelessWidget {
+/// The "Check on me" card. Idle: one button opens the phone's time picker, so the person chooses
+/// exactly when their contacts should check on them - tonight's walk, the bus ride, whatever.
+/// Running: shows when the alert would go out and one big "I'm safe" button. Nothing here
+/// overlaps: the whole home screen is a scrolling column and this card lays out top-down rows.
+class CheckInCard extends StatefulWidget {
   const CheckInCard({super.key, required this.checkin, required this.sos, required this.i18n});
   final CheckInController checkin;
   final SosController sos;
   final I18n i18n;
+  @override
+  State<CheckInCard> createState() => _CheckInCardState();
+}
 
-  static const _windows = [Duration(minutes: 10), Duration(minutes: 20), Duration(minutes: 30)];
+class _CheckInCardState extends State<CheckInCard> {
+  /// A picked wall-clock time becomes a window from now. A time already past today means
+  /// tomorrow at that time, which is what a person means when they pick "10:15 PM" at 9:40 PM.
+  Future<void> _pickTime() async {
+    final now = DateTime.now();
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(now.add(const Duration(minutes: 30))),
+    );
+    if (picked == null || !mounted) return;
+    var start = DateTime(now.year, now.month, now.day, picked.hour, picked.minute);
+    if (!start.isAfter(now)) start = start.add(const Duration(days: 1));
+    await widget.checkin.start(start.difference(now));
+  }
 
   @override
   Widget build(BuildContext context) {
-    final t = i18n.t;
+    final checkin = widget.checkin;
+    final t = widget.i18n.t;
     final cs = Theme.of(context).colorScheme;
     final muted = cs.onSurface.withValues(alpha: 0.55);
     return ListenableBuilder(
@@ -343,89 +355,20 @@ class CheckInCard extends StatelessWidget {
                 ]),
               ] else ...[
                 Row(children: [
-                  for (final w in _windows) ...[
-                    Expanded(
-                      child: OutlinedButton(
-                        style: OutlinedButton.styleFrom(
-                          minimumSize: const Size.fromHeight(40),
-                          padding: EdgeInsets.zero,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                        ),
-                        onPressed: () => unawaited(checkin.start(w)),
-                        child: Text('${w.inMinutes} min', style: const TextStyle(fontSize: 14)),
-                      ),
+                  Expanded(
+                    child: FilledButton.icon(
+                      style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(44), backgroundColor: cs.primary),
+                      onPressed: _pickTime,
+                      icon: const Icon(Icons.schedule, size: 20),
+                      label: Text(t('home.check_pick'), style: const TextStyle(fontSize: 15)),
                     ),
-                    if (w != _windows.last) const SizedBox(width: 8),
-                  ],
+                  ),
                 ]),
               ],
             ]),
           ),
         );
       },
-    );
-  }
-}
-
-/// The emergency numbers card: national line, FRSC and the Lagos line. All are free calls from
-/// any phone, so they work even with no data connection. Each row dials straight away.
-class EmergencyNumbersCard extends StatelessWidget {
-  const EmergencyNumbersCard({super.key, required this.i18n});
-  final I18n i18n;
-
-  Future<void> _call(String number) async {
-    try {
-      await launchUrl(Uri.parse('tel:$number'), mode: LaunchMode.externalApplication);
-    } catch (_) {}
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final t = i18n.t;
-    final cs = Theme.of(context).colorScheme;
-    final muted = cs.onSurface.withValues(alpha: 0.55);
-    final rows = <(String, String, IconData)>[
-      ('112', t('home.em_national'), Icons.local_police_outlined),
-      ('122', t('home.em_frsc'), Icons.traffic_outlined),
-      ('767', t('home.em_lagos'), Icons.sos_outlined),
-    ];
-    return Glass(
-      radius: 18,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Icon(Icons.emergency_outlined, size: 20, color: cs.error),
-            const SizedBox(width: 8),
-            Expanded(child: Text(t('home.em_title'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600))),
-          ]),
-          const SizedBox(height: 4),
-          Text(t('home.em_sub'), style: TextStyle(fontSize: 12.5, height: 1.35, color: muted)),
-          const SizedBox(height: 6),
-          for (final r in rows) ...[
-            InkWell(
-              onTap: () => unawaited(_call(r.$1)),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 9),
-                child: Row(children: [
-                  Container(
-                    width: 34,
-                    height: 34,
-                    decoration: BoxDecoration(shape: BoxShape.circle, color: cs.error.withValues(alpha: 0.1)),
-                    child: Icon(r.$3, size: 18, color: cs.error),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(child: Text(r.$2, style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600))),
-                  Text(r.$1, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: cs.primary)),
-                  const SizedBox(width: 10),
-                  Icon(Icons.phone_outlined, size: 19, color: cs.primary),
-                ]),
-              ),
-            ),
-            if (r != rows.last) Divider(height: 0.5, thickness: 0.5, color: cs.onSurface.withValues(alpha: 0.08)),
-          ],
-        ]),
-      ),
     );
   }
 }
