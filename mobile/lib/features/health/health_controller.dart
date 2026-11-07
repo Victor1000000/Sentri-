@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:camera/camera.dart' show CameraController;
 import 'package:flutter/foundation.dart';
 import 'package:health/health.dart';
 import 'package:http/http.dart' as http;
@@ -11,6 +12,7 @@ import '../../core/net/api.dart';
 import '../../core/settings.dart';
 import '../location/location.dart';
 import '../push/push_service.dart';
+import 'heart_camera.dart';
 
 /// One hospital around the person, from the free OpenStreetMap service.
 class NearbyHospital {
@@ -23,6 +25,15 @@ class NearbyHospital {
   /// The public phone line as saved on the map, or null when OSM has none yet.
   final String? phone;
 }
+
+/// Free mirrors of the OpenStreetMap query service, tried in order: the main one rate-limits
+/// and hiccups on mobile networks, so no single failure should be able to blank the list.
+const _overpassEndpoints = <String>[
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
+  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+];
 
 /// The watchful heart of the Health tab:
 ///
@@ -58,6 +69,22 @@ class HealthController extends ChangeNotifier {
   List<NearbyHospital> hospitals = const [];
   bool hospitalsLoading = false;
   bool hospitalsFailed = false;
+
+  /// true when the map service answered fine but no location could be had - a different
+  /// problem with a different advice than "service unreachable".
+  bool hospitalsNoLocation = false;
+
+  // ---- the app's own pulse reading (camera + torch on the fingertip) ----
+  final HeartCamera _camera = HeartCamera();
+  bool measuring = false;
+  int measureLeft = 0;
+  int? cameraBpm;
+  bool measureFailed = false;
+  bool noCamera = false;
+
+  /// The active camera controller during a measurement - the screen shows its preview so
+  /// frames keep flowing. Null when not measuring.
+  CameraController? get cameraPreview => _camera.controller;
 
   Timer? _poll;
   DateTime? _historyAt;
@@ -251,44 +278,115 @@ class HealthController extends ChangeNotifier {
     }
   }
 
-  /// Hospitals near the person, straight from the free OpenStreetMap service.
-  /// Refreshed at most every ten minutes.
+  /// One pulse reading taken by the app itself: camera torch on, fingertip over the lens,
+  /// about thirty seconds, then the maths decides whether it can trust the numbers. The
+  /// result feeds the same display as Health Connect readings; no health app needed.
+  Future<void> measureWithCamera() async {
+    if (measuring) return;
+    measuring = true;
+    measureFailed = false;
+    noCamera = false;
+    cameraBpm = null;
+    measureLeft = HeartCamera.secondsTarget;
+    notifyListeners();
+    int? r;
+    try {
+      r = await _camera.measure(onTick: (s) {
+        measureLeft = s;
+        notifyListeners();
+      });
+    } catch (_) {
+      r = null;
+    }
+    measuring = false;
+    measureLeft = 0;
+    noCamera = _camera.cameraMissing;
+    if (r == null) {
+      measureFailed = true;
+      notifyListeners();
+      return;
+    }
+    cameraBpm = r;
+    bpm = r;
+    bpmAt = DateTime.now();
+    notifyListeners();
+  }
+
+  /// Hospitals near the person, straight from the free OpenStreetMap service (with backup
+  /// mirrors, so one busy server cannot blank the list). Refreshed at most every ten minutes.
+  /// A rough fix is plenty here: if the exact fix does not come in time, the last known spot
+  /// still shows useful hospitals.
   Future<void> loadHospitals({bool force = false}) async {
     if (hospitalsLoading) return;
     final had = _hospitalsAt;
     if (!force && had != null && had.isAfter(DateTime.now().subtract(_hospitalsRefetch))) return;
     hospitalsLoading = true;
+    hospitalsFailed = false;
+    hospitalsNoLocation = false;
     notifyListeners();
-    DateTime? at;
+    GeoFix? f;
     try {
-      final f = await location.preciseFix(timeout: const Duration(seconds: 15));
-      final here = f == null ? null : LatLng(f.lat, f.lon);
-      if (here == null) {
-        hospitalsFailed = true;
-      } else {
-        at = DateTime.now();
-        hospitals = await _fetchHospitals(here);
-        hospitalsFailed = false;
-      }
-    } catch (_) {
-      hospitalsFailed = true;
+      f = await location.preciseFix(timeout: const Duration(seconds: 20));
+    } catch (_) {}
+    if (f == null) {
+      try {
+        f = await location.fix(highAccuracy: true, timeout: const Duration(seconds: 20));
+      } catch (_) {}
     }
-    _hospitalsAt = at ?? DateTime.now();
+    if (f == null) {
+      try {
+        f = await location.lastKnown();
+      } catch (_) {}
+    }
+    if (f == null) {
+      // Honest split: the map service may be fine - the problem is no location yet.
+      hospitalsNoLocation = true;
+      _hospitalsAt = DateTime.now();
+      hospitalsLoading = false;
+      notifyListeners();
+      return;
+    }
+    final here = LatLng(f.lat, f.lon);
+    List<NearbyHospital>? got;
+    for (final url in _overpassEndpoints) {
+      try {
+        got = await _overpassQuery(url, here);
+        if (got != null) break;
+      } catch (_) {
+        got = null;
+      }
+    }
+    if (got == null) {
+      hospitalsFailed = true;
+    } else {
+      hospitals = got;
+      _hospitalsAt = DateTime.now();
+      hospitalsFailed = false;
+    }
     hospitalsLoading = false;
     notifyListeners();
   }
 
-  Future<List<NearbyHospital>> _fetchHospitals(LatLng here) async {
+  /// One Overpass mirror; returns null when that mirror answers badly (bad code, timeout).
+  Future<List<NearbyHospital>?> _overpassQuery(String url, LatLng here) async {
     const radius = 15000.0;
     final q = '[out:json][timeout:25];('
         'node(around:\$radius,${here.latitude},${here.longitude})["amenity"~"^(hospital|clinic)\$"];'
         'way(around:\$radius,${here.latitude},${here.longitude})["amenity"~"^(hospital|clinic)\$"];'
         ');out center tags;';
-    final res = await http.post(
-      Uri.parse('https://overpass-api.de/api/interpreter'),
-      body: {'data': q},
-    ).timeout(const Duration(seconds: 40));
+    final res = await http
+        .post(
+          Uri.parse(url),
+          headers: const {'User-Agent': 'SentriApp/1.0 (health tab hospitals)'},
+          body: {'data': q},
+        )
+        .timeout(const Duration(seconds: 35));
+    if (res.statusCode != 200 || res.bodyBytes.isEmpty) return null;
     final j = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+    return _hospitalsFromOverpass(j, here);
+  }
+
+  Future<List<NearbyHospital>> _hospitalsFromOverpass(Map<String, dynamic> j, LatLng here) async {
     final out = <NearbyHospital>[];
     final dist = const Distance();
     for (final el in (j['elements'] as List? ?? const [])) {

@@ -15,6 +15,10 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Health Connect: the accurate heart-rate source on the phone. Read-only, one data type. -->
     <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
+    <!-- The app's own pulse reading: fingertip over the rear lens, torch on. Optional hardware. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
 
     <application
         android:name="${applicationName}"

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui' show FontFeature;
 
+import 'package:camera/camera.dart' show CameraController, CameraPreview;
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -8,9 +9,11 @@ import '../../core/i18n/i18n.dart';
 import '../../core/widgets/flat.dart';
 import 'health_controller.dart';
 
-/// The Health tab: honest heart-rate readings from Health Connect, drink-water reminders at
-/// the person's own pace, and hospitals near them - nearest first, with a call button. The
-/// same calm card look as the rest of the app: big number, plain words, nothing loud.
+/// The Health tab: honest heart-rate readings - straight from the person's fingertip with
+/// the camera when no health app is around (plus Health Connect when a band or health app
+/// is feeding it), drink-water reminders at the person's own pace, and hospitals near them -
+/// nearest first, with a call button. The same calm card look as the rest of the app: big
+/// number, plain words, nothing loud.
 class HealthScreen extends StatefulWidget {
   const HealthScreen({super.key, required this.health, required this.i18n});
   final HealthController health;
@@ -70,7 +73,9 @@ class _HealthScreenState extends State<HealthScreen> {
       child: Padding(
         padding: const EdgeInsets.all(18),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          if (h.connected == null) ...[
+          if (h.measuring) ...[
+            _measureArea(context, cs),
+          ] else if (h.connected == null) ...[
             const LinearProgressIndicator(minHeight: 2),
             const SizedBox(height: 8),
           ] else if (h.bpm != null) ...[
@@ -102,9 +107,53 @@ class _HealthScreenState extends State<HealthScreen> {
               ),
             ],
           ],
+          // The app measures the person directly - camera + torch on the fingertip. It
+          // stays available even while Health Connect is waiting for permission.
+          const SizedBox(height: 14),
+          if (h.measureFailed && h.noCamera)
+            Text(t('health.measure_no_cam'), textAlign: TextAlign.center, style: TextStyle(fontSize: 13.5, height: 1.4, color: cs.error.withValues(alpha: 0.85)))
+          else if (h.measureFailed)
+            Text(t('health.measure_fail'), textAlign: TextAlign.center, style: TextStyle(fontSize: 13.5, height: 1.4, color: Flat.muted(context))),
+          if (!h.measuring) ...[
+            const SizedBox(height: 14),
+            Center(
+              child: FilledButton.icon(
+                style: FilledButton.styleFrom(minimumSize: const Size(0, 44), padding: const EdgeInsets.symmetric(horizontal: 22)),
+                onPressed: () => unawaited(h.measureWithCamera()),
+                icon: const Icon(Icons.waving_hand_outlined, size: 20),
+                label: Text(t(h.cameraBpm == null ? 'health.measure' : 'health.measure_again'), style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600)),
+              ),
+            ),
+          ],
         ]),
       ),
     );
+  }
+
+  Widget _measureArea(BuildContext context, ColorScheme cs) {
+    final h = widget.health;
+    final ctrl = h.cameraPreview;
+    return Column(crossAxisAlignment: CrossAxisAlignment.center, children: [
+      Text(t('health.measure_left', {'n': '${h.measureLeft}'}),
+          style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w800, height: 1, fontFeatures: [FontFeature.tabularFigures()])),
+      const SizedBox(height: 12),
+      Center(
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(18),
+          child: SizedBox(
+            width: 150,
+            height: 235,
+            child: ctrl == null
+                ? ColoredBox(color: Flat.hairline(context))
+                : CameraPreview(ctrl),
+          ),
+        ),
+      ),
+      const SizedBox(height: 12),
+      Text(t('health.measure_tip'), textAlign: TextAlign.center, style: const TextStyle(fontSize: 13.5, height: 1.45)),
+      const SizedBox(height: 12),
+      const LinearProgressIndicator(minHeight: 2),
+    ]);
   }
 
   // ---------------------------------------------------------------- water
@@ -164,6 +213,8 @@ class _HealthScreenState extends State<HealthScreen> {
         child: Column(children: [
           if (h.hospitalsLoading) ...[
             Padding(padding: const EdgeInsets.all(28), child: LinearProgressIndicator(minHeight: 2, color: cs.primary)),
+          ] else if (h.hospitalsNoLocation && list.isEmpty) ...[
+            Padding(padding: const EdgeInsets.all(16), child: Text(t('health.hosp_location'), textAlign: TextAlign.center, style: const TextStyle(fontSize: 14, height: 1.45))),
           ] else if (h.hospitalsFailed && list.isEmpty) ...[
             Padding(padding: const EdgeInsets.all(16), child: Text(t('health.hosp_error'), textAlign: TextAlign.center, style: const TextStyle(fontSize: 14, height: 1.45))),
           ] else if (list.isEmpty) ...[
