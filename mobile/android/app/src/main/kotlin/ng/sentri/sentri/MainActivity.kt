@@ -3,15 +3,19 @@ package ng.sentri.sentri
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 
 /**
  * The screen. It attaches to the shared engine from [SentriEngine], so an alert that was started by a
  * gesture while the phone slept is already running when this opens. Shows over the lock screen so the
  * cancel-PIN screen is visible when an alert starts from a locked phone.
+ *
+ * It extends [FlutterFragmentActivity] (not the plain FlutterActivity) on purpose: the Health tab's
+ * permission requests go through Android's registerForActivityResult, which only exists on
+ * ComponentActivity - and FragmentActivity is that. Everything else behaves identically.
  */
-class MainActivity : FlutterActivity() {
+class MainActivity : FlutterFragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (Build.VERSION.SDK_INT >= 27) {
