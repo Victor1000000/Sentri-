@@ -17,18 +17,6 @@ diff --git a/mobile/lib/core/fonts.dart b/mobile/lib/core/fonts.dart
 +  BrandFonts.kInter700,
 +  BrandFonts.kInter800,
 +];
-diff --git a/mobile/pubspec.yaml b/mobile/pubspec.yaml
---- a/mobile/pubspec.yaml
-+++ b/mobile/pubspec.yaml
-@@ -26,7 +26,7 @@
-   flutter_local_notifications: ^17.2.3
-   share_plus: ^10.0.2
-   connectivity_plus: ^6.0.5
--  health: ^13.3.2
-+  health: 13.3.1
-   url_launcher: ^6.3.0
-   flutter_tts: ^4.1.0
- 
 diff --git a/mobile/lib/features/health/health_controller.dart b/mobile/lib/features/health/health_controller.dart
 --- a/mobile/lib/features/health/health_controller.dart
 +++ b/mobile/lib/features/health/health_controller.dart
@@ -113,50 +101,3 @@ diff --git a/mobile/test/helpers.dart b/mobile/test/helpers.dart
    Place? place = const Place(street: 'Allen Avenue', area: 'Ikeja', state: 'Lagos', label: 'Allen Avenue, Ikeja, Lagos');
    @override
    Future<Place?> reverseGeocode(double lat, double lon) async {
-diff --git a/mobile/android/app/src/main/AndroidManifest.xml b/mobile/android/app/src/main/AndroidManifest.xml
---- a/mobile/android/app/src/main/AndroidManifest.xml
-+++ b/mobile/android/app/src/main/AndroidManifest.xml
-@@ -53,6 +53,7 @@
-             android:permission="android.permission.START_VIEW_PERMISSION_USAGE">
-             <intent-filter>
-                 <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
-+                <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
-                 <category android:name="android.intent.category.HEALTH_CONNECT" />
-             </intent-filter>
-             <meta-data
-@@ -114,6 +115,10 @@
-             <action android:name="android.intent.action.PROCESS_TEXT" />
-             <data android:mimeType="text/plain" />
-         </intent>
-+        <!-- Health Connect: checks whether it is on the phone and lets it show our reasons. -->
-         <package android:name="com.google.android.apps.healthdata" />
-+        <intent>
-+            <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
-+        </intent>
-     </queries>
- </manifest>
-diff --git a/mobile/android/app/src/main/kotlin/ng/sentri/sentri/MainActivity.kt b/mobile/android/app/src/main/kotlin/ng/sentri/sentri/MainActivity.kt
---- a/mobile/android/app/src/main/kotlin/ng/sentri/sentri/MainActivity.kt
-+++ b/mobile/android/app/src/main/kotlin/ng/sentri/sentri/MainActivity.kt
-@@ -3,15 +3,19 @@
- import android.os.Build
- import android.os.Bundle
- import android.view.WindowManager
--import io.flutter.embedding.android.FlutterActivity
-+import io.flutter.embedding.android.FlutterFragmentActivity
- import io.flutter.embedding.engine.FlutterEngine
- 
- /**
-  * The screen. It attaches to the shared engine from [SentriEngine], so an alert that was started by a
-  * gesture while the phone slept is already running when this opens. Shows over the lock screen so the
-  * cancel-PIN screen is visible when an alert starts from a locked phone.
-+ *
-+ * It extends [FlutterFragmentActivity] (not the plain FlutterActivity) on purpose: the Health tab's
-+ * permission requests go through Android's registerForActivityResult, which only exists on
-+ * ComponentActivity - and FragmentActivity is that. Everything else behaves identically.
-  */
--class MainActivity : FlutterActivity() {
-+class MainActivity : FlutterFragmentActivity() {
-     override fun onCreate(savedInstanceState: Bundle?) {
-         super.onCreate(savedInstanceState)
-         if (Build.VERSION.SDK_INT >= 27) {
