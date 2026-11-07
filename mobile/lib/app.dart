@@ -12,6 +12,7 @@ import 'features/location/place_lookup.dart';
 import 'features/map/map_screen.dart';
 import 'features/police/police_directory.dart';
 import 'features/police/police_screen.dart';
+import 'features/health/health_screen.dart';
 import 'features/onboarding/onboarding_controller.dart';
 import 'features/onboarding/onboarding_screens.dart';
 import 'features/sos/sos_controller.dart';
@@ -114,7 +115,7 @@ class _RootState extends State<_Root> {
 }
 
 
-/// Home, Map and Police. The pages stay built inside an IndexedStack, so directions, pins and
+/// Home, Map, Health and Police. The pages stay built inside an IndexedStack, so directions, pins and
 /// route voice plans survive a switch to Home and back.
 class _Tabs extends StatefulWidget {
   const _Tabs({required this.services});
@@ -144,13 +145,14 @@ class _TabsState extends State<_Tabs> {
   Widget build(BuildContext context) {
     final s = widget.services;
     final t = s.i18n.t;
-    // All three tabs stay built inside an IndexedStack, so switching to Home and back no longer
+    // All tabs stay built inside an IndexedStack, so switching to Home and back no longer
     // tears down the Map tab: an active route, its pin and its voice plan survive the switch.
     final body = IndexedStack(
       index: _tab,
       children: [
         HomeScreen(sos: s.sos, settings: s.settings, i18n: s.i18n, bridge: s.bridge, api: s.api, inbox: s.inbox, share: s.share, checkin: s.checkin, police: s.police),
         MapScreen(location: s.location, api: s.api, i18n: s.i18n, placeLookup: const DevicePlaceLookup(), onPlace: (p) => _state = p?.state, police: _directoryFuture),
+        HealthScreen(health: s.health, i18n: s.i18n),
         PoliceScreen(directory: _directory, i18n: s.i18n, currentState: _state),
       ],
     );
@@ -169,6 +171,7 @@ class _TabsState extends State<_Tabs> {
         destinations: [
           NavigationDestination(icon: const Icon(Icons.home_outlined), selectedIcon: const Icon(Icons.home, color: Colors.white), label: t('tabs.home')),
           NavigationDestination(icon: const Icon(Icons.map_outlined), selectedIcon: const Icon(Icons.map, color: Colors.white), label: t('tabs.map')),
+          NavigationDestination(icon: const Icon(Icons.monitor_heart_outlined), selectedIcon: const Icon(Icons.monitor_heart, color: Colors.white), label: t('tabs.health')),
           NavigationDestination(icon: const Icon(Icons.local_police_outlined), selectedIcon: const Icon(Icons.local_police, color: Colors.white), label: t('tabs.police')),
         ],
       )),

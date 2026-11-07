@@ -143,6 +143,10 @@ abstract class SentriApi {
   Future<PinResult> submitPin(String? sosId, String pin);
   Future<void> lowBattery(GeoFix? geo);
 
+  /// Tells close contacts that this person's heart rate climbed abnormally, again and again.
+  /// Rate-limited on the server; the phone spaces these out itself.
+  Future<void> healthAlert(GeoFix? geo);
+
   /// Street, area, LGA and state for a position, or null when the server cannot say. Never required for an alert.
   Future<Place?> reverseGeocode(double lat, double lon);
 
@@ -495,6 +499,11 @@ class HttpSentriApi implements SentriApi {
   @override
   Future<void> lowBattery(GeoFix? geo) async {
     await _call('POST', '/v1/alerts/low-battery', body: {...?geo?.toJson()}, patient: false);
+  }
+
+  @override
+  Future<void> healthAlert(GeoFix? geo) async {
+    await _call('POST', '/v1/alerts/health', body: {...?geo?.toJson()}, patient: false);
   }
 
   // ---- inbox ----

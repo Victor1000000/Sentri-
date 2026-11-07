@@ -16,6 +16,7 @@ import 'core/timers.dart';
 import 'features/battery/battery.dart';
 import 'features/battery/low_battery_alerter.dart';
 import 'features/checkin/checkin_controller.dart';
+import 'features/health/health_controller.dart';
 import 'features/inbox/inbox_controller.dart';
 import 'features/location/location.dart';
 import 'features/police/police_directory.dart';
@@ -38,6 +39,7 @@ class AppServices {
     required this.settings,
     required this.sos,
     required this.lowBattery,
+    required this.health,
     required this.onboarding,
     required this.location,
     required this.inbox,
@@ -56,6 +58,10 @@ class AppServices {
   final AppSettings settings;
   final SosController sos;
   final LowBatteryAlerter lowBattery;
+
+  /// The Health tab's watch: heart-rate readings, drink-water reminders, nearby hospitals.
+  final HealthController health;
+
   final OnboardingController onboarding;
   final LocationSource location;
   final InboxController inbox;
@@ -119,6 +125,13 @@ class AppServices {
       timers: timers,
     );
 
+    final health = HealthController(
+      api: api,
+      settings: settings,
+      location: location,
+      i18n: i18n,
+    );
+
     final onboarding = OnboardingController(
       api: api,
       i18n: i18n,
@@ -146,6 +159,7 @@ class AppServices {
       settings: settings,
       sos: sos,
       lowBattery: lowBattery,
+      health: health,
       onboarding: onboarding,
       location: location,
       inbox: inbox,
@@ -184,6 +198,7 @@ class AppServices {
     await bridge.startProtection(settings.triggers);
     if (settings.onboarded) {
       lowBattery.start();
+      health.start();
       unawaited(_push.start());
       unawaited(inbox.refresh());
       unawaited(share.resume());
@@ -191,6 +206,7 @@ class AppServices {
     settings.addListener(() {
       if (settings.onboarded) {
         lowBattery.start();
+        health.start();
         unawaited(_push.start());
       }
     });
@@ -200,6 +216,7 @@ class AppServices {
   Future<void> dispose() async {
     await _net?.cancel();
     lowBattery.stop();
+    health.dispose();
     checkin.dispose();
     sos.dispose();
     share.dispose();

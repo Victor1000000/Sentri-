@@ -17,6 +17,7 @@ const T: Record<Locale, Record<InboxKind, string>> & Record<Locale, { someone: s
     test: '{n} sent a test alert. Nothing to do. A real alert looks like this.',
     share_start: '{n} is sharing their location with you. Open Sentri to follow along.',
     share_stop: '{n} stopped sharing their location with you.',
+    health_alert: "{n}'s heart rate climbed unusually high, more than once. Open Sentri to check on them and see the hospitals near them.",
   },
   pcm: {
     someone: 'Person',
@@ -27,6 +28,7 @@ const T: Record<Locale, Record<InboxKind, string>> & Record<Locale, { someone: s
     test: '{n} send test alert. Nothing to do. Real alert go look like this.',
     share_start: '{n} dey share where e dey with you. Open Sentri to follow am.',
     share_stop: '{n} don stop to share where e dey.',
+    health_alert: "{n} heartbeat don jump up high plenty times. Open Sentri check am and see hospital wey dey near am.",
   },
   ha: {
     someone: 'Wani',
@@ -37,6 +39,7 @@ const T: Record<Locale, Record<InboxKind, string>> & Record<Locale, { someone: s
     test: '{n} ya aiko gwajin gargaɗi. Babu abin yi. Gargaɗin gaske zai yi kama da wannan.',
     share_start: '{n} na raba maka wurin da yake. Buɗe Sentri ka bi sawunsa.',
     share_stop: '{n} ya daina raba maka wurin da yake.',
+    health_alert: 'Bugun zuciyar {n} ya yi gagarumin hawa fiye da sau ɗaya. Buɗe Sentri ka tabbata da lafiyarsa ka ga asibitoci mafi kusa da shi.',
   },
   yo: {
     someone: 'Ẹnìkan',
@@ -47,6 +50,7 @@ const T: Record<Locale, Record<InboxKind, string>> & Record<Locale, { someone: s
     test: '{n} fi ìdánwò ìkìlọ̀ ránṣẹ́. Kò sí ohun tí o máa ṣe. Ìkìlọ̀ gidi á rí báyìí.',
     share_start: '{n} ń pín ibi tí ó wà pẹ̀lú rẹ. Ṣí Sentri láti tẹ̀lé e.',
     share_stop: '{n} ti dáwọ́ pípín ibi tí ó wà dúró.',
+    health_alert: 'Ìbú ọkàn {n} ti ga tó éwu léèméjì. Ṣí Sentri láti bò tó ọ kí o sì rí wọ́nì tí ó sún mọ́ ọn.',
   },
   ig: {
     someone: 'Mmadụ',
@@ -57,6 +61,7 @@ const T: Record<Locale, Record<InboxKind, string>> & Record<Locale, { someone: s
     test: '{n} zitere ọkwa nnwale. Ọ nweghị ihe ị ga-eme. Ọkwa n’ezie ga-adị otu a.',
     share_start: '{n} na-ekekọrịta ebe ọ nọ gị. Meghee Sentri iji soro ya.',
     share_stop: '{n} akwụsịla ịkekọrịta ebe ọ nọ.',
+    health_alert: 'Aka obi {n} elielo nke ọma maka nke ọzọ. Meghee Sentri lelee ya ma hụ ụlọ ọgwụ dị ya nso.',
   },
 };
 

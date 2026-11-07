@@ -136,6 +136,14 @@ export function buildApp(d: AppDeps): FastifyInstance {
     return reply.send(await d.engine.lowBattery(uid, geo));
   });
 
+  app.post('/v1/alerts/health', async (req, reply) => {
+    const uid = await user(req);
+    if (!uid) return reply.code(401).send({ error: 'unauthorized' });
+    const g = Geo.partial().parse(req.body ?? {});
+    const geo = g.lat !== undefined && g.lon !== undefined ? { lat: g.lat, lon: g.lon, accuracyM: g.accuracyM, at: Date.now() } : undefined;
+    return reply.send(await d.engine.healthAlert(uid, geo));
+  });
+
   app.get('/healthz', async () => ({ ok: true }));
 
   return app;

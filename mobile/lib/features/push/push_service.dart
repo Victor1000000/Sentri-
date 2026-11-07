@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import '../../core/net/api.dart';
@@ -27,10 +28,96 @@ const _shareChannel = AndroidNotificationChannel(
   importance: Importance.high,
 );
 
+/// Health notes (heart-rate warnings, drink-water reminders): noticeable, but they never
+/// ring like an emergency, because they are not one.
+const _healthChannel = AndroidNotificationChannel(
+  'sentri_health',
+  'Health',
+  description: 'Drink-water reminders and gentle heart-rate notes from your own Health tab.',
+  importance: Importance.high,
+);
+
 final _alarmPattern = Int64List.fromList([0, 700, 300, 700, 300, 700, 300, 700]);
 
 /// One notification per alert: repeats of the same alert replace it (and ring again) instead of piling up.
 int _idFor(Map<String, dynamic> data) => ((data['inboxId'] ?? data['sosId'] ?? data['text'] ?? '').toString().hashCode) & 0x7fffffff;
+
+/// Fixed ids so each kind can cancel or replace exactly itself.
+const _waterId = 7201;
+const _healthNoteId = 7202;
+
+/// Repeats the drink-water reminder at the person's own pace. Cancels the previous one first
+/// (including "off"), then asks for the notification permission once, right when the person
+/// turns reminders on.
+Future<void> scheduleWaterReminder(int minutes, String title, String body) async {
+  const details = NotificationDetails(
+    android: AndroidNotificationDetails(
+      'sentri_health',
+      'Health',
+      channelDescription: 'Drink-water reminders and gentle heart-rate notes from your own Health tab.',
+      importance: Importance.high,
+      priority: Priority.high,
+    ),
+    iOS: DarwinNotificationDetails(interruptionLevel: InterruptionLevel.timeSensitive),
+  );
+  try {
+    await _local.cancel(_waterId);
+    if (minutes <= 0) return;
+    final android = _local.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+    await android?.createNotificationChannel(_healthChannel);
+    await android?.requestNotificationsPermission();
+    try {
+      await _local.periodicallyShowWithDuration(
+        _waterId,
+        title,
+        body,
+        Duration(minutes: minutes),
+        details,
+        androidScheduleMode: AndroidScheduleMode.alarmClock,
+      );
+    } on PlatformException {
+      // Some phones lock exact alarms: a gently inexact chime still keeps the habit.
+      await _local.periodicallyShowWithDuration(
+        _waterId,
+        title,
+        body,
+        Duration(minutes: minutes),
+        details,
+        androidScheduleMode: AndroidScheduleMode.inexact,
+      );
+    }
+  } catch (_) {
+    // A reminder that cannot be scheduled must never break the Health tab.
+  }
+}
+
+/// A one-off health note (for example a heart-rate warning): same channel as the water
+/// reminder, noticeable but calm, and it replaces the previous note instead of piling up.
+Future<void> showHealthNote(String title, String body) async {
+  try {
+    final android = _local.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+    await android?.createNotificationChannel(_healthChannel);
+    final android2 = await android?.areNotificationsEnabled() ?? true;
+    if (android2 == false) return;
+    await _local.show(
+      _healthNoteId,
+      title,
+      body,
+      const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'sentri_health',
+          'Health',
+          channelDescription: 'Drink-water reminders and gentle heart-rate notes from your own Health tab.',
+          importance: Importance.high,
+          priority: Priority.high,
+        ),
+        iOS: DarwinNotificationDetails(interruptionLevel: InterruptionLevel.timeSensitive),
+      ),
+    );
+  } catch (_) {
+    // Nothing about health notes may break the app.
+  }
+}
 
 /// Removes the ringing notification of an alert that has been answered or has ended.
 Future<void> cancelAlertNotification(String inboxId) => _local.cancel(inboxId.hashCode & 0x7fffffff);

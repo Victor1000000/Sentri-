@@ -14,7 +14,7 @@ import type {
 } from '../../domain/types.js';
 import { noopLogger } from '../../domain/types.js';
 import { evaluatePin } from '../../lib/pin.js';
-import type { FixedWindowLimiter } from '../../lib/rate-limit.js';
+import { FixedWindowLimiter } from '../../lib/rate-limit.js';
 import { hashToken, linkToken } from '../../lib/tokens.js';
 
 export interface EngineConfig {
@@ -37,6 +37,8 @@ export interface EngineDeps {
   dispatcher: Dispatcher;
   audit: AuditSink;
   lowBatteryLimiter: FixedWindowLimiter;
+  /** Optional: caps the "heart rate climbed dangerously" notes to contacts. The engine builds its own generous default when absent. */
+  healthAlertLimiter?: FixedWindowLimiter;
   clock: () => number;
   newId: () => string;
   cfg: EngineConfig;
@@ -388,6 +390,41 @@ export class SosEngine {
     );
     await this.record('system', 'battery.low_alert', userId);
     return { sent: true };
+  }
+
+  /**
+   * The phone says this person's heart rate climbed abnormally high again and again inside an
+   * hour (the phone decides what counts; the phone paces itself). Contacts get one honest note,
+   * with the last known place, so they can act on it.
+   */
+  async healthAlert(userId: string, geo?: GeoPoint): Promise<{ sent: boolean }> {
+    const { store } = this.d;
+    const limiter = this.d.healthAlertLimiter ?? this.defaultHealthLimiter();
+    if (!limiter.allow(`health:${userId}`)) return { sent: false };
+
+    const contacts = await store.getContacts(userId);
+    if (contacts.length === 0) return { sent: false };
+
+    await Promise.all(
+      contacts.map(async (c) => {
+        await this.safeSend({
+          kind: 'health_alert',
+          sosId: null,
+          contact: c,
+          locationUrl: mapLink(geo),
+          geo,
+          repeat: 0,
+        });
+      }),
+    );
+    await this.record('system', 'health.high_hr_alert', userId);
+    return { sent: true };
+  }
+
+  /** Used when the caller does not care to set its own pace: one note per 6 hours at most. */
+  private defaultHealthLimiter(): FixedWindowLimiter {
+    this.d.healthAlertLimiter ??= new FixedWindowLimiter(1, 6 * 60 * 60_000, this.d.clock);
+    return this.d.healthAlertLimiter;
   }
 
   // -------------------------------------------------------------- helpers

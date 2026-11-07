@@ -76,9 +76,11 @@ class SentriWordmark extends StatelessWidget {
   const SentriWordmark({super.key, this.size = 28, this.color = Brand.indigo});
   final double size;
   final Color color;
+  // TextDecoration.none is belt and braces: even a default that draws an underline stroke
+  // (which once showed as a stray yellow line) can never paint over the brand mark.
   @override
   Widget build(BuildContext context) =>
-      Text('Sentri', style: TextStyle(fontSize: size, fontWeight: FontWeight.w500, letterSpacing: -size * 0.035, height: 1, color: color));
+      Text('Sentri', style: TextStyle(fontSize: size, fontWeight: FontWeight.w500, letterSpacing: -size * 0.035, height: 1, color: color, decoration: TextDecoration.none));
 }
 
 /// The indigo opening, built to the designed brand board: the neon-green mark beside the white

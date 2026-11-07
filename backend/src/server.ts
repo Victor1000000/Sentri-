@@ -150,6 +150,7 @@ const engine = new SosEngine({
   dispatcher,
   audit,
   lowBatteryLimiter: new FixedWindowLimiter(1, 30 * 60_000, clock),
+  healthAlertLimiter: new FixedWindowLimiter(1, 6 * 60 * 60_000, clock),
   clock,
   newId: randomUUID,
   log,

@@ -24,6 +24,9 @@ class AppSettings extends ChangeNotifier {
   /// 'system', 'light' or 'dark'.
   String theme = 'system';
 
+  /// Minutes between drink-water reminders; 0 means reminders are off.
+  int waterMinutes = 0;
+
   Future<void> load() async {
     final raw = await _store.read(_k);
     if (raw == null) return;
@@ -40,6 +43,7 @@ class AppSettings extends ChangeNotifier {
     onboarded = j['onboarded'] as bool? ?? false;
     language = j['lang'] as String? ?? 'en';
     theme = j['theme'] as String? ?? 'system';
+    waterMinutes = j['water'] as int? ?? 0;
   }
 
   Future<void> update({
@@ -49,6 +53,7 @@ class AppSettings extends ChangeNotifier {
     bool? onboarded,
     String? language,
     String? theme,
+    int? waterMinutes,
   }) async {
     this.triggers = triggers ?? this.triggers;
     this.dataSaver = dataSaver ?? this.dataSaver;
@@ -56,6 +61,7 @@ class AppSettings extends ChangeNotifier {
     this.onboarded = onboarded ?? this.onboarded;
     this.language = language ?? this.language;
     this.theme = theme ?? this.theme;
+    this.waterMinutes = waterMinutes ?? this.waterMinutes;
     await _store.write(
       _k,
       jsonEncode({
@@ -69,6 +75,7 @@ class AppSettings extends ChangeNotifier {
         'onboarded': this.onboarded,
         'lang': this.language,
         'theme': this.theme,
+        'water': this.waterMinutes,
       }),
     );
     notifyListeners();

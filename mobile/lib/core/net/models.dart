@@ -7,7 +7,7 @@ class InboxEntry {
   const InboxEntry({required this.id, required this.kind, required this.from, required this.text, required this.at, required this.read, required this.live, this.state = 'active'});
   final String id;
 
-  /// sos | duress | offline | low_battery | test | share_start | share_stop
+  /// sos | duress | offline | low_battery | test | share_start | share_stop | health_alert
   final String kind;
   final String? from;
   final String text;

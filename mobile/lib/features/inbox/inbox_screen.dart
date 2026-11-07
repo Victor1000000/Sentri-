@@ -28,6 +28,7 @@ String _ago(DateTime d, String Function(String, [Map<String, String>]) t) {
 IconData _icon(InboxEntry e) => switch (e.kind) {
       'sos' || 'duress' || 'offline' => Icons.warning_amber_rounded,
       'low_battery' => Icons.battery_alert,
+      'health_alert' => Icons.monitor_heart_outlined,
       'share_start' => Icons.near_me,
       'share_stop' => Icons.near_me_disabled,
       _ => Icons.notifications_none,

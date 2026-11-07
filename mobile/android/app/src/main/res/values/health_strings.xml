@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The reason shown on the Health Connect permission screen when the person asks "why does
+     Sentri need heart-rate readings?". Plain words only: exactly what is read and why. -->
+<resources>
+    <string name="health_permission_reason">This app reads your heart-rate records to notice when your heart rate climbs unusually high and to tell the people you chose as emergency contacts. Nothing is read without your say-so, and no other health data is used.</string>
+</resources>

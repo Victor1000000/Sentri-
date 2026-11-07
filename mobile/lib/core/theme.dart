@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 /// Sentri's look. One calm base, one alarm colour used only for SOS, one reassurance colour.
 /// Both themes share the same roles so screens never hard-code colours.
@@ -37,9 +36,11 @@ ThemeData sentriTheme(Brightness b) {
     tertiary: dark ? SentriColors.safeDark : SentriColors.safe,
   );
   // Inter everywhere: the calm, grid-like letterforms Google Maps and Uber use, so every screen
-  // reads as one family. The font is fetched once and cached on the phone (falls back to the
-  // system face when the phone is offline on first launch).
-  final text = GoogleFonts.interTextTheme((dark ? ThemeData.dark() : ThemeData.light()).textTheme).apply(
+  // reads as one family. The face is bundled inside the app (see core/fonts.dart), so the very
+  // first launch - even offline - already paints with the brand font. Nothing is fetched from
+  // the network any more, so no more serif fallback on first open.
+  final text = (dark ? ThemeData.dark() : ThemeData.light()).textTheme.apply(
+        fontFamily: 'Inter',
         bodyColor: base.onSurface,
         displayColor: base.onSurface,
       );
