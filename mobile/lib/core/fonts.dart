@@ -36724,6 +36724,13 @@ class BrandFonts {
     'BEIENAYlBQcKKrEADkJBCR1AGUAVQBJAD0ALQAfAAAcACyqxABVCQQkAQABAAEAAQABAAEAAQAAH'
     'AAsquQADAABEsSQBiFFYsECIWLkAAwAARLEoAYhRWLgIAIhYuQADAABEWRuxJwGIUVi6CIAAAQRA'
     'iGNUWLkAAwAARFlZWVlZQBB2BmYGVgZKBD4ELgYgBQcOKrgB/4WwBI2xAgBEswVkBgBERAA=';
+}
 
- /// All five weights in registration order.
-const kInterWeights = <String>[kInter400, kInter500, kInter600, kInter700, kInter800];
+/// All five weights in registration order.
+const kInterWeights = <String>[
+  BrandFonts.kInter400,
+  BrandFonts.kInter500,
+  BrandFonts.kInter600,
+  BrandFonts.kInter700,
+  BrandFonts.kInter800,
+];

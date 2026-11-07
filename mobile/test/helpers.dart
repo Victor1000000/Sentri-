@@ -105,6 +105,13 @@ class FakeApi implements SentriApi {
     lowBatteryCalls++;
   }
 
+  int healthAlertCalls = 0;
+  @override
+  Future<void> healthAlert(GeoFix? geo) async {
+    _check();
+    healthAlertCalls++;
+  }
+
   Place? place = const Place(street: 'Allen Avenue', area: 'Ikeja', state: 'Lagos', label: 'Allen Avenue, Ikeja, Lagos');
   @override
   Future<Place?> reverseGeocode(double lat, double lon) async {

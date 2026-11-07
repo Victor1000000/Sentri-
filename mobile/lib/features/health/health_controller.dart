@@ -9,6 +9,7 @@ import 'package:latlong2/latlong.dart';
 import '../../core/i18n/i18n.dart';
 import '../../core/net/api.dart';
 import '../../core/settings.dart';
+import '../location/location.dart';
 import '../push/push_service.dart';
 
 /// One hospital around the person, from the free OpenStreetMap service.
@@ -61,6 +62,7 @@ class HealthController extends ChangeNotifier {
   Timer? _poll;
   DateTime? _historyAt;
   String? _lastWaterKey;
+  DateTime? _hospitalsAt;
 
   // ---- anomaly bookkeeping -------------------------------------------------
   final _recent = <DateTime, double>{};
@@ -138,7 +140,10 @@ class HealthController extends ChangeNotifier {
         startTime: start,
         endTime: now,
       );
-      double? bpmOf(HealthDataPoint p) => p.value is NumericHealthValue ? (p.value as NumericHealthValue).numericValue : null;
+      double? bpmOf(HealthDataPoint p) {
+        final x = p.value is NumericHealthValue ? (p.value as NumericHealthValue).numericValue : null;
+        return x == null ? null : x.toDouble();
+      }
       pts.sort((a, b) => b.dateTo.compareTo(a.dateTo));
       final latest = pts.isEmpty ? null : pts.first;
       final v = latest == null ? null : bpmOf(latest);
@@ -179,9 +184,10 @@ class HealthController extends ChangeNotifier {
       for (final p in week) {
         final v = p.value is NumericHealthValue ? (p.value as NumericHealthValue).numericValue : null;
         if (v == null || v < 30 || v > 250) continue;
-        vals.add(v);
+        final d = v.toDouble();
+        vals.add(d);
         final h = p.dateTo.hour;
-        if (h >= _nightStart && h < _nightEnd) night.add(v);
+        if (h >= _nightStart && h < _nightEnd) night.add(d);
       }
       _historyAt = now;
       double median(List<double> xs) {
@@ -275,8 +281,8 @@ class HealthController extends ChangeNotifier {
   Future<List<NearbyHospital>> _fetchHospitals(LatLng here) async {
     const radius = 15000.0;
     final q = '[out:json][timeout:25];('
-        'node(around:$radius,${here.latitude},${here.longitude})["amenity"~"^(hospital|clinic)$"];'
-        'way(around:$radius,${here.latitude},${here.longitude})["amenity"~"^(hospital|clinic)$"];'
+        'node(around:\$radius,${here.latitude},${here.longitude})["amenity"~"^(hospital|clinic)\$"];'
+        'way(around:\$radius,${here.latitude},${here.longitude})["amenity"~"^(hospital|clinic)\$"];'
         ');out center tags;';
     final res = await http.post(
       Uri.parse('https://overpass-api.de/api/interpreter'),

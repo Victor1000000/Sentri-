@@ -27,7 +27,7 @@ class _HealthScreenState extends State<HealthScreen> {
     unawaited(widget.health.loadHospitals());
   }
 
-  String t(String k, [Map<String, String>? a]) => widget.i18n.t(k, a);
+  String t(String k, [Map<String, String> a = const {}]) => widget.i18n.t(k, a);
 
   @override
   Widget build(BuildContext context) {
