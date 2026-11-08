@@ -14,7 +14,7 @@
   "otp.format": "The code is 6 numbers. Check it and try again.",
   "otp.invalid": "That code is not the newest one. Ask Telegram for a new code and type the latest one.",
   "contacts.title": "Emergency contacts",
-  "contacts.help": "These people get your alerts. Each one is asked to accept. Someone who declines stops getting alerts from you.",
+  "contacts.help": "These people get your alerts. Every alert rings on their phone and keeps ringing until it is attended to.",
   "contacts.add": "Add contact",
   "contacts.phone_hint": "Phone number",
   "contacts.need_more": "Add at least 3 contacts.",

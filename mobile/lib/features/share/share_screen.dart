@@ -7,6 +7,8 @@ import '../../core/i18n/i18n.dart';
 import '../../core/net/api.dart';
 import '../../core/widgets/brand.dart';
 import '../../core/widgets/flat.dart';
+import '../sos/contact_people.dart';
+import '../sos/guardian_badges.dart';
 import 'share_controller.dart';
 
 String prettyPhone(String e164) {
@@ -24,10 +26,11 @@ String clockTime(DateTime d) {
 
 /// Share location. Before sharing: pick people and how long. While sharing: one calm status and one Stop.
 class ShareScreen extends StatefulWidget {
-  const ShareScreen({super.key, required this.share, required this.api, required this.i18n});
+  const ShareScreen({super.key, required this.share, required this.api, required this.i18n, required this.people});
   final ShareController share;
   final SentriApi api;
   final I18n i18n;
+  final ContactPeople people;
 
   @override
   State<ShareScreen> createState() => _ShareScreenState();
@@ -39,6 +42,20 @@ class _ShareScreenState extends State<ShareScreen> {
   double _hours = 8;
   bool _busy = false;
   String? _error;
+  // The same names and guardian characters the Emergency-contacts screen manages:
+  // one store, so every change made there shows up here too.
+  Map<String, Person> _people = const {};
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadPeople());
+  }
+
+  Future<void> _loadPeople() async {
+    final p = await widget.people.load();
+    if (mounted) setState(() => _people = p);
+  }
 
   String t(String k, [Map<String, String> a = const {}]) => widget.i18n.t(k, a);
 
@@ -116,16 +133,23 @@ class _ShareScreenState extends State<ShareScreen> {
   Widget _row(BuildContext context, ContactStatus c) {
     final on = _picked.contains(c.id);
     final can = c.reachable && c.id.isNotEmpty;
+    // The same face and name the person set in Emergency contacts: a friendly drawn
+    // character when one was picked, the plain fallback circle otherwise.
+    final person = _people[c.phone];
+    final hasPerson = (person?.badge.isNotEmpty ?? false) || (person?.name.isNotEmpty ?? false);
+    final display = person?.name.isNotEmpty == true ? person!.name : prettyPhone(c.phone);
     return InkWell(
       onTap: can ? () => setState(() => on ? _picked.remove(c.id) : _picked.add(c.id)) : null,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(children: [
-          FlatAvatar(on: on),
+          hasPerson
+              ? GuardianAvatar(badge: badgeById(person!.badge.isNotEmpty ? person.badge : guardianBadges.first.id), size: 46)
+              : FlatAvatar(on: on),
           const SizedBox(width: 14),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(prettyPhone(c.phone), style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: can ? null : Flat.muted(context))),
+              Text(display, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: can ? null : Flat.muted(context))),
               const SizedBox(height: 2),
               Text(can ? t('contacts.on_sentri') : t('share.not_on_sentri'), style: TextStyle(fontSize: 13, color: Flat.muted(context))),
             ]),

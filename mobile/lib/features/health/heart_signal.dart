@@ -128,12 +128,21 @@ double? _readOneWindow(
 
   if (bpmA == null) return null;
   if (bpmB == null) {
-    // No clean run of beat peaks came out (move artefacts, wet finger). The rhythm
-    // match alone is admitted only when its confidence is high.
-    return bpmA.confidence >= trust + 0.15 ? bpmA.bpm : null;
+    // No clean run of beat peaks came out (move artefacts, wet finger, dim light).
+    // The refined rhythm match is admitted whenever it is at least confident: demanding
+    // more here refused far too many real fingers, and the parabolic interpolation plus
+    // the octave guard already keep the rhythm match honest.
+    return bpmA.confidence >= trust ? bpmA.bpm : null;
   }
   final rel = (bpmA.bpm - bpmB).abs() / bpmA.bpm;
-  if (rel > _agreement) return null;
+  if (rel > _agreement) {
+    // The two views do not fully agree. Do not refuse blindly: when the rhythm match is
+    // solid, it is the steadier of the two and carries the reading; only refuse when the
+    // match itself is weak. This keeps precision where it is provable and availability
+    // everywhere else.
+    if (bpmA.confidence >= trust + 0.12) return bpmA.bpm;
+    return null;
+  }
   return (bpmA.bpm + bpmB) / 2;
 }
 
@@ -229,11 +238,29 @@ double? _peakIntervalsBpm(
   final peakRms = math.sqrt(peakEnergy / n);
   final floor = 0.55 * peakRms;
 
-  final peaks = <int>[];
+  // Collect every candidate, then apply a refractory rule: within one shortest-possible
+  // beat, only the tallest candidate survives. A wobbly real waveform makes several small
+  // maxima around each main beat, and counting them as beats wrecks the spacing.
+  final minGap = (fps * 60 / maxBpm).floor();
+  final candidates = <int>[];
   for (var i = 1; i < n - 1; i++) {
     if (s[i] > s[i - 1] && s[i] >= s[i + 1] && s[i] > floor) {
-      peaks.add(i);
+      candidates.add(i);
     }
+  }
+  final peaks = <int>[];
+  var lastKept = -minGap - 1;
+  for (final i in candidates) {
+    if (i - lastKept <= minGap) {
+      // Two candidates inside one beat window: keep the taller one.
+      if (peaks.isNotEmpty && s[i] > s[peaks.last]) {
+        peaks[peaks.length - 1] = i;
+        lastKept = i;
+      }
+      continue;
+    }
+    peaks.add(i);
+    lastKept = i;
   }
   if (peaks.length < 4) return null;
 

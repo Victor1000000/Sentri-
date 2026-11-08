@@ -181,7 +181,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                         _MenuRow(
                           label: t('share.title'),
                           trailing: widget.share.active != null ? const _SharingTag() : null,
-                          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ShareScreen(share: widget.share, api: widget.api, i18n: widget.i18n))),
+                          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ShareScreen(share: widget.share, api: widget.api, i18n: widget.i18n, people: widget.people))),
                         ),
                         const Divider(height: 0.5, thickness: 0.5, indent: 16),
                         _MenuRow(

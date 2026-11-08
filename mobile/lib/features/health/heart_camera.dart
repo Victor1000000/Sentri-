@@ -119,7 +119,10 @@ class HeartCamera {
     if (span < 5) return null;
     final fps = n / span;
     final ys = detrend(smoothMedian3(samples), (fps * 1.5).round().clamp(3, n));
-    final bpm = bpmFromSamples(ys, fps);
+    // A gentler wiggle floor than the maths default: on dark themes and dim screens the
+    // pulse is fainter in camera counts, and demanding more here read "no pulse" on
+    // healthy fingers. The agreement checks still rule out junk.
+    final bpm = bpmFromSamples(ys, fps, minWiggle: 0.4);
     if (bpm == null) return null;
     return bpm.round().clamp(30, 220);
   }

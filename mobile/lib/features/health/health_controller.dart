@@ -397,24 +397,38 @@ class HealthController extends ChangeNotifier with WidgetsBindingObserver {
         return;
       }
       final here = LatLng(f.lat, f.lon);
-      // Race all mirrors at once instead of walking them one by one: the first one that
+      // Race ALL sources at once instead of walking them one by one: the first one that
       // answers with usable data wins and releases everyone else, so the whole run costs
-      // at most one timeout instead of one per mirror.
+      // at most one timeout. Sources deliberately mix families - six Overpass mirrors,
+      // plus Nominatim and Photon, which are built and hosted entirely differently, so
+      // one blocked family cannot blank the list.
+      final racers = <Future<List<NearbyHospital>?> Function()>[
+        for (final url in _overpassEndpoints) () => _overpassQuery(url, here),
+        () => _nominatimQuery(here),
+        () => _photonQuery(here),
+      ];
       final done = Completer<List<NearbyHospital>?>();
-      var pending = _overpassEndpoints.length;
-      Future<void> race(String url) async {
+      var pending = racers.length;
+      var answeredEmpty = false;
+      Future<void> race(Future<List<NearbyHospital>?> Function() q) async {
         try {
-          final r = await _overpassQuery(url, here).timeout(const Duration(seconds: 45));
-          if (r != null && !done.isCompleted) done.complete(r);
+          final r = await q().timeout(const Duration(seconds: 45));
+          if (r != null && r.isNotEmpty) {
+            if (!done.isCompleted) done.complete(r);
+          } else if (r != null) {
+            // A service answered properly but found nothing nearby: honest "none"
+            // if every source agrees there is nothing.
+            answeredEmpty = true;
+          }
         } catch (_) {
-          // this mirror is out; the others keep racing
+          // this source is out; the others keep racing
         } finally {
           pending--;
-          if (pending <= 0 && !done.isCompleted) done.complete(null);
+          if (pending <= 0 && !done.isCompleted) done.complete(answeredEmpty ? const <NearbyHospital>[] : null);
         }
       }
-      for (final url in _overpassEndpoints) {
-        unawaited(race(url));
+      for (final q in racers) {
+        unawaited(race(q));
       }
       final got = await done.future;
       if (got == null) {
@@ -471,7 +485,7 @@ class HealthController extends ChangeNotifier with WidgetsBindingObserver {
       final res = await http
           .post(
             Uri.parse(url),
-            headers: const {'User-Agent': 'SentriApp/1.0 (health tab hospitals)'},
+            headers: const {'User-Agent': _hospUa},
             body: {'data': q},
           )
           .timeout(const Duration(seconds: 40));
@@ -493,12 +507,110 @@ class HealthController extends ChangeNotifier with WidgetsBindingObserver {
       final res = await http
           .get(
             Uri.parse('$url?data=${Uri.encodeQueryComponent(q)}'),
-            headers: const {'User-Agent': 'SentriApp/1.0 (health tab hospitals)'},
+            headers: const {'User-Agent': _hospUa},
           )
           .timeout(const Duration(seconds: 40));
       if (res.statusCode != 200 || res.bodyBytes.isEmpty) return null;
       final j = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
       return _hospitalsFromOverpass(j, here);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static const _hospUa = 'SentriApp/1.0 (health tab; hospitals near you)';
+
+  /// Nominatim (the OpenStreetMap search service, hosted separately from Overpass). It
+  /// often answers when the Overpass mirrors are unreachable, and its "extratags" carry
+  /// the saved phone numbers. Bounded to a box around the person, amenities only.
+  Future<List<NearbyHospital>?> _nominatimQuery(LatLng here) async {
+    const spanLon = 0.13; // roughly 14 km across at Nigerian latitudes
+    const spanLat = 0.10;
+    final vb = '${(here.longitude - spanLon).toStringAsFixed(4)},'
+        '${(here.latitude - spanLat).toStringAsFixed(4)},'
+        '${(here.longitude + spanLon).toStringAsFixed(4)},'
+        '${(here.latitude + spanLat).toStringAsFixed(4)}';
+    final uri = Uri.parse('https://nominatim.openstreetmap.org/search').replace(queryParameters: {
+      'format': 'jsonv2',
+      'q': 'hospital',
+      'viewbox': vb,
+      'bounded': '1',
+      'limit': '40',
+      'extratags': '1',
+    });
+    try {
+      final res = await http.get(uri, headers: {'User-Agent': _hospUa}).timeout(const Duration(seconds: 40));
+      if (res.statusCode != 200 || res.bodyBytes.isEmpty) return null;
+      final j = jsonDecode(utf8.decode(res.bodyBytes));
+      if (j is! List) return null;
+      final out = <NearbyHospital>[];
+      final dist = const Distance();
+      for (final el in j) {
+        if (el is! Map<String, dynamic>) continue;
+        final cat = el['category'];
+        final typ = el['type'];
+        if (cat != 'amenity') continue;
+        if (typ != 'hospital' && typ != 'clinic' && typ != 'doctors') continue;
+        final la = double.tryParse('${el['lat']}');
+        final lo = el['lon'] is num ? (el['lon'] as num).toDouble() : double.tryParse('${el['lon']}');
+        if (la == null || lo == null) continue;
+        final extra = el['extratags'] is Map<String, dynamic> ? el['extratags'] as Map<String, dynamic> : const <String, dynamic>{};
+        final phone = (extra['phone'] ?? extra['contact:phone']) as String?;
+        var name = el['name'] as String?;
+        final display = el['display_name'] as String?;
+        if (name == null || name.isEmpty) {
+          // No own name saved: use the first line of the address so the row is not blank.
+          name = (display != null && display.isNotEmpty) ? display.split(',').first.trim() : 'Hospital';
+        }
+        out.add(NearbyHospital(
+          name: name,
+          km: dist.as(LengthUnit.Kilometer, here, LatLng(la, lo)),
+          phone: (phone == null || phone.isEmpty) ? null : phone,
+        ));
+      }
+      out.sort((a, b) => a.km.compareTo(b.km));
+      return out.take(12).toList();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Photon (komoot's search service, on entirely different infrastructure again). A
+  /// last resort that at least fills the list with names and distances, with phone
+  /// numbers when the map data has them. POIs only, amenities only.
+  Future<List<NearbyHospital>?> _photonQuery(LatLng here) async {
+    final qs = 'q=hospital&lat=${here.latitude.toStringAsFixed(5)}&lon=${here.longitude.toStringAsFixed(5)}'
+        '&limit=40&osm_tag=amenity%3Ahospital&osm_tag=amenity%3Aclinic';
+    final uri = Uri.parse('https://photon.komoot.io/api/?$qs');
+    try {
+      final res = await http.get(uri, headers: {'User-Agent': _hospUa}).timeout(const Duration(seconds: 40));
+      if (res.statusCode != 200 || res.bodyBytes.isEmpty) return null;
+      final j = jsonDecode(utf8.decode(res.bodyBytes));
+      final features = (j is Map<String, dynamic> ? j['features'] : null) as List?;
+      if (features == null) return null;
+      final out = <NearbyHospital>[];
+      final dist = const Distance();
+      for (final f in features) {
+        if (f is! Map<String, dynamic>) continue;
+        final props = f['properties'] is Map<String, dynamic> ? f['properties'] as Map<String, dynamic> : const <String, dynamic>{};
+        if (props['osm_key'] != 'amenity') continue;
+        final val = '${props['osm_value']}';
+        if (val != 'hospital' && val != 'clinic') continue;
+        final geometry = f['geometry'] is Map<String, dynamic> ? f['geometry'] as Map<String, dynamic> : null;
+        final coords = (geometry?['coordinates'] ?? const []) as List;
+        if (coords.length < 2) continue;
+        final lo = coords[0] is num ? (coords[0] as num).toDouble() : double.tryParse('${coords[0]}');
+        final la = coords[1] is num ? (coords[1] as num).toDouble() : double.tryParse('${coords[1]}');
+        if (la == null || lo == null) continue;
+        final name = (props['name'] as String?) ?? 'Hospital';
+        out.add(NearbyHospital(
+          name: name,
+          km: dist.as(LengthUnit.Kilometer, here, LatLng(la, lo)),
+          phone: null,
+        ));
+      }
+      out.sort((a, b) => a.km.compareTo(b.km));
+      return out.take(12).toList();
     } catch (_) {
       return null;
     }

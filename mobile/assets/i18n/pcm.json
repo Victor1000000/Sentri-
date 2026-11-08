@@ -14,7 +14,7 @@
   "otp.format": "The code na 6 numbers. Check am, try again.",
   "otp.invalid": "That one no be the newest code. Ask Telegram for a new code and type the latest one.",
   "contacts.title": "Emergency people",
-  "contacts.help": "Dis people dey get your alert. Dem go ask each one make e accept. Person wey refuse no go dey get your alert again.",
+  "contacts.help": "Di pipo wey dey here na dem dey receive your alert. Dia phone dey ring and di alert no go stop until dem respond am.",
   "contacts.add": "Add person",
   "contacts.phone_hint": "Phone number",
   "contacts.need_more": "Add at least 3 people.",

@@ -147,14 +147,16 @@ class SentriTopBar extends StatelessWidget {
             button: true,
             label: i18n.t('lang.title'),
             child: Material(
-              color: compact ? (Theme.of(context).brightness == Brightness.dark ? const Color(0xFF1B1D23) : Colors.white) : Brand.indigo,
-              shape: CircleBorder(side: compact ? BorderSide(color: Colors.black.withValues(alpha: 0.12)) : BorderSide.none),
+              color: compact ? (dark ? const Color(0xFF1B1D23) : Colors.white) : Brand.indigo,
+              shape: CircleBorder(side: compact ? BorderSide(color: (dark ? Colors.white : Colors.black).withValues(alpha: dark ? 0.25 : 0.12)) : BorderSide.none),
               elevation: compact ? 0 : 4,
               shadowColor: Brand.indigo.withValues(alpha: 0.4),
               child: InkWell(
                 customBorder: const CircleBorder(),
                 onTap: () => unawaited(showLanguageSheet(context, i18n, onLanguage)),
-                child: SizedBox(width: compact ? 38 : 46, height: compact ? 38 : 46, child: Icon(Icons.translate, color: compact ? Brand.indigo : Colors.white, size: compact ? 20 : 24)),
+                // Dark mode: white icon on the quiet dark disc - indigo on near-black
+                // disappears, and the language switcher must stay easy to find.
+                child: SizedBox(width: compact ? 38 : 46, height: compact ? 38 : 46, child: Icon(Icons.translate, color: compact ? (dark ? Colors.white : Brand.indigo) : Colors.white, size: compact ? 20 : 24)),
               ),
             ),
           ),

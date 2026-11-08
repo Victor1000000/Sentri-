@@ -6,6 +6,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/net/api.dart';
 
@@ -52,8 +53,10 @@ const _healthNoteId = 7202;
 ///
 /// The quiet problem this fights: phones purge scheduled alarms (reboot, battery saving,
 /// "auto-start" managers), so a reminder set weeks ago can die without anyone noticing. So
-/// this asks for exact-alarm permission when the system offers it, and callers re-run it
-/// every time the app opens - each fresh schedule outlives what the system dropped.
+/// this asks the person to excuse Sentri from battery saving (the screen most phones hide
+/// behind), and callers re-run it every time the app opens - each fresh schedule outlives
+/// what the system dropped. The schedule itself uses the alarm-clock mode, the one phone
+/// makers promise not to swallow, instead of exact alarms many phones deny by default.
 Future<void> scheduleWaterReminder(int minutes, String title, String body) async {
   const details = NotificationDetails(
     android: AndroidNotificationDetails(
@@ -71,15 +74,14 @@ Future<void> scheduleWaterReminder(int minutes, String title, String body) async
     final android = _local.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
     await android?.createNotificationChannel(_healthChannel);
     await android?.requestNotificationsPermission();
-    // When the system allows exact alarms, use them - precise chimes at the chosen pace even
-    // when the phone has been asleep. On phones that deny them, ask once (the system shows its
-    // own page) and keep the alarm-clock mode, which still rings on time in practice.
-    var exactAllowed = false;
+    // Battery savers on common phone brands silently drop scheduled reminders - the classic
+    // "it never rings at all" case. Ask to be always allowed to run in the background.
     try {
-      exactAllowed = await android?.canScheduleExactNotifications() ?? false;
-      if (!exactAllowed) await android?.requestExactAlarmsPermission();
+      if (!await Permission.ignoreBatteryOptimizations.isGranted) {
+        await Permission.ignoreBatteryOptimizations.request();
+      }
     } catch (_) {
-      exactAllowed = false;
+      // Only ask when the platform supports the question; a refusal must never block the reminder.
     }
     try {
       await _local.periodicallyShowWithDuration(
@@ -88,10 +90,10 @@ Future<void> scheduleWaterReminder(int minutes, String title, String body) async
         body,
         Duration(minutes: minutes),
         details,
-        androidScheduleMode: exactAllowed ? AndroidScheduleMode.exactAllowWhileIdle : AndroidScheduleMode.alarmClock,
+        androidScheduleMode: AndroidScheduleMode.alarmClock,
       );
     } on PlatformException {
-      // Some phones lock exact alarms: a gently inexact chime still keeps the habit.
+      // Some phones lock alarm-clock scheduling too: a gently inexact chime still keeps the habit.
       await _local.periodicallyShowWithDuration(
         _waterId,
         title,
@@ -135,7 +137,68 @@ Future<void> showHealthNote(String title, String body) async {
 }
 
 /// Removes the ringing notification of an alert that has been answered or has ended.
-Future<void> cancelAlertNotification(String inboxId) => _local.cancel(inboxId.hashCode & 0x7fffffff);
+Future<void> cancelAlertNotification(String inboxId) {
+  _stopAlertRepeat();
+  return _local.cancel(inboxId.hashCode & 0x7fffffff);
+}
+
+// ---- an alert does not ring once and die: it nags until someone deals with it ----
+// Some phone makers strip the system "insistent" flag, so the sound and vibration stop
+// after one round. This app does not trust that: while an emergency alert is live and
+// unanswered, the notification is re-issued on a timer, and every re-issue plays the
+// alarm sound and the vibration again. Nothing here is dismissible in between.
+
+Timer? _alertRepeat;
+int? _alertRepeatId;
+int _alertRepeatCount = 0;
+const _alertRepeatEvery = Duration(seconds: 30);
+const _alertRepeatMax = 120; // one hour of insisting, then the phone gets a break
+
+void _stopAlertRepeat() {
+  _alertRepeat?.cancel();
+  _alertRepeat = null;
+  _alertRepeatId = null;
+  _alertRepeatCount = 0;
+}
+
+void _beginAlertRepeat(int id, Map<String, dynamic> data) {
+  _stopAlertRepeat();
+  _alertRepeatId = id;
+  _alertRepeatCount = 0;
+  _alertRepeat = Timer.periodic(_alertRepeatEvery, (_) async {
+    if (_alertRepeatId != id) return; // a newer alert or an end took over
+    _alertRepeatCount++;
+    if (_alertRepeatCount > _alertRepeatMax) return _stopAlertRepeat();
+    try {
+      await _local.show(id, 'Sentri', data['text'] as String?, _urgentDetails());
+    } catch (_) {
+      // A failed ring again must never crash the app; the next tick tries once more.
+    }
+  });
+}
+
+NotificationDetails _urgentDetails() {
+  return NotificationDetails(
+    android: AndroidNotificationDetails(
+      _channel.id,
+      _channel.name,
+      channelDescription: _channel.description,
+      importance: Importance.max,
+      priority: Priority.high,
+      category: AndroidNotificationCategory.alarm,
+      fullScreenIntent: true,
+      enableVibration: true,
+      vibrationPattern: _alarmPattern,
+      visibility: NotificationVisibility.public,
+      audioAttributesUsage: AudioAttributesUsage.alarm,
+      ongoing: true,
+      autoCancel: false,
+      // FLAG_INSISTENT (4): the system itself repeats sound and vibration between re-issues.
+      additionalFlags: Int32List.fromList([4]),
+    ),
+    iOS: const DarwinNotificationDetails(interruptionLevel: InterruptionLevel.timeSensitive),
+  );
+}
 
 /// Shows the alert. The server sends data-only pushes, so the app builds the notification.
 ///
@@ -145,6 +208,7 @@ Future<void> cancelAlertNotification(String inboxId) => _local.cancel(inboxId.ha
 Future<void> showAlertNotification(Map<String, dynamic> data) async {
   final kind = data['kind'];
   if (kind == 'clear') {
+    _stopAlertRepeat();
     await _local.cancel(_idFor(data));
     return;
   }
@@ -163,30 +227,15 @@ Future<void> showAlertNotification(Map<String, dynamic> data) async {
     return;
   }
   final urgent = kind == 'sos' || kind == 'duress' || kind == 'offline';
-  await _local.show(
-    _idFor(data),
-    'Sentri',
-    text,
-    NotificationDetails(
-      android: AndroidNotificationDetails(
-        _channel.id,
-        _channel.name,
-        channelDescription: _channel.description,
-        importance: Importance.max,
-        priority: Priority.high,
-        category: AndroidNotificationCategory.alarm,
-        fullScreenIntent: true,
-        enableVibration: true,
-        vibrationPattern: _alarmPattern,
-        visibility: NotificationVisibility.public,
-        audioAttributesUsage: AudioAttributesUsage.alarm,
-        ongoing: urgent,
-        autoCancel: !urgent,
-        // FLAG_INSISTENT (4): keep repeating the sound and vibration until the notification is removed.
-        additionalFlags: urgent ? Int32List.fromList([4]) : null,
-      ),
-      iOS: const DarwinNotificationDetails(interruptionLevel: InterruptionLevel.timeSensitive),
-    ),
+  final id = _idFor(data);
+  await _local.show(id, 'Sentri', text, urgent ? _urgentDetails() : _shareOnDevice());
+  if (urgent) _beginAlertRepeat(id, data);
+}
+
+NotificationDetails _shareOnDevice() {
+  return NotificationDetails(
+    android: AndroidNotificationDetails(_shareChannel.id, _shareChannel.name, channelDescription: _shareChannel.description, importance: Importance.high, priority: Priority.high),
+    iOS: const DarwinNotificationDetails(interruptionLevel: InterruptionLevel.timeSensitive),
   );
 }
 

@@ -13,6 +13,10 @@
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Lets the drink-water reminder (and emergency alerts) keep working through the
+         battery savers phone makers run by default: the app asks the person to be
+         excused from them with a system dialog. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- The drink-water reminder fires through exact alarms when the system allows them,
          so a schedule survives doze and battery saving. Dropped schedules are re-armed
          inside the app on every open (see scheduleWaterReminder). -->
