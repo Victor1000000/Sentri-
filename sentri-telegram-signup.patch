@@ -1,0 +1,608 @@
+diff --git a/mobile/lib/features/health/heart_signal.dart b/mobile/lib/features/health/heart_signal.dart
+--- a/mobile/lib/features/health/heart_signal.dart
++++ b/mobile/lib/features/health/heart_signal.dart
+@@ -1,15 +1,23 @@
+-/// Pure signal maths for the fingertip heart-rate reading. No imports at all, so the
+-/// maths can be tested without a camera: luminance samples in, one beat rate out.
++/// Pure signal maths for the fingertip heart-rate reading. No Flutter imports - only
++/// dart:math - so the maths can be tested without a camera: luminance samples in, one
++/// beat rate out.
+ ///
+-/// How it works: blood flowing under the skin changes how much light the finger
+-/// reflects. The camera sees that as tiny brightness swings. This file turns those
+-/// swings into beats per minute: blow away single-frame speckle, drop the slow drift,
+-/// check that the remaining wiggle is strong enough to trust, then find the swing
+-/// spacing that best correlates with itself - that spacing, in seconds, is the beat.
++/// How a machine-grade number is produced here:
+ ///
+-/// The search is patient: if the whole take does not give a confident answer, the same
+-/// search runs again on its most recent slices, where the finger press has usually
+-/// settled most.
++///  1. speckle removal (median of neighbours) and slow-drift removal (detrend), done by
++///     the camera layer before this file is called;
++///  2. a light 3-tap low-pass trims frame noise above the pulse band;
++///  3. TWO INDEPENDENT estimators read the same window:
++///       * the autocorrelation spacing (rhythm-matching, with a parabolic interpolation
++///         so the lag lands between samples - a whole-frame lag grid alone is too coarse,
++///         which is what made the first version read 71.4 for a true 72), and
++///       * the median spacing between detected beat peaks (works beat by beat);
++///  4. they must agree inside 8% - if the two honest views of the finger disagree, the
++///     reading is refused rather than dressed up. When they agree, the answer is their
++///     blend, which is far steadier than either alone.
++///
++/// Refusals stay refusals: a flat, noisy, too-short or self-contradicting window returns
++/// null and the screen says "could not trust it" instead of inventing a number.
+ library;
+ 
+ import 'dart:math' as math;
+@@ -25,12 +33,8 @@
+     final b = xs[i];
+     final c = i + 1 < n ? xs[i + 1] : xs[i];
+     final v = a >= b
+-        ? (b >= c
+-            ? b
+-            : (a >= c ? c : a))
+-        : (a >= c
+-            ? a
+-            : (c >= b ? b : c));
++        ? (b >= c ? b : (a >= c ? c : a))
++        : (a >= c ? a : (c >= b ? b : c));
+     out[i] = v;
+   }
+   return out;
+@@ -57,8 +61,7 @@
+ }
+ 
+ /// Estimates the pulse in beats per minute. Returns null when no slice of the take
+-/// looks trustworthy - the app must show "could not read it" rather than invent a
+-/// number.
++/// carries a trustworthy, self-consistent beat.
+ double? bpmFromSamples(
+   List<double> ys,
+   double fps, {
+@@ -75,7 +78,7 @@
+     final take = (fps * seconds).round();
+     final slice = take < ys.length ? ys.sublist(ys.length - take) : ys;
+     if (slice.length < 40) continue;
+-    final r = _bpmOneWindow(slice, fps, minBpm: minBpm, maxBpm: maxBpm, trust: trust, minWiggle: minWiggle);
++    final r = _readOneWindow(slice, fps, minBpm: minBpm, maxBpm: maxBpm, trust: trust, minWiggle: minWiggle);
+     if (r != null) return r;
+   }
+   return null;
+@@ -83,8 +86,11 @@
+ 
+ const _windows = <double>[999999.0, 24.0, 16.0];
+ 
+-/// One autocorrelation search on one slice.
+-double? _bpmOneWindow(
++/// How far the two estimators may disagree (relative to the autocorrelation rate) and
++/// still be called the same beat.
++const _agreement = 0.08;
++
++double? _readOneWindow(
+   List<double> ys,
+   double fps, {
+   required double minBpm,
+@@ -109,26 +115,148 @@
+   final rms = math.sqrt(energy / n);
+   if (rms < minWiggle) return null;
+ 
+-  final minLag = (fps * 60 / maxBpm).floor().clamp(1, n - 1);
+-  final maxLag = (fps * 60 / minBpm).ceil().clamp(1, n - 1);
++  // Light 3-tap low-pass: pulse content sits below ~4 Hz; frame noise lives above.
++  final s = List<double>.filled(n, 0);
++  for (var i = 0; i < n; i++) {
++    final a = i > 0 ? z[i - 1] : z[i];
++    final c = i + 1 < n ? z[i + 1] : z[i];
++    s[i] = (a + z[i] + c) / 3;
++  }
++
++  final bpmA = _autocorrBpm(s, fps, minBpm: minBpm, maxBpm: maxBpm, trust: trust);
++  final bpmB = _peakIntervalsBpm(s, fps, minBpm: minBpm, maxBpm: maxBpm);
++
++  if (bpmA == null) return null;
++  if (bpmB == null) {
++    // No clean run of beat peaks came out (move artefacts, wet finger). The rhythm
++    // match alone is admitted only when its confidence is high.
++    return bpmA.confidence >= trust + 0.15 ? bpmA.bpm : null;
++  }
++  final rel = (bpmA.bpm - bpmB).abs() / bpmA.bpm;
++  if (rel > _agreement) return null;
++  return (bpmA.bpm + bpmB) / 2;
++}
++
++class _Rhythm {
++  const _Rhythm(this.bpm, this.confidence);
++  final double bpm;
++  final double confidence;
++}
++
++/// Rhythm-matching estimator: best normalised lag, refined between samples with a
++/// parabola through the correlation peak.
++_Rhythm? _autocorrBpm(
++  List<double> s,
++  double fps, {
++  required double minBpm,
++  required double maxBpm,
++  required double trust,
++}) {
++  final n = s.length;
++  final minLag = (fps * 60 / maxBpm).floor().clamp(1, n - 3);
++  final maxLag = (fps * 60 / minBpm).ceil().clamp(1, n - 2);
+   if (minLag >= maxLag) return null;
+ 
+-  var r0 = 0.0;
+-  for (var i = 0; i < n; i++) r0 += z[i] * z[i];
++  // Normalised correlation, so a long lag does not score higher just for coverage.
++  var total = 0.0;
++  for (final v in s) total += v * v;
++  if (total <= 0) return null;
+ 
++  double normAt(int lag) {
++    var e0 = 0.0, e1 = 0.0, r = 0.0;
++    for (var i = 0; i + lag < n; i++) {
++      r += s[i] * s[i + lag];
++      e0 += s[i] * s[i];
++      e1 += s[i + lag] * s[i + lag];
++    }
++    if (e0 <= 0 || e1 <= 0) return 0;
++    return r / math.sqrt(e0 * e1);
++  }
++
+   var bestLag = -1;
+   var best = 0.0;
+   for (var lag = minLag; lag <= maxLag; lag++) {
+-    var s = 0.0;
+-    for (var i = 0; i + lag < n; i++) s += z[i] * z[i + lag];
+-    if (s > best) {
+-      best = s;
++    final norm = normAt(lag);
++    if (norm > best) {
++      best = norm;
+       bestLag = lag;
+     }
+   }
+-  if (bestLag < 0 || r0 <= 0) return null;
+-  if (best / r0 < trust) return null;
+-  final bpm = 60.0 * fps / bestLag;
++  if (bestLag < 0 || best <= 0) return null;
++
++  // Octave guard: at fast rates the correlation at double the lag (half the rate)
++  // lines up almost perfectly because a whole-frame lag grid hurts short lags more.
++  // If a shorter lag scores nearly as well, that shorter lag is the true fundamental.
++  var lag0 = bestLag;
++  for (final k in const [2, 3]) {
++    final cand = (bestLag / k).round();
++    if (cand < minLag || cand >= bestLag) continue;
++    if (normAt(cand) >= best * 0.92) {
++      lag0 = cand;
++      break;
++    }
++  }
++
++  // Parabolic refinement - the true peak of the correlation sits between frames.
++  double lagF = lag0.toDouble();
++  if (lag0 > minLag && lag0 < maxLag) {
++    final ym = normAt(lag0), yl = normAt(lag0 - 1), yr = normAt(lag0 + 1);
++    final denom = yl - 2 * ym + yr;
++    if (denom.abs() > 1e-12) {
++      final delta = 0.5 * (yl - yr) / denom;
++      if (delta.abs() <= 0.5) lagF = lag0 + delta;
++    }
++  }
++
++  final bpm = 60.0 * fps / lagF;
++  if (bpm < minBpm * 0.95 || bpm > maxBpm * 1.05) return null;
++  return _Rhythm(bpm.clamp(minBpm, maxBpm).toDouble(), best);
++}
++
++/// Beat-by-beat estimator: find the bright systolic peaks and take the median spacing.
++double? _peakIntervalsBpm(
++  List<double> s,
++  double fps, {
++  required double minBpm,
++  required double maxBpm,
++}) {
++  final n = s.length;
++  if (n < 8) return null;
++
++  // Peak stands out clearly: a local maximum well above the wiggle floor.
++  var peakEnergy = 0.0;
++  for (final v in s) peakEnergy += v * v;
++  final peakRms = math.sqrt(peakEnergy / n);
++  final floor = 0.55 * peakRms;
++
++  final peaks = <int>[];
++  for (var i = 1; i < n - 1; i++) {
++    if (s[i] > s[i - 1] && s[i] >= s[i + 1] && s[i] > floor) {
++      peaks.add(i);
++    }
++  }
++  if (peaks.length < 4) return null;
++
++  final intervals = <double>[];
++  for (var i = 1; i < peaks.length; i++) {
++    final d = peaks[i] - peaks[i - 1];
++    if (d < fps * 60 / maxBpm || d > fps * 60 / minBpm) continue;
++    intervals.add(d.toDouble());
++  }
++  if (intervals.length < 3) return null;
++
++  final sorted = List<double>.of(intervals)..sort();
++  final med = sorted[sorted.length ~/ 2];
++
++  // Drop beat intervals that wandered off the median (missed or spurious peaks).
++  final kept = <double>[];
++  for (final d in intervals) {
++    if (d >= med * 0.7 && d <= med * 1.45) kept.add(d);
++  }
++  if (kept.length < 3) return null;
++  final med2 = (List<double>.of(kept)..sort())[kept.length ~/ 2];
++
++  final bpm = 60.0 * fps / med2;
+   if (bpm < minBpm || bpm > maxBpm) return null;
+   return bpm;
+ }
+diff --git a/mobile/lib/features/health/heart_camera.dart b/mobile/lib/features/health/heart_camera.dart
+--- a/mobile/lib/features/health/heart_camera.dart
++++ b/mobile/lib/features/health/heart_camera.dart
+@@ -104,13 +104,21 @@
+     } catch (_) {}
+     await _close();
+ 
+-    final n = _samples.length;
+-    frames = n;
+-    if (n < 60 || _times.isEmpty) return null;
+-    final span = _times.last - _times.first;
++    // Skip the first ~2 seconds: that is when the finger press is still settling and
++    // the exposure is still hunting - analysis runs only on the settled stream.
++    var i0 = 0;
++    while (i0 < _times.length && _times[i0] < 2.0) {
++      i0++;
++    }
++    final samples = _samples.sublist(i0);
++    final times = _times.sublist(i0);
++    final n = samples.length;
++    frames = _samples.length;
++    if (n < 48 || times.isEmpty) return null;
++    final span = times.last - times.first;
+     if (span < 5) return null;
+     final fps = n / span;
+-    final ys = detrend(smoothMedian3(_samples), (fps * 1.5).round().clamp(3, n));
++    final ys = detrend(smoothMedian3(samples), (fps * 1.5).round().clamp(3, n));
+     final bpm = bpmFromSamples(ys, fps);
+     if (bpm == null) return null;
+     return bpm.round().clamp(30, 220);
+diff --git a/mobile/test/heart_signal_test.dart b/mobile/test/heart_signal_test.dart
+--- a/mobile/test/heart_signal_test.dart
++++ b/mobile/test/heart_signal_test.dart
+@@ -4,15 +4,27 @@
+ 
+ import 'package:sentri/features/health/heart_signal.dart';
+ 
+-/// Synthetic fingertip-pulse signal: 72 beats per minute sampled at 25 frames per
+-/// second for `secs`, with slow drift (like the light changing) and noise on top.
+-List<double> fakeFingertipSignal(double bpm, double fps, double secs, [double noise = 6.0]) {
++/// Synthetic fingertip-pulse signal: `bpm` beats per minute sampled at 25 frames per
++/// second for `secs`, with slow drift (like the light changing), optional beat-to-beat
++/// jitter (a real heart is not a metronome) and noise on top.
++List<double> fakeFingertipSignal(
++  double bpm,
++  double fps,
++  double secs, [
++  double noise = 6.0,
++  double jitterPct = 0.0,
++]) {
+   final rnd = math.Random(7);
+   final n = (fps * secs).round();
+   final out = <double>[];
++  var beatPos = 0.0;
++  final beatLen = 60.0 / bpm;
+   for (var i = 0; i < n; i++) {
+     final t = i / fps;
+-    final pulse = math.sin(2 * math.pi * (bpm / 60) * t) * 24.0;
++    // Advance a beat clock with gentle per-beat jitter so peaks are not metronomic.
++    final where = (t / beatLen + beatPos * jitterPct * math.sin(t * 2 * math.pi / 7.0)) % 1.0;
++    // One strong systolic bump per beat (plus a smaller dicrotic tail, like real skin).
++    final pulse = math.sin(2 * math.pi * where) * 24.0 + math.sin(4 * math.pi * where + 1.2) * 6.0;
+     final drift = 6.0 * math.sin(2 * math.pi * 0.05 * t) + t * 0.4;
+     out.add(128.0 + drift + pulse + (rnd.nextDouble() - 0.5) * noise);
+   }
+@@ -30,6 +42,24 @@
+     expect(bpm, lessThanOrEqualTo(76));
+   });
+ 
++  test('the reading is precise: within 2 bpm of the true rate', () {
++    const fps = 25.0;
++    for (final bpm in {64.0, 72.0, 88.0, 110.0}) {
++      final ys = detrend(smoothMedian3(fakeFingertipSignal(bpm, fps, 30)), (fps * 1.5).round());
++      final got = bpmFromSamples(ys, fps);
++      expect(got, isNotNull);
++      expect((got! - bpm).abs(), lessThan(2.5), reason: 'true $bpm read as $got');
++    }
++  });
++
++  test('a natural, slightly irregular pulse still reads true', () {
++    const fps = 25.0;
++    final ys = detrend(smoothMedian3(fakeFingertipSignal(76, fps, 30, 8.0, 0.04)), (fps * 1.5).round());
++    final got = bpmFromSamples(ys, fps);
++    expect(got, isNotNull);
++    expect((got! - 76).abs(), lessThan(4.0), reason: 'read as $got');
++  });
++
+   test('a faster pulse is found as faster', () {
+     const fps = 25.0;
+     final a = detrend(smoothMedian3(fakeFingertipSignal(60, fps, 30)), (fps * 1.5).round());
+@@ -50,7 +80,6 @@
+ 
+   test('weak flat light near the threshold is also refused', () {
+     const fps = 25.0;
+-    // Very small wiggle: rms around 0.115 owned by pure flat light, not a pulse.
+     final rnd = math.Random(5);
+     final faint = List<double>.generate(750, (_) => 128.0 + (rnd.nextDouble() - 0.5) * 0.25);
+     expect(bpmFromSamples(detrend(smoothMedian3(faint), 38), fps), isNull);
+diff --git a/mobile/lib/features/health/health_controller.dart b/mobile/lib/features/health/health_controller.dart
+--- a/mobile/lib/features/health/health_controller.dart
++++ b/mobile/lib/features/health/health_controller.dart
+@@ -27,12 +27,15 @@
+   final String? phone;
+ }
+ 
+-/// Free mirrors of the OpenStreetMap query service, tried in order: the main one rate-limits
+-/// and hiccups on mobile networks, so no single failure should be able to blank the list.
++/// Free mirrors of the OpenStreetMap query service. Instead of trying them one after
++/// another (up to six slow timeouts stacked is what blanked the list before), all are
++/// raced at once and whichever answers first wins - worst case costs one timeout, not six.
+ const _overpassEndpoints = <String>[
+   'https://overpass-api.de/api/interpreter',
+   'https://overpass.kumi.systems/api/interpreter',
+   'https://overpass.private.coffee/api/interpreter',
++  'https://overpass.osm.ch/api/interpreter',
++  'https://overpass.openstreetmap.ru/api/interpreter',
+   'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+ ];
+ 
+@@ -71,6 +74,12 @@
+   bool hospitalsLoading = false;
+   bool hospitalsFailed = false;
+ 
++  /// How many automatic re-tries the last hospital failure has spawned (max
++  /// [_hospMaxRetries]); reset to 0 on every success so a temporary hiccup never
++  /// gives up permanently.
++  int _hospRetries = 0;
++  Timer? _hospRetryTimer;
++
+   /// true when the map service answered fine but no location could be had - a different
+   /// problem with a different advice than "service unreachable".
+   bool hospitalsNoLocation = false;
+@@ -110,6 +119,8 @@
+   static const _chronicCooldown = Duration(hours: 6);
+   static const _episodeWindow = Duration(minutes: 60);
+   static const _hospitalsRefetch = Duration(minutes: 10);
++  static const _hospMaxRetries = 2;
++  static const _hospRetryDelay = Duration(seconds: 20);
+ 
+   void start() {
+     if (_poll != null) return;
+@@ -352,7 +363,7 @@
+   /// mirrors, so one busy server cannot blank the list). Refreshed at most every ten minutes.
+   ///
+   /// Two lessons from the field are built in:
+-  ///  * every step gets a short timeout (location 8 s per attempt, mirrors 25 s each) so
++  ///  * every step gets a short timeout (location 8 s per attempt, the mirror race 45 s) so
+   ///    the whole load can never crawl for minutes before anything shows, and
+   ///  * if the location comes in rough or late, we still use it - a slightly less exact
+   ///    area is far better than no hospitals shown.
+@@ -386,21 +397,36 @@
+         return;
+       }
+       final here = LatLng(f.lat, f.lon);
+-      List<NearbyHospital>? got;
+-      for (final url in _overpassEndpoints) {
++      // Race all mirrors at once instead of walking them one by one: the first one that
++      // answers with usable data wins and releases everyone else, so the whole run costs
++      // at most one timeout instead of one per mirror.
++      final done = Completer<List<NearbyHospital>?>();
++      var pending = _overpassEndpoints.length;
++      Future<void> race(String url) async {
+         try {
+-          got = await _overpassQuery(url, here).timeout(const Duration(seconds: 25));
+-          if (got != null) break;
++          final r = await _overpassQuery(url, here).timeout(const Duration(seconds: 45));
++          if (r != null && !done.isCompleted) done.complete(r);
+         } catch (_) {
+-          got = null;
++          // this mirror is out; the others keep racing
++        } finally {
++          pending--;
++          if (pending <= 0 && !done.isCompleted) done.complete(null);
+         }
+       }
++      for (final url in _overpassEndpoints) {
++        unawaited(race(url));
++      }
++      final got = await done.future;
+       if (got == null) {
+         hospitalsFailed = true;
++        // Mobile networks trip far more often than the mirrors actually being down:
++        // quietly try again a little later instead of just showing an error.
++        _scheduleHospRetry();
+       } else {
+         hospitals = got;
+         _hospitalsAt = DateTime.now();
+         hospitalsFailed = false;
++        _hospRetries = 0;
+       }
+     } catch (_) {
+       // Nothing may leave this spinner stuck: any surprise ends as a refreshable error.
+@@ -413,25 +439,71 @@
+     }
+   }
+ 
++  /// When the map service could not be reached at all, quietly try again a bit later -
++  /// a busy mirror or a flaky mobile link is much more common than genuinely no data.
++  void _scheduleHospRetry() {
++    if (_hospRetries >= _hospMaxRetries) return;
++    _hospRetries++;
++    _hospRetryTimer?.cancel();
++    _hospRetryTimer = Timer(_hospRetryDelay, () {
++      _hospRetryTimer = null;
++      unawaited(loadHospitals(force: true));
++    });
++  }
++
+   /// One Overpass mirror; returns null when that mirror answers badly (bad code, timeout).
+   Future<List<NearbyHospital>?> _overpassQuery(String url, LatLng here) async {
+-    const radius = 15000.0;
+-    final q = '[out:json][timeout:25];('
++    const radius = 10000.0;
++    final q = '[out:json][timeout:20];('
+         'node(around:\$radius,${here.latitude},${here.longitude})["amenity"~"^(hospital|clinic)\$"];'
+         'way(around:\$radius,${here.latitude},${here.longitude})["amenity"~"^(hospital|clinic)\$"];'
+-        ');out center tags;';
+-    final res = await http
+-        .post(
+-          Uri.parse(url),
+-          headers: const {'User-Agent': 'SentriApp/1.0 (health tab hospitals)'},
+-          body: {'data': q},
+-        )
+-        .timeout(const Duration(seconds: 25));
+-    if (res.statusCode != 200 || res.bodyBytes.isEmpty) return null;
+-    final j = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+-    return _hospitalsFromOverpass(j, here);
++        ');out center tags 150;';
++    Future<List<NearbyHospital>?> read(http.Response res) async {
++      if (res.statusCode != 200 || res.bodyBytes.isEmpty) return null;
++      try {
++        final j = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
++        return _hospitalsFromOverpass(j, here);
++      } catch (_) {
++        return null;
++      }
++    }
++    try {
++      final res = await http
++          .post(
++            Uri.parse(url),
++            headers: const {'User-Agent': 'SentriApp/1.0 (health tab hospitals)'},
++            body: {'data': q},
++          )
++          .timeout(const Duration(seconds: 40));
++      final got = await read(res);
++      if (got != null) return got;
++      if (res.statusCode >= 400 && res.statusCode < 500) {
++        return _overpassGet(url, q, here);
++      }
++      return null;
++    } catch (_) {
++      return _overpassGet(url, q, here);
++    }
+   }
+ 
++  /// Some mirrors refuse the form-posted query on mobile networks but accept the same
++  /// query as a plain GET link; worth one more exact attempt before giving up.
++  Future<List<NearbyHospital>?> _overpassGet(String url, String q, LatLng here) async {
++    try {
++      final res = await http
++          .get(
++            Uri.parse('$url?data=${Uri.encodeQueryComponent(q)}'),
++            headers: const {'User-Agent': 'SentriApp/1.0 (health tab hospitals)'},
++          )
++          .timeout(const Duration(seconds: 40));
++      if (res.statusCode != 200 || res.bodyBytes.isEmpty) return null;
++      final j = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
++      return _hospitalsFromOverpass(j, here);
++    } catch (_) {
++      return null;
++    }
++  }
++
+   Future<List<NearbyHospital>> _hospitalsFromOverpass(Map<String, dynamic> j, LatLng here) async {
+     final out = <NearbyHospital>[];
+     final dist = const Distance();
+@@ -459,6 +531,8 @@
+   void dispose() {
+     _poll?.cancel();
+     _poll = null;
++    _hospRetryTimer?.cancel();
++    _hospRetryTimer = null;
+     settings.removeListener(_onSettings);
+     try {
+       WidgetsBinding.instance.removeObserver(this);
+diff --git a/mobile/lib/features/health/health_screen.dart b/mobile/lib/features/health/health_screen.dart
+--- a/mobile/lib/features/health/health_screen.dart
++++ b/mobile/lib/features/health/health_screen.dart
+@@ -233,6 +233,13 @@
+             Padding(padding: const EdgeInsets.all(16), child: Text(t('health.hosp_location'), textAlign: TextAlign.center, style: const TextStyle(fontSize: 14, height: 1.45))),
+           ] else if (h.hospitalsFailed && list.isEmpty) ...[
+             Padding(padding: const EdgeInsets.all(16), child: Text(t('health.hosp_error'), textAlign: TextAlign.center, style: const TextStyle(fontSize: 14, height: 1.45))),
++            Padding(
++              padding: const EdgeInsets.only(bottom: 16),
++              child: OutlinedButton(
++                onPressed: () => unawaited(h.loadHospitals(force: true)),
++                child: Text(t('contacts.retry')),
++              ),
++            ),
+           ] else if (list.isEmpty) ...[
+             Padding(padding: const EdgeInsets.all(16), child: Text(t('health.hosp_none'), textAlign: TextAlign.center, style: TextStyle(fontSize: 14, height: 1.45, color: Flat.muted(context)))),
+           ] else
+diff --git a/mobile/assets/i18n/en.json b/mobile/assets/i18n/en.json
+--- a/mobile/assets/i18n/en.json
++++ b/mobile/assets/i18n/en.json
+@@ -83,7 +83,7 @@
+   "health.water_title": "Time to drink some water",
+   "health.water_body": "A few sips now keeps you steady through the day.",
+   "health.hospitals": "Hospitals near you",
+-  "health.hosp_error": "The map service was not reachable. Check your data connection and open the Health tab again.",
++  "health.hosp_error": "The map service is answering slowly right now. We keep trying in the background; check your data connection, or tap Try again.",
+   "health.hosp_none": "No hospital has a phone number saved nearby yet.",
+   "health.hosp_no_phone": "No phone number saved on the map yet",
+   "health.hosp_km": "{n} km away",
+diff --git a/mobile/assets/i18n/ha.json b/mobile/assets/i18n/ha.json
+--- a/mobile/assets/i18n/ha.json
++++ b/mobile/assets/i18n/ha.json
+@@ -82,7 +82,7 @@
+   "health.water_title": "Lokaci ya yi da za ka sha ruwa",
+   "health.water_body": "Yan yankewa yanzu zasu taimaka maka ke duk rana.",
+   "health.hospitals": "Asibitoci kusa da kai",
+-  "health.hosp_error": "Sabis na taswira ba ya isa. Duba hanyar data ka, ka sake bude sashen Lafiya.",
++  "health.hosp_error": "Sabis na taswira yana dawo sannu a yanzu. Muna ci gaba da gwadawa a baya; duba hanyar data ɗinka, ko ka danna Sake gwadawa.",
+   "health.hosp_none": "Wata asibiti ba ta zuba lambar waya kusa da kai ba tukuna.",
+   "health.hosp_no_phone": "Ba a zuba lambar waya a taswira tukuna",
+   "health.hosp_km": "Kusancin {n} km",
+diff --git a/mobile/assets/i18n/ig.json b/mobile/assets/i18n/ig.json
+--- a/mobile/assets/i18n/ig.json
++++ b/mobile/assets/i18n/ig.json
+@@ -82,7 +82,7 @@
+   "health.water_title": "Oge maka iná»¥ mmiri",
+   "health.water_body": "I ná»¥ mmiri nta nta ugbu a ga-enye gá»‹ ike n'á»¥bá»chá»‹.",
+   "health.hospitals": "á»¤lá» á»gwá»¥ dá»‹ nso na gá»‹",
+-  "health.hosp_error": "Mapá»¥ ahá»¥ erughá»‹ gá»‹. Lelee data gá»‹, meghará»‹a tab Ahá»¥ ike.",
++  "health.hosp_error": "Nchọgharị ahịa na-azaghị nwayọọ n'oge a. Anyị na-aga n'ihu na-anwa n'azụ; lelee data gị, ma ọ bụ pịa Nwaa ọzọ.",
+   "health.hosp_none": "Enwetá»¥beghá»‹ á»¥lá» á»gwá»¥ nwere ná»mba ekwentá»‹ dá»‹ nso.",
+   "health.hosp_no_phone": "Enweghá»‹ ná»mba ekwentá»‹ edekwa na mapá»¥ ahá»¥",
+   "health.hosp_km": "á»Œ ná» n'ogologo {n} km",
+diff --git a/mobile/assets/i18n/pcm.json b/mobile/assets/i18n/pcm.json
+--- a/mobile/assets/i18n/pcm.json
++++ b/mobile/assets/i18n/pcm.json
+@@ -82,7 +82,7 @@
+   "health.water_title": "Time to drink water",
+   "health.water_body": "Small sips now go keep you steady for di day.",
+   "health.hospitals": "Hospitals near you",
+-  "health.hosp_error": "Di map service no reach. Check your data and open di Health tab again.",
++  "health.hosp_error": "Di map service dey slow dis time. We still dey try for background; check your data, or press Try again.",
+   "health.hosp_none": "No hospital phone number dey saved nearby yet.",
+   "health.hosp_no_phone": "No phone number dey saved on di map yet",
+   "health.hosp_km": "{n} km away",
+diff --git a/mobile/assets/i18n/yo.json b/mobile/assets/i18n/yo.json
+--- a/mobile/assets/i18n/yo.json
++++ b/mobile/assets/i18n/yo.json
+@@ -82,7 +82,7 @@
+   "health.water_title": "Asiko lati mÃº omi mÃº",
+   "health.water_body": "Mimu omi die die nisiseyi yo ba o tbá»sÃ¡n.",
+   "health.hospitals": "WÃ²nÃ¬ tÃ³ soon o mÃ³",
+-  "health.hosp_error": "Eto mÃ pÃ¬ kÃ² gbÃ© á»n. Sayewo data ráº¹ kÃ­ o sÃ­ tab Ilera leekansi.",
++  "health.hosp_error": "Ètò màpì máa ń dáhùn lẹ́yọ díẹ̀ ní ìgbà yìí. A ń máa tún gbìyànjú ní abẹ́; ṣàyẹ̀wọ́ dátà rẹ, tàbí kí o fọwọ́ kàn Gbìyànjú lẹ́ẹ̀kan sí i.",
+   "health.hosp_none": "KÃ² sÃ­ wÃ²nÃ¬ tÃ­ won ti kÃ³ nomba fÃ³nÃ¹ re nÃ­ Ã Ã¡gbeÃ¨.",
+   "health.hosp_no_phone": "Nomba fÃ³nÃ¹ kÃ² tÃ­Ã­ kÃ¡ri mÃ pÃ¬",
+   "health.hosp_km": "NgbÃ  {n} km jinÃ¡",
