@@ -1,0 +1,1605 @@
+diff --git a/mobile/lib/features/health/health_controller.dart b/mobile/lib/features/health/health_controller.dart
+--- a/mobile/lib/features/health/health_controller.dart
++++ b/mobile/lib/features/health/health_controller.dart
+@@ -3,6 +3,7 @@
+ 
+ import 'package:camera/camera.dart' show CameraController;
+ import 'package:flutter/foundation.dart';
++import 'package:flutter/widgets.dart';
+ import 'package:health/health.dart';
+ import 'package:http/http.dart' as http;
+ import 'package:latlong2/latlong.dart';
+@@ -46,7 +47,7 @@
+ ///  * keeps hospitals near the person ready to show and call.
+ ///
+ /// It never invents a number: with no source connected, it says so plainly.
+-class HealthController extends ChangeNotifier {
++class HealthController extends ChangeNotifier with WidgetsBindingObserver {
+   HealthController({required this.api, required this.settings, required this.location, required this.i18n});
+   final SentriApi api;
+   final AppSettings settings;
+@@ -74,7 +75,7 @@
+   /// problem with a different advice than "service unreachable".
+   bool hospitalsNoLocation = false;
+ 
+-  // ---- the app's own pulse reading (camera + torch on the fingertip) ----
++  // ---- the app's own pulse reading (camera on the fingertip, screen light) ----
+   final HeartCamera _camera = HeartCamera();
+   bool measuring = false;
+   int measureLeft = 0;
+@@ -82,6 +83,10 @@
+   bool measureFailed = false;
+   bool noCamera = false;
+ 
++  /// true when the last reading failed because the camera stream delivered no frames
++  /// at all (dark screen, camera busy) - different advice than a weak pulse.
++  bool measureNofeed = false;
++
+   /// The active camera controller during a measurement - the screen shows its preview so
+   /// frames keep flowing. Null when not measuring.
+   CameraController? get cameraPreview => _camera.controller;
+@@ -108,12 +113,43 @@
+ 
+   void start() {
+     if (_poll != null) return;
++    WidgetsBinding.instance.addObserver(this);
+     unawaited(_init());
+     _poll = Timer.periodic(_pollEvery, (_) => unawaited(_pollOnce()));
+     settings.addListener(_onSettings);
+     _onSettings();
+   }
+ 
++  /// Re-arms the water reminder and refreshes hospitals when this tab is opened.
++  /// Both are cheap and idempotent; called from the Health screen's initState.
++  Future<void> onHealthTabOpen() async {
++    ensureWaterReminder();
++    if (hospitalsFailed || hospitalsNoLocation || hospitals.isEmpty) {
++      unawaited(loadHospitals(force: hospitalsFailed || hospitalsNoLocation));
++    }
++  }
++
++  /// The drink-water reminder is scheduled on the phone's alarm system, which the system
++  /// can drop after a reboot or a battery-saving purge. Re-arming it every time the app
++  /// becomes visible is how the reminder "sticks" - one fresh schedule each app open.
++  /// Water reminders must fire even though scheduled alarms on some phones quietly stop
++  /// after a while; scheduleWaterReminder makes them exact when the system allows it and
++  /// bumps itself back into shape whenever the app is opened (see ensureWaterReminder).
++  void ensureWaterReminder() {
++    unawaited(scheduleWaterReminder(
++      settings.waterMinutes,
++      i18n.t('health.water_title'),
++      i18n.t('health.water_body'),
++    ));
++  }
++
++  @override
++  void didChangeAppLifecycleState(AppLifecycleState state) {
++    if (state == AppLifecycleState.resumed) {
++      ensureWaterReminder();
++    }
++  }
++
+   void _onSettings() {
+     final key = '${settings.waterMinutes}|${i18n.code}';
+     if (key == _lastWaterKey) {
+@@ -121,11 +157,7 @@
+       return;
+     }
+     _lastWaterKey = key;
+-    unawaited(scheduleWaterReminder(
+-      settings.waterMinutes,
+-      i18n.t('health.water_title'),
+-      i18n.t('health.water_body'),
+-    ));
++    ensureWaterReminder();
+     notifyListeners();
+   }
+ 
+@@ -278,13 +310,14 @@
+     }
+   }
+ 
+-  /// One pulse reading taken by the app itself: camera torch on, fingertip over the lens,
+-  /// about thirty seconds, then the maths decides whether it can trust the numbers. The
+-  /// result feeds the same display as Health Connect readings; no health app needed.
++  /// One pulse reading taken by the app itself: fingertip over the front camera with the
++  /// bright screen lighting it, about thirty seconds, then the maths decides whether it
++  /// can trust the numbers. No health app involved at any step.
+   Future<void> measureWithCamera() async {
+     if (measuring) return;
+     measuring = true;
+     measureFailed = false;
++    measureNofeed = false;
+     noCamera = false;
+     cameraBpm = null;
+     measureLeft = HeartCamera.secondsTarget;
+@@ -302,6 +335,9 @@
+     measureLeft = 0;
+     noCamera = _camera.cameraMissing;
+     if (r == null) {
++      // Distinguish "no frames at all" (dark screen, camera busy) from "the reading was
++      // not strong enough" - each gets its own honest advice.
++      measureNofeed = _camera.frames == 0;
+       measureFailed = true;
+       notifyListeners();
+       return;
+@@ -314,8 +350,12 @@
+ 
+   /// Hospitals near the person, straight from the free OpenStreetMap service (with backup
+   /// mirrors, so one busy server cannot blank the list). Refreshed at most every ten minutes.
+-  /// A rough fix is plenty here: if the exact fix does not come in time, the last known spot
+-  /// still shows useful hospitals.
++  ///
++  /// Two lessons from the field are built in:
++  ///  * every step gets a short timeout (location 8 s per attempt, mirrors 25 s each) so
++  ///    the whole load can never crawl for minutes before anything shows, and
++  ///  * if the location comes in rough or late, we still use it - a slightly less exact
++  ///    area is far better than no hospitals shown.
+   Future<void> loadHospitals({bool force = false}) async {
+     if (hospitalsLoading) return;
+     final had = _hospitalsAt;
+@@ -324,47 +364,53 @@
+     hospitalsFailed = false;
+     hospitalsNoLocation = false;
+     notifyListeners();
+-    GeoFix? f;
+     try {
+-      f = await location.preciseFix(timeout: const Duration(seconds: 20));
+-    } catch (_) {}
+-    if (f == null) {
+-      try {
+-        f = await location.fix(highAccuracy: true, timeout: const Duration(seconds: 20));
+-      } catch (_) {}
+-    }
+-    if (f == null) {
++      GeoFix? f;
+       try {
+-        f = await location.lastKnown();
++        f = await location.preciseFix(timeout: const Duration(seconds: 8));
+       } catch (_) {}
+-    }
+-    if (f == null) {
+-      // Honest split: the map service may be fine - the problem is no location yet.
+-      hospitalsNoLocation = true;
+-      _hospitalsAt = DateTime.now();
+-      hospitalsLoading = false;
+-      notifyListeners();
+-      return;
+-    }
+-    final here = LatLng(f.lat, f.lon);
+-    List<NearbyHospital>? got;
+-    for (final url in _overpassEndpoints) {
+-      try {
+-        got = await _overpassQuery(url, here);
+-        if (got != null) break;
+-      } catch (_) {
+-        got = null;
++      if (f == null) {
++        try {
++          f = await location.fix(highAccuracy: true, timeout: const Duration(seconds: 8));
++        } catch (_) {}
+       }
+-    }
+-    if (got == null) {
++      if (f == null) {
++        try {
++          f = await location.lastKnown();
++        } catch (_) {}
++      }
++      if (f == null) {
++        // Honest split: the map service may be fine - the problem is no location yet.
++        hospitalsNoLocation = true;
++        _hospitalsAt = DateTime.now();
++        return;
++      }
++      final here = LatLng(f.lat, f.lon);
++      List<NearbyHospital>? got;
++      for (final url in _overpassEndpoints) {
++        try {
++          got = await _overpassQuery(url, here).timeout(const Duration(seconds: 25));
++          if (got != null) break;
++        } catch (_) {
++          got = null;
++        }
++      }
++      if (got == null) {
++        hospitalsFailed = true;
++      } else {
++        hospitals = got;
++        _hospitalsAt = DateTime.now();
++        hospitalsFailed = false;
++      }
++    } catch (_) {
++      // Nothing may leave this spinner stuck: any surprise ends as a refreshable error.
+       hospitalsFailed = true;
+-    } else {
+-      hospitals = got;
+-      _hospitalsAt = DateTime.now();
+-      hospitalsFailed = false;
++    } finally {
++      if (hospitalsLoading) {
++        hospitalsLoading = false;
++        notifyListeners();
++      }
+     }
+-    hospitalsLoading = false;
+-    notifyListeners();
+   }
+ 
+   /// One Overpass mirror; returns null when that mirror answers badly (bad code, timeout).
+@@ -380,7 +426,7 @@
+           headers: const {'User-Agent': 'SentriApp/1.0 (health tab hospitals)'},
+           body: {'data': q},
+         )
+-        .timeout(const Duration(seconds: 35));
++        .timeout(const Duration(seconds: 25));
+     if (res.statusCode != 200 || res.bodyBytes.isEmpty) return null;
+     final j = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+     return _hospitalsFromOverpass(j, here);
+@@ -414,6 +460,9 @@
+     _poll?.cancel();
+     _poll = null;
+     settings.removeListener(_onSettings);
++    try {
++      WidgetsBinding.instance.removeObserver(this);
++    } catch (_) {}
+     super.dispose();
+   }
+ }
+diff --git a/mobile/lib/features/health/health_screen.dart b/mobile/lib/features/health/health_screen.dart
+--- a/mobile/lib/features/health/health_screen.dart
++++ b/mobile/lib/features/health/health_screen.dart
+@@ -9,11 +9,11 @@
+ import '../../core/widgets/flat.dart';
+ import 'health_controller.dart';
+ 
+-/// The Health tab: honest heart-rate readings - straight from the person's fingertip with
+-/// the camera when no health app is around (plus Health Connect when a band or health app
+-/// is feeding it), drink-water reminders at the person's own pace, and hospitals near them -
+-/// nearest first, with a call button. The same calm card look as the rest of the app: big
+-/// number, plain words, nothing loud.
++/// The Health tab: heart-rate readings taken by the app itself - fingertip over the
++/// front camera, lit by the screen - plus a passive read of Health Connect when a band
++/// or health app is feeding it, drink-water reminders at the person's own pace, and
++/// hospitals near them - nearest first, with a call button. The same calm card look as
++/// the rest of the app: big number, plain words, nothing loud.
+ class HealthScreen extends StatefulWidget {
+   const HealthScreen({super.key, required this.health, required this.i18n});
+   final HealthController health;
+@@ -27,7 +27,8 @@
+   @override
+   void initState() {
+     super.initState();
+-    unawaited(widget.health.loadHospitals());
++    // Re-arms the water reminder on every open and refreshes hospitals when they are stale.
++    unawaited(widget.health.onHealthTabOpen());
+   }
+ 
+   String t(String k, [Map<String, String> a = const {}]) => widget.i18n.t(k, a);
+@@ -75,46 +76,37 @@
+         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+           if (h.measuring) ...[
+             _measureArea(context, cs),
+-          ] else if (h.connected == null) ...[
+-            const LinearProgressIndicator(minHeight: 2),
+-            const SizedBox(height: 8),
+-          ] else if (h.bpm != null) ...[
+-            Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+-              Text('${h.bpm}', style: const TextStyle(fontSize: 46, fontWeight: FontWeight.w800, height: 1)),
+-              const SizedBox(width: 8),
+-              Padding(padding: const EdgeInsets.only(bottom: 7), child: Text('bpm', style: TextStyle(fontSize: 14, color: Flat.muted(context), fontWeight: FontWeight.w600))),
+-              const Spacer(),
+-              Icon(Icons.monitor_heart_outlined, size: 22, color: cs.primary),
+-            ]),
+-            const SizedBox(height: 6),
+-            if (h.baseline != null) Text(t('health.heart_base', {'n': '${h.baseline}'}), style: TextStyle(fontSize: 13.5, color: Flat.muted(context))),
+-            const SizedBox(height: 4),
+-            Text(t('health.heart_watch'), style: const TextStyle(fontSize: 13, height: 1.4)),
+           ] else ...[
+-            Text(
+-              h.connected == false ? t('health.heart_none') : t('health.heart_perm'),
+-              style: const TextStyle(fontSize: 14, height: 1.45),
+-            ),
+-            if (h.connected == true) ...[
+-              const SizedBox(height: 14),
+-              Align(
+-                alignment: Alignment.centerLeft,
+-                child: FilledButton(
+-                  style: FilledButton.styleFrom(minimumSize: const Size(0, 44), padding: const EdgeInsets.symmetric(horizontal: 22)),
+-                  onPressed: () => unawaited(h.authorize()),
+-                  child: Text(t('health.allow')),
+-                ),
+-              ),
++            // The measure flow is the primary path; no "connect a health app" homework.
++            // A saved reading (from the camera or a band via Health Connect) still shows.
++            if (h.bpm != null) ...[
++              Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
++                Text('${h.bpm}', style: const TextStyle(fontSize: 46, fontWeight: FontWeight.w800, height: 1)),
++                const SizedBox(width: 8),
++                Padding(padding: const EdgeInsets.only(bottom: 7), child: Text('bpm', style: TextStyle(fontSize: 14, color: Flat.muted(context), fontWeight: FontWeight.w600))),
++                const Spacer(),
++                Icon(Icons.monitor_heart_outlined, size: 22, color: cs.primary),
++              ]),
++              if (h.baseline != null) ...[
++                const SizedBox(height: 6),
++                Text(t('health.heart_base', {'n': '${h.baseline}'}), style: TextStyle(fontSize: 13.5, color: Flat.muted(context))),
++              ],
++              const SizedBox(height: 4),
++              Text(t('health.heart_watch'), style: const TextStyle(fontSize: 13, height: 1.4)),
++            ] else ...[
++              Text(t('health.heart_cam'), style: const TextStyle(fontSize: 14, height: 1.45)),
+             ],
+-          ],
+-          // The app measures the person directly - camera + torch on the fingertip. It
+-          // stays available even while Health Connect is waiting for permission.
+-          const SizedBox(height: 14),
+-          if (h.measureFailed && h.noCamera)
+-            Text(t('health.measure_no_cam'), textAlign: TextAlign.center, style: TextStyle(fontSize: 13.5, height: 1.4, color: cs.error.withValues(alpha: 0.85)))
+-          else if (h.measureFailed)
+-            Text(t('health.measure_fail'), textAlign: TextAlign.center, style: TextStyle(fontSize: 13.5, height: 1.4, color: Flat.muted(context))),
+-          if (!h.measuring) ...[
++            // Honest failure notes, each with its own advice.
++            if (h.measureFailed && h.noCamera) ...[
++              const SizedBox(height: 12),
++              Text(t('health.measure_no_cam'), textAlign: TextAlign.center, style: TextStyle(fontSize: 13.5, height: 1.4, color: cs.error.withValues(alpha: 0.85))),
++            ] else if (h.measureFailed && h.measureNofeed) ...[
++              const SizedBox(height: 12),
++              Text(t('health.measure_nofeed'), textAlign: TextAlign.center, style: TextStyle(fontSize: 13.5, height: 1.4, color: cs.error.withValues(alpha: 0.85))),
++            ] else if (h.measureFailed) ...[
++              const SizedBox(height: 12),
++              Text(t('health.measure_fail'), textAlign: TextAlign.center, style: TextStyle(fontSize: 13.5, height: 1.4, color: Flat.muted(context))),
++            ],
+             const SizedBox(height: 14),
+             Center(
+               child: FilledButton.icon(
+@@ -133,24 +125,48 @@
+   Widget _measureArea(BuildContext context, ColorScheme cs) {
+     final h = widget.health;
+     final ctrl = h.cameraPreview;
++    // A big warm, near-white panel: with the finger pressed over the front camera, this
++    // bright surface IS the light source for the reading. The small round window shows
++    // the live stream so frames keep flowing.
+     return Column(crossAxisAlignment: CrossAxisAlignment.center, children: [
+       Text(t('health.measure_left', {'n': '${h.measureLeft}'}),
+           style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w800, height: 1, fontFeatures: [FontFeature.tabularFigures()])),
+       const SizedBox(height: 12),
+       Center(
+-        child: ClipRRect(
+-          borderRadius: BorderRadius.circular(18),
+-          child: SizedBox(
+-            width: 150,
+-            height: 235,
+-            child: ctrl == null
+-                ? ColoredBox(color: Flat.hairline(context))
+-                : CameraPreview(ctrl),
++        child: Container(
++          width: double.infinity,
++          padding: const EdgeInsets.fromLTRB(20, 22, 20, 18),
++          decoration: BoxDecoration(
++            color: const Color(0xFFFDF1E0),
++            gradient: const LinearGradient(
++              begin: Alignment.topCenter,
++              end: Alignment.bottomCenter,
++              colors: [Color(0xFFFFFBF4), Color(0xFFFBEEDC)],
++            ),
++            borderRadius: BorderRadius.circular(22),
+           ),
++          child: Column(children: [
++            ClipOval(
++              child: Container(
++                width: 130,
++                height: 130,
++                decoration: BoxDecoration(
++                  border: Border.all(color: const Color(0x338A6D3B), width: 3),
++                ),
++                child: ctrl == null
++                    ? const ColoredBox(color: Color(0xFFFFF6EA))
++                    : CameraPreview(ctrl),
++              ),
++            ),
++            const SizedBox(height: 12),
++            Text(
++              t('health.measure_tip'),
++              textAlign: TextAlign.center,
++              style: TextStyle(fontSize: 13.5, height: 1.45, color: Colors.black.withValues(alpha: 0.78)),
++            ),
++          ]),
+         ),
+       ),
+-      const SizedBox(height: 12),
+-      Text(t('health.measure_tip'), textAlign: TextAlign.center, style: const TextStyle(fontSize: 13.5, height: 1.45)),
+       const SizedBox(height: 12),
+       const LinearProgressIndicator(minHeight: 2),
+     ]);
+diff --git a/mobile/lib/features/health/heart_signal.dart b/mobile/lib/features/health/heart_signal.dart
+--- a/mobile/lib/features/health/heart_signal.dart
++++ b/mobile/lib/features/health/heart_signal.dart
+@@ -3,13 +3,39 @@
+ ///
+ /// How it works: blood flowing under the skin changes how much light the finger
+ /// reflects. The camera sees that as tiny brightness swings. This file turns those
+-/// swings into beats per minute: drop the slow drift, check that the remaining wiggle
+-/// is strong enough to trust, then find the swing spacing that best correlates with
+-/// itself - that spacing, in seconds, is the beat.
++/// swings into beats per minute: blow away single-frame speckle, drop the slow drift,
++/// check that the remaining wiggle is strong enough to trust, then find the swing
++/// spacing that best correlates with itself - that spacing, in seconds, is the beat.
++///
++/// The search is patient: if the whole take does not give a confident answer, the same
++/// search runs again on its most recent slices, where the finger press has usually
++/// settled most.
+ library;
+ 
+ import 'dart:math' as math;
+ 
++/// Median of each sample and its two neighbours: kills one-frame white speckle
++/// (auto-exposure hiccups) without smearing the pulse rhythm.
++List<double> smoothMedian3(List<double> xs) {
++  final n = xs.length;
++  if (n == 0) return <double>[];
++  final out = List<double>.filled(n, 0);
++  for (var i = 0; i < n; i++) {
++    final a = i > 0 ? xs[i - 1] : xs[i];
++    final b = xs[i];
++    final c = i + 1 < n ? xs[i + 1] : xs[i];
++    final v = a >= b
++        ? (b >= c
++            ? b
++            : (a >= c ? c : a))
++        : (a >= c
++            ? a
++            : (c >= b ? b : c));
++    out[i] = v;
++  }
++  return out;
++}
++
+ /// Removes slow drift (lighting changes, the finger pressing in and out): shifts each
+ /// sample by the mean of the samples within `window` around it, keeping only the
+ /// faster wiggle.
+@@ -30,21 +56,44 @@
+   return out;
+ }
+ 
+-/// Estimates the pulse in beats per minute: finds the sample spacing (the "lag")
+-/// whose self-correlation is strongest inside the possible heart range, and returns
+-/// that spacing in seconds as a rate. Returns null when the signal is too short, too
+-/// flat, or too noisy to trust - the app must show "could not read it" rather than
+-/// invent a number.
++/// Estimates the pulse in beats per minute. Returns null when no slice of the take
++/// looks trustworthy - the app must show "could not read it" rather than invent a
++/// number.
+ double? bpmFromSamples(
+   List<double> ys,
+   double fps, {
+   double minBpm = 40,
+   double maxBpm = 180,
+-  double trust = 0.22,
+-  double minWiggle = 0.35,
++  double trust = 0.18,
++  double minWiggle = 0.6,
+ }) {
++  if (ys.length < 8 || fps <= 0) return null;
++
++  // The whole take first; then its most recent slices, where the finger press has
++  // usually settled most. Whichever slice gives a confident answer wins.
++  for (final seconds in _windows) {
++    final take = (fps * seconds).round();
++    final slice = take < ys.length ? ys.sublist(ys.length - take) : ys;
++    if (slice.length < 40) continue;
++    final r = _bpmOneWindow(slice, fps, minBpm: minBpm, maxBpm: maxBpm, trust: trust, minWiggle: minWiggle);
++    if (r != null) return r;
++  }
++  return null;
++}
++
++const _windows = <double>[999999.0, 24.0, 16.0];
++
++/// One autocorrelation search on one slice.
++double? _bpmOneWindow(
++  List<double> ys,
++  double fps, {
++  required double minBpm,
++  required double maxBpm,
++  required double trust,
++  required double minWiggle,
++}) {
+   final n = ys.length;
+-  if (n < 8 || fps <= 0) return null;
++  if (n < 8) return null;
+ 
+   // Zero-mean.
+   var mean = 0.0;
+diff --git a/mobile/lib/features/health/heart_camera.dart b/mobile/lib/features/health/heart_camera.dart
+--- a/mobile/lib/features/health/heart_camera.dart
++++ b/mobile/lib/features/health/heart_camera.dart
+@@ -4,11 +4,11 @@
+ 
+ import 'heart_signal.dart';
+ 
+-/// Reads the pulse straight from the person, with no health app in between: the back
+-/// camera and its torch, with the fingertip covering both. Each heartbeat pushes a
+-/// little more blood through the finger, which changes how much light reflects back -
+-/// the camera turns that into a brightness wiggle, and the maths turns the wiggle into
+-/// beats per minute.
++/// Reads the pulse straight from the person, with no health app in between: the front
++/// camera, with the fingertip pressed over it and the bright screen lighting the finger
++/// from behind. Each heartbeat pushes a little more blood through the finger, which
++/// changes how much light reflects back - the camera turns that into a brightness wiggle,
++/// and the maths turns the wiggle into beats per minute.
+ ///
+ /// Deliberately patient and honest: it records about thirty seconds, and returns null
+ /// (not a guess) whenever the wiggle is too weak or too messy to trust.
+@@ -19,6 +19,10 @@
+   /// different advice on the screen than "the reading was not strong enough".
+   bool cameraMissing = false;
+ 
++  /// Frames that actually arrived last run. A run with zero frames means the camera
++  /// stream never delivered anything - different advice than a weak pulse.
++  int frames = 0;
++
+   final _samples = <double>[];
+   final _times = <double>[];
+   final _sw = Stopwatch();
+@@ -42,10 +46,11 @@
+       ..start();
+     CameraDescription? cam;
+     cameraMissing = false;
++    frames = 0;
+     try {
+       final cams = await availableCameras();
+       for (final c in cams) {
+-        if (c.lensDirection == CameraLensDirection.back) {
++        if (c.lensDirection == CameraLensDirection.front) {
+           cam = c;
+           break;
+         }
+@@ -73,11 +78,8 @@
+       return null; // never pretend a number
+     }
+     _controller = ctrl;
+-    try {
+-      await ctrl.setFlashMode(FlashMode.torch);
+-    } catch (_) {
+-      // A phone without a torch still has a pulse reading chance in bright light.
+-    }
++    // No torch here: the front camera has none. The bright screen supplies the light;
++    // the measure screen shows a big bright panel for exactly that.
+     try {
+       await ctrl.startImageStream(_onFrame);
+     } catch (_) {
+@@ -100,17 +102,15 @@
+     try {
+       await ctrl.stopImageStream();
+     } catch (_) {}
+-    try {
+-      await ctrl.setFlashMode(FlashMode.off);
+-    } catch (_) {}
+     await _close();
+ 
+     final n = _samples.length;
++    frames = n;
+     if (n < 60 || _times.isEmpty) return null;
+     final span = _times.last - _times.first;
+     if (span < 5) return null;
+     final fps = n / span;
+-    final ys = detrend(_samples, (fps * 1.5).round().clamp(3, n));
++    final ys = detrend(smoothMedian3(_samples), (fps * 1.5).round().clamp(3, n));
+     final bpm = bpmFromSamples(ys, fps);
+     if (bpm == null) return null;
+     return bpm.round().clamp(30, 220);
+@@ -140,6 +140,7 @@
+     if (cnt == 0) return;
+     _samples.add(sum / cnt);
+     _times.add(_sw.elapsedMicroseconds / 1e6);
++    frames = _samples.length;
+   }
+ 
+   /// Waits until the sample buffer stops growing for a beat (the stream has caught up),
+diff --git a/mobile/test/heart_signal_test.dart b/mobile/test/heart_signal_test.dart
+--- a/mobile/test/heart_signal_test.dart
++++ b/mobile/test/heart_signal_test.dart
+@@ -1,4 +1,3 @@
+-import 'dart:async';
+ import 'dart:math' as math;
+ 
+ import 'package:flutter_test/flutter_test.dart';
+@@ -23,7 +22,8 @@
+ void main() {
+   test('a clean fingertip signal comes out near the true rate', () {
+     const fps = 25.0;
+-    final ys = detrend(fakeFingertipSignal(72, fps, 30), (fps * 1.5).round());
++    final raw = smoothMedian3(fakeFingertipSignal(72, fps, 30));
++    final ys = detrend(raw, (fps * 1.5).round());
+     final bpm = bpmFromSamples(ys, fps);
+     expect(bpm, isNotNull);
+     expect(bpm!, greaterThanOrEqualTo(68));
+@@ -32,8 +32,8 @@
+ 
+   test('a faster pulse is found as faster', () {
+     const fps = 25.0;
+-    final a = detrend(fakeFingertipSignal(60, fps, 30), (fps * 1.5).round());
+-    final b = detrend(fakeFingertipSignal(95, fps, 30), (fps * 1.5).round());
++    final a = detrend(smoothMedian3(fakeFingertipSignal(60, fps, 30)), (fps * 1.5).round());
++    final b = detrend(smoothMedian3(fakeFingertipSignal(95, fps, 30)), (fps * 1.5).round());
+     final ba = bpmFromSamples(a, fps);
+     final bb = bpmFromSamples(b, fps);
+     expect(ba, isNotNull);
+@@ -45,10 +45,18 @@
+     const fps = 25.0;
+     final rnd = math.Random(3);
+     final flat = List<double>.generate(750, (_) => 128.0 + (rnd.nextDouble() - 0.5) * 0.4);
+-    expect(bpmFromSamples(detrend(flat, 38), fps), isNull);
++    expect(bpmFromSamples(detrend(smoothMedian3(flat), 38), fps), isNull);
+   });
+ 
++  test('weak flat light near the threshold is also refused', () {
++    const fps = 25.0;
++    // Very small wiggle: rms around 0.115 owned by pure flat light, not a pulse.
++    final rnd = math.Random(5);
++    final faint = List<double>.generate(750, (_) => 128.0 + (rnd.nextDouble() - 0.5) * 0.25);
++    expect(bpmFromSamples(detrend(smoothMedian3(faint), 38), fps), isNull);
++  });
++
+   test('too-short data is refused', () {
+-    expect(bpmFromSamples(detrend(<double>[130, 131, 130, 129, 130], 2), 25.0), isNull);
++    expect(bpmFromSamples(detrend(smoothMedian3(<double>[130, 131, 130, 129, 130]), 2), 25.0), isNull);
+   });
+ }
+diff --git a/mobile/lib/features/sos/guardian_badges.dart b/mobile/lib/features/sos/guardian_badges.dart
+new file mode 100644
+--- /dev/null
++++ b/mobile/lib/features/sos/guardian_badges.dart
+@@ -0,0 +1,331 @@
++/// The fun "security team" avatars for emergency contacts: 20 presets - ten
++/// command-style posts in both a male and a female look. Everything is drawn in
++/// code, so no image assets are needed, and each one looks the same on every phone.
++///
++/// The look is layered gradients (light on top, darker shadows underneath) over a
++/// radar-style ring, to give the small drawn portraits their soft 3D shine.
++library;
++
++import 'dart:math' as math;
++
++import 'package:flutter/material.dart';
++
++enum GuardianKind {
++  commander,
++  sergeant,
++  captain,
++  major,
++  guard,
++  ranger,
++  pilot,
++  doctor,
++  nurse,
++  fireChief,
++}
++
++extension GuardianKindTitle on GuardianKind {
++  /// Kept in English on purpose: the badge is a role name printed on a uniform.
++  String get en => switch (this) {
++        GuardianKind.commander => 'Commander',
++        GuardianKind.sergeant => 'Sergeant',
++        GuardianKind.captain => 'Captain',
++        GuardianKind.major => 'Major',
++        GuardianKind.guard => 'Guard',
++        GuardianKind.ranger => 'Ranger',
++        GuardianKind.pilot => 'Pilot',
++        GuardianKind.doctor => 'Doctor',
++        GuardianKind.nurse => 'Nurse',
++        GuardianKind.fireChief => 'Fire Chief',
++      };
++}
++
++/// One preset: who the drawn character is (role + look) and its colour pair.
++class GuardianBadge {
++  const GuardianBadge({
++    required this.id,
++    required this.kind,
++    required this.female,
++    required this.color,
++    required this.accent,
++  });
++
++  /// Stable short name saved in the contact store, e.g. 'commander_f'.
++  final String id;
++  final GuardianKind kind;
++  final bool female;
++
++  /// Main uniform colour.
++  final Color color;
++
++  /// Trim colour: hat, piping, collar.
++  final Color accent;
++
++  String get title => kind.en;
++}
++
++/// The whole roster, in a nice display order: same rank twice, then mixed looks.
++const guardianBadges = <GuardianBadge>[
++  GuardianBadge(id: 'commander_m', kind: GuardianKind.commander, female: false, color: Color(0xFF1E3A6E), accent: Color(0xFFD9A441)),
++  GuardianBadge(id: 'commander_f', kind: GuardianKind.commander, female: true, color: Color(0xFF1E3A6E), accent: Color(0xFFD9A441)),
++  GuardianBadge(id: 'sergeant_m', kind: GuardianKind.sergeant, female: false, color: Color(0xFF2E4A2E), accent: Color(0xFFC8C8C8)),
++  GuardianBadge(id: 'sergeant_f', kind: GuardianKind.sergeant, female: true, color: Color(0xFF2E4A2E), accent: Color(0xFFC8C8C8)),
++  GuardianBadge(id: 'captain_m', kind: GuardianKind.captain, female: false, color: Color(0xFF153C54), accent: Color(0xFFE4C25A)),
++  GuardianBadge(id: 'captain_f', kind: GuardianKind.captain, female: true, color: Color(0xFF153C54), accent: Color(0xFFE4C25A)),
++  GuardianBadge(id: 'major_m', kind: GuardianKind.major, female: false, color: Color(0xFF4A3320), accent: Color(0xFFD9A441)),
++  GuardianBadge(id: 'major_f', kind: GuardianKind.major, female: true, color: Color(0xFF4A3320), accent: Color(0xFFD9A441)),
++  GuardianBadge(id: 'guard_m', kind: GuardianKind.guard, female: false, color: Color(0xFF232A35), accent: Color(0xFF8FA3BF)),
++  GuardianBadge(id: 'guard_f', kind: GuardianKind.guard, female: true, color: Color(0xFF232A35), accent: Color(0xFF8FA3BF)),
++  GuardianBadge(id: 'ranger_m', kind: GuardianKind.ranger, female: false, color: Color(0xFF3D5A3A), accent: Color(0xFFCCB06A)),
++  GuardianBadge(id: 'ranger_f', kind: GuardianKind.ranger, female: true, color: Color(0xFF3D5A3A), accent: Color(0xFFCCB06A)),
++  GuardianBadge(id: 'pilot_m', kind: GuardianKind.pilot, female: false, color: Color(0xFF123B63), accent: Color(0xFF9EC4E8)),
++  GuardianBadge(id: 'pilot_f', kind: GuardianKind.pilot, female: true, color: Color(0xFF123B63), accent: Color(0xFF9EC4E8)),
++  GuardianBadge(id: 'doctor_m', kind: GuardianKind.doctor, female: false, color: Color(0xFF28556A), accent: Color(0xFFF2F6F8)),
++  GuardianBadge(id: 'doctor_f', kind: GuardianKind.doctor, female: true, color: Color(0xFF28556A), accent: Color(0xFFF2F6F8)),
++  GuardianBadge(id: 'nurse_m', kind: GuardianKind.nurse, female: false, color: Color(0xFF3E6B8A), accent: Color(0xFFF6F9FB)),
++  GuardianBadge(id: 'nurse_f', kind: GuardianKind.nurse, female: true, color: Color(0xFF3E6B8A), accent: Color(0xFFF6F9FB)),
++  GuardianBadge(id: 'firechief_m', kind: GuardianKind.fireChief, female: false, color: Color(0xFF8A2A22), accent: Color(0xFF2B2B2B)),
++  GuardianBadge(id: 'firechief_f', kind: GuardianKind.fireChief, female: true, color: Color(0xFF8A2A22), accent: Color(0xFF2B2B2B)),
++];
++
++GuardianBadge badgeById(String id) {
++  for (final b in guardianBadges) {
++    if (b.id == id) return b;
++  }
++  return guardianBadges.first;
++}
++
++/// The drawn portrait used in the contacts list and the editor.
++class GuardianAvatar extends StatelessWidget {
++  const GuardianAvatar({super.key, required this.badge, this.size = 48});
++  final GuardianBadge badge;
++  final double size;
++
++  @override
++  Widget build(BuildContext context) {
++    return SizedBox(
++      width: size,
++      height: size,
++      child: CustomPaint(painter: _GuardianPainter(badge)),
++    );
++  }
++}
++
++class _GuardianPainter extends CustomPainter {
++  _GuardianPainter(this.badge);
++  final GuardianBadge badge;
++
++  static const _maleSkinDark = Color(0xFFB5794A);
++  static const _maleSkinLight = Color(0xFFD9A06D);
++  static const _femaleSkin = Color(0xFFC98E5F);
++
++  @override
++  void paint(Canvas canvas, Size size) {
++    final w = size.width;
++    final h = size.height;
++    final c = Offset(w / 2, h / 2);
++    final b = badge;
++    final dark = Color.lerp(b.color, Colors.black, 0.35)!;
++    final light = Color.lerp(b.color, Colors.white, 0.30)!;
++
++    // Radar ring behind the head gives every avatar the security-response look.
++    final ring = Paint()
++      ..style = PaintingStyle.stroke
++      ..strokeWidth = w * 0.05
++      ..shader = SweepGradient(
++        colors: [b.accent, Color.lerp(b.accent, Colors.white, 0.45)!, b.accent.withValues(alpha: 0.35), b.accent],
++      ).createShader(Rect.fromCircle(center: c, radius: w * 0.46));
++    canvas.drawCircle(c, w * 0.42, ring);
++
++    // Background disc, lit from the top.
++    canvas.drawCircle(c, w * 0.39, Paint()..color = dark);
++    canvas.drawCircle(
++      Offset(w / 2, h * 0.44),
++      w * 0.36,
++      Paint()
++        ..shader = RadialGradient(
++          radius: 0.9,
++          colors: [light, b.color],
++          stops: const [0.0, 1.0],
++        ).createShader(Rect.fromCircle(center: c, radius: w * 0.4)),
++    );
++
++    // The rest of the portrait is clipped inside the disc.
++    final clip = Path()..addOval(Rect.fromCircle(center: c, radius: w * 0.39));
++    canvas.save();
++    canvas.clipPath(clip);
++
++    _drawTorso(canvas, w, h, b);
++    _drawHead(canvas, w, h, b);
++    _drawHeadwear(canvas, w, h, b);
++
++    canvas.restore();
++  }
++
++  void _drawTorso(Canvas canvas, double w, double h, GuardianBadge b) {
++    final dark = Color.lerp(b.color, Colors.black, 0.35)!;
++    final torsoTop = h * 0.72;
++    final torso = Paint()
++      ..shader = LinearGradient(
++        begin: Alignment.topCenter,
++        end: Alignment.bottomCenter,
++        colors: [Color.lerp(b.color, Colors.white, 0.12)!, dark],
++      ).createShader(Rect.fromLTRB(0, torsoTop - h * 0.2, w, h));
++    final torsoPath = Path()
++      ..moveTo(w * 0.14, h)
++      ..lineTo(w * 0.14, torsoTop + h * 0.06)
++      ..quadraticBezierTo(w / 2, torsoTop - h * 0.10, w * 0.86, torsoTop + h * 0.06)
++      ..lineTo(w * 0.86, h)
++      ..close();
++    canvas.drawPath(torsoPath, torso);
++    // Collar trim.
++    canvas.drawPath(
++      Path()
++        ..moveTo(w * 0.34, torsoTop + h * 0.02)
++        ..quadraticBezierTo(w / 2, torsoTop - h * 0.045, w * 0.66, torsoTop + h * 0.02),
++      Paint()
++        ..strokeWidth = w * 0.04
++        ..style = PaintingStyle.stroke
++        ..color = Color.lerp(b.accent, Colors.white, 0.25)!,
++    );
++  }
++
++  void _drawHead(Canvas canvas, double w, double h, GuardianBadge b) {
++    final skin = b.female ? _femaleSkin : _maleSkinDark;
++    final shadowed = Color.lerp(skin, Colors.black, 0.18)!;
++    final headRect = Rect.fromCenter(center: Offset(w / 2, h * 0.47), width: w * 0.34, height: h * 0.40);
++    canvas.drawOval(headRect, Paint()..color = skin);
++    canvas.drawOval(
++      Rect.fromCenter(center: Offset(w / 2, h * 0.47), width: w * 0.34, height: h * 0.40),
++      Paint()
++        ..shader = LinearGradient(
++          begin: Alignment.topLeft,
++          end: Alignment.bottomRight,
++          colors: [_maleSkinLight, skin, shadowed],
++        ).createShader(headRect),
++    );
++    // Small ears.
++    canvas.drawCircle(Offset(w * 0.335, h * 0.50), w * 0.035, Paint()..color = skin);
++    canvas.drawCircle(Offset(w * 0.665, h * 0.50), w * 0.035, Paint()..color = Color.lerp(skin, Colors.black, 0.10)!);
++  }
++
++  void _drawHeadwear(Canvas canvas, double w, double h, GuardianBadge b) {
++    final darkHat = Color.lerp(b.accent, Colors.black, 0.25)!;
++    final litHat = Color.lerp(b.accent, Colors.white, 0.35)!;
++    final topShadow = Paint()..color = Colors.white.withValues(alpha: 0.22);
++
++    // Longer hair for the female looks (drawn under every kind of hat).
++    if (b.female) {
++      final hair = Paint()..color = const Color(0xFF2E2118);
++      canvas.drawPath(
++        Path()
++          ..moveTo(w * 0.30, h * 0.46)
++          ..quadraticBezierTo(w * 0.27, h * 0.70, w * 0.34, h * 0.76)
++          ..lineTo(w * 0.40, h * 0.66)
++          ..lineTo(w * 0.40, h * 0.42)
++          ..close()
++          ..moveTo(w * 0.70, h * 0.46)
++          ..quadraticBezierTo(w * 0.73, h * 0.70, w * 0.66, h * 0.76)
++          ..lineTo(w * 0.60, h * 0.66)
++          ..lineTo(w * 0.60, h * 0.42)
++          ..close(),
++        hair,
++      );
++    }
++
++    switch (b.kind) {
++      case GuardianKind.doctor:
++      case GuardianKind.nurse:
++        // White cap with a coloured cross mark.
++        canvas.drawRRect(
++          RRect.fromRectAndRadius(Rect.fromCenter(center: Offset(w / 2, h * 0.315), width: w * 0.30, height: h * 0.10), Radius.circular(w * 0.03)),
++          Paint()..color = b.accent,
++        );
++        final cross = Paint()..color = b.kind == GuardianKind.doctor ? const Color(0xFFB3413A) : const Color(0xFF367A5C);
++        canvas.drawRect(Rect.fromCenter(center: Offset(w / 2, h * 0.315), width: w * 0.10, height: h * 0.032), cross);
++        canvas.drawRect(Rect.fromCenter(center: Offset(w / 2, h * 0.315), width: w * 0.032, height: h * 0.10), cross);
++        break;
++      case GuardianKind.pilot:
++        // Air pilot cap with a visor.
++        canvas.drawOval(
++          Rect.fromCenter(center: Offset(w / 2, h * 0.32), width: w * 0.38, height: h * 0.15),
++          Paint()..color = b.accent,
++        );
++        canvas.drawOval(
++          Rect.fromCenter(center: Offset(w / 2, h * 0.32), width: w * 0.38, height: h * 0.15),
++          Paint()
++            ..shader = LinearGradient(colors: [litHat, b.accent, darkHat]).createShader(Rect.fromLTWH(w * 0.31, h * 0.24, w * 0.38, h * 0.16)),
++        );
++        canvas.drawOval(Rect.fromCenter(center: Offset(w / 2, h * 0.375), width: w * 0.40, height: h * 0.035), Paint()..color = darkHat);
++        break;
++      case GuardianKind.fireChief:
++        // Fire helmet with a shield mark.
++        canvas.drawPath(
++          Path()
++            ..moveTo(w * 0.26, h * 0.40)
++            ..quadraticBezierTo(w * 0.26, h * 0.20, w * 0.50, h * 0.20)
++            ..quadraticBezierTo(w * 0.74, h * 0.20, w * 0.74, h * 0.40)
++            ..close(),
++          Paint()..color = Color.lerp(b.accent, Colors.red, 0.5)!,
++        );
++        canvas.drawOval(Rect.fromCenter(center: Offset(w / 2, h * 0.385), width: w * 0.52, height: h * 0.045), Paint()..color = b.accent);
++        canvas.drawCircle(Offset(w / 2, h * 0.30), w * 0.055, Paint()..color = const Color(0xFFF2D24B));
++        break;
++      case GuardianKind.ranger:
++      case GuardianKind.guard:
++        // Broad field hat with a brim.
++        canvas.drawOval(Rect.fromCenter(center: Offset(w / 2, h * 0.375), width: w * 0.52, height: h * 0.09), Paint()..color = darkHat);
++        canvas.drawRRect(
++          RRect.fromRectAndRadius(Rect.fromLTWH(w * 0.33, h * 0.27, w * 0.34, h * 0.11), Radius.circular(w * 0.04)),
++          Paint()..color = b.accent,
++        );
++        break;
++      case GuardianKind.commander:
++      case GuardianKind.major:
++        // Peaked cap with a star badge.
++        canvas.drawRRect(
++          RRect.fromRectAndRadius(Rect.fromLTWH(w * 0.32, h * 0.255, w * 0.36, h * 0.115), Radius.circular(w * 0.045)),
++          Paint()..color = b.accent,
++        );
++        canvas.drawPath(
++          Path()
++            ..moveTo(w * 0.30, h * 0.365)
++            ..quadraticBezierTo(w / 2, h * 0.315, w * 0.70, h * 0.365)
++            ..close(),
++          Paint()..color = darkHat,
++        );
++        _drawStar(canvas, Offset(w / 2, h * 0.295), w * 0.05, const Color(0xFFF4E3A1));
++        break;
++      case GuardianKind.sergeant:
++      case GuardianKind.captain:
++        // Beret tilted slightly, with a pip.
++        canvas.save();
++        canvas.translate(w / 2, h * 0.32);
++        canvas.rotate(-0.16);
++        canvas.drawRRect(
++          RRect.fromRectAndRadius(Rect.fromCenter(center: Offset.zero, width: w * 0.40, height: h * 0.135), Radius.elliptical(w * 0.20, h * 0.0675)),
++          Paint()..color = b.accent,
++        );
++        canvas.restore();
++        canvas.drawCircle(Offset(w * 0.60, h * 0.283), w * 0.03, Paint()..color = const Color(0xFFF4E3A1));
++        break;
++    }
++
++    // One top highlight so every hat reads as a lit 3D surface.
++    canvas.drawOval(Rect.fromLTWH(w * 0.38, h * 0.255, w * 0.10, h * 0.022), topShadow);
++  }
++
++  void _drawStar(Canvas canvas, Offset c, double r, Color color) {
++    final path = Path();
++    for (var i = 0; i < 10; i++) {
++      final ang = -math.pi / 2 + i * math.pi / 5;
++      final rad = i.isEven ? r : r * 0.44;
++      final p = Offset(c.dx + rad * math.cos(ang), c.dy + rad * math.sin(ang));
++      i == 0 ? path.moveTo(p.dx, p.dy) : path.lineTo(p.dx, p.dy);
++    }
++    path.close();
++    canvas.drawPath(path, Paint()..color = color);
++  }
++
++  @override
++  bool shouldRepaint(covariant _GuardianPainter old) => old.badge != badge;
++}
+diff --git a/mobile/lib/features/sos/contact_people.dart b/mobile/lib/features/sos/contact_people.dart
+new file mode 100644
+--- /dev/null
++++ b/mobile/lib/features/sos/contact_people.dart
+@@ -0,0 +1,64 @@
++import 'dart:convert';
++
++import '../../core/storage/key_value_store.dart';
++
++/// The name and guardian character a person picked for one of their emergency
++/// contacts. Saved on this phone only - the character is a personal decoration for
++/// this screen, not something the server needs to know about.
++class Person {
++  const Person({required this.phone, this.name = '', this.badge = ''});
++  final String phone;
++
++  /// The friendly display name, or the empty string when they keep it simple.
++  final String name;
++
++  /// Id of the chosen GuardianBadge, e.g. 'commander_f'. Empty = pick one later.
++  final String badge;
++
++  Map<String, String> toJson() => {'p': phone, 'n': name, 'b': badge};
++  factory Person.fromJson(Map<String, dynamic> j) => Person(
++        phone: (j['p'] ?? '') as String,
++        name: (j['n'] ?? '') as String,
++        badge: (j['b'] ?? '') as String,
++      );
++}
++
++/// Phone-number keyed store for [Person], kept in the same secure storage as the
++/// rest of the app's private data.
++class ContactPeople {
++  ContactPeople(this._store);
++  final KeyValueStore _store;
++  static const _k = 'people.v1';
++
++  Map<String, Person> _people = const {};
++
++  Future<Map<String, Person>> load() async {
++    try {
++      final raw = await _store.read(_k);
++      if (raw == null) return _people = const {};
++      final list = (jsonDecode(raw) as List<dynamic>).cast<Map<String, dynamic>>();
++      final m = <String, Person>{};
++      for (final j in list) {
++        final p = Person.fromJson(j);
++        if (p.phone.isNotEmpty) m[p.phone] = p;
++      }
++      return _people = m;
++    } catch (_) {
++      return _people = const {};
++    }
++  }
++
++  /// Saves the whole record for one phone (name and/or badge).
++  Future<void> put(Person p) async {
++    if (p.phone.isEmpty) return;
++    final m = Map<String, Person>.of(_people);
++    m[p.phone] = p;
++    _people = m;
++    await _persist();
++  }
++
++  Person? forPhone(String phone) => _people[phone];
++
++  Future<void> _persist() =>
++      _store.write(_k, jsonEncode([for (final p in _people.values) p.toJson()]));
++}
+diff --git a/mobile/lib/features/contacts/contacts_screen.dart b/mobile/lib/features/contacts/contacts_screen.dart
+--- a/mobile/lib/features/contacts/contacts_screen.dart
++++ b/mobile/lib/features/contacts/contacts_screen.dart
+@@ -1,14 +1,21 @@
++import 'dart:async';
++
+ import 'package:flutter/material.dart';
+ import 'package:share_plus/share_plus.dart';
+ 
+ import '../../core/i18n/i18n.dart';
+ import '../../core/net/api.dart';
++import '../sos/contact_people.dart';
++import '../sos/guardian_badges.dart';
+ 
+-/// Shows the people who get your alerts, and whether each one agreed to it.
+-/// Changing the list is done in onboarding; it is locked while an alert is running.
++/// Shows the people who get your alerts, and whether each one agreed to it. Each
++/// contact can be given a friendly name and one of twenty drawn "security team"
++/// characters (saved on this phone only). Changing the list is done in onboarding;
++/// it is locked while an alert is running.
+ class ContactsScreen extends StatefulWidget {
+-  const ContactsScreen({super.key, required this.api, required this.i18n});
++  const ContactsScreen({super.key, required this.api, required this.people, required this.i18n});
+   final SentriApi api;
++  final ContactPeople people;
+   final I18n i18n;
+ 
+   @override
+@@ -17,7 +24,19 @@
+ 
+ class _ContactsScreenState extends State<ContactsScreen> {
+   late Future<List<ContactStatus>> _future = widget.api.listContacts();
++  Map<String, Person> _people = const {};
+ 
++  @override
++  void initState() {
++    super.initState();
++    unawaited(_loadPeople());
++  }
++
++  Future<void> _loadPeople() async {
++    final p = await widget.people.load();
++    if (mounted) setState(() => _people = p);
++  }
++
+   void _reload() => setState(() => _future = widget.api.listContacts());
+ 
+   /// 0803 123 4567 style, so numbers are easy to recognise at a glance.
+@@ -29,6 +48,18 @@
+     return e164;
+   }
+ 
++  Future<void> _editPerson(ContactStatus c) async {
++    final bad = await showModalBottomSheet<bool>(
++      context: context,
++      isScrollControlled: true,
++      builder: (context) => _PersonSheet(phone: c.phone, existing: _people[c.phone], people: widget.people, i18n: widget.i18n),
++    );
++    if (bad == true) {
++      final fresh = await widget.people.load();
++      if (mounted) setState(() => _people = fresh);
++    }
++  }
++
+   @override
+   Widget build(BuildContext context) {
+     final t = widget.i18n.t;
+@@ -64,14 +95,41 @@
+                     for (var i = 0; i < list.length; i++) ...[
+                       if (i > 0) const Divider(height: 1),
+                       ListTile(
+-                        title: Text(pretty(list[i].phone), style: const TextStyle(fontWeight: FontWeight.w600)),
+-                        subtitle: Text(list[i].reachable ? t('contacts.on_sentri') : t('contacts.not_on_sentri'), style: TextStyle(fontSize: 13, color: list[i].reachable ? cs.tertiary : cs.onSurface.withValues(alpha: 0.55))),
+-                        trailing: list[i].reachable ? _Chip(list[i].consent, t) : TextButton(onPressed: () => Share.share(t('share.invite_text')), child: Text(t('share.invite'))),
++                        onTap: () => unawaited(_editPerson(list[i])),
++                        leading: GuardianAvatar(
++                          badge: badgeById(_people[list[i].phone]?.badge ?? guardianBadges.first.id),
++                          size: 46,
++                        ),
++                        // The name the person gave; falls back to the plain number.
++                        title: Text(
++                          _people[list[i].phone]?.name.isNotEmpty == true
++                              ? _people[list[i].phone]!.name
++                              : pretty(list[i].phone),
++                          style: const TextStyle(fontWeight: FontWeight.w600),
++                        ),
++                        subtitle: Text(
++                          _people[list[i].phone]?.name.isNotEmpty == true ? pretty(list[i].phone) : (list[i].reachable ? t('contacts.on_sentri') : t('contacts.not_on_sentri')),
++                          style: TextStyle(
++                            fontSize: 13,
++                            height: 1.15,
++                            color: _people[list[i].phone]?.name.isNotEmpty == true
++                                ? cs.onSurface.withValues(alpha: 0.55)
++                                : (list[i].reachable ? cs.tertiary : cs.onSurface.withValues(alpha: 0.55)),
++                          ),
++                        ),
++                        trailing: list[i].reachable
++                            ? _Chip(list[i].consent, t)
++                            : TextButton(onPressed: () => Share.share(t('share.invite_text')), child: Text(t('share.invite'))),
+                       ),
+                     ],
+                   ],
+                 ),
+               ),
++              const SizedBox(height: 12),
++              Text(
++                t('contacts.characters'),
++                style: Theme.of(context).textTheme.bodySmall,
++              ),
+               const SizedBox(height: 16),
+               Text(t('contacts.app_only'), style: Theme.of(context).textTheme.bodySmall),
+               if (declined > 0) ...[
+@@ -81,6 +139,118 @@
+             ],
+           );
+         },
++      ),
++    );
++  }
++}
++
++/// The editor for one contact: any name they like, plus one of the twenty drawn
++/// characters. Saves to the phone's secure store; nothing leaves the device.
++class _PersonSheet extends StatefulWidget {
++  const _PersonSheet({required this.phone, required this.existing, required this.people, required this.i18n});
++  final String phone;
++  final Person? existing;
++  final ContactPeople people;
++  final I18n i18n;
++
++  @override
++  State<_PersonSheet> createState() => _PersonSheetState();
++}
++
++class _PersonSheetState extends State<_PersonSheet> {
++  late final TextEditingController _name = TextEditingController(text: widget.existing?.name ?? '');
++  late String _badge = widget.existing?.badge.isEmpty ?? true ? guardianBadges.first.id : widget.existing!.badge;
++
++  String t(String k, [Map<String, String> a = const {}]) => widget.i18n.t(k, a);
++
++  @override
++  void dispose() {
++    _name.dispose();
++    super.dispose();
++  }
++
++  @override
++  Widget build(BuildContext context) {
++    final cs = Theme.of(context).colorScheme;
++    final pad = MediaQuery.of(context).viewInsets.bottom;
++    return Padding(
++      padding: EdgeInsets.fromLTRB(0, 12, 0, pad),
++      child: SizedBox(
++        height: MediaQuery.of(context).size.height * 0.78,
++        child: Column(children: [
++          Container(width: 44, height: 4, decoration: BoxDecoration(color: cs.onSurface.withValues(alpha: 0.25), borderRadius: BorderRadius.circular(2))),
++          const SizedBox(height: 14),
++          Expanded(
++            child: ListView(
++              padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
++              children: [
++                Text(t('contacts.title'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
++                const SizedBox(height: 14),
++                TextField(
++                  controller: _name,
++                  keyboardType: TextInputType.name,
++                  textCapitalization: TextCapitalization.words,
++                  decoration: InputDecoration(hintText: t('contacts.name_hint'), isDense: true, counterText: ''),
++                  maxLength: 24,
++                ),
++                const SizedBox(height: 4),
++                Text(t('contacts.characters'), style: TextStyle(fontSize: 13, color: cs.onSurface.withValues(alpha: 0.6))),
++                const SizedBox(height: 10),
++                GridView.builder(
++                  shrinkWrap: true,
++                  physics: const NeverScrollableScrollPhysics(),
++                  gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
++                    maxCrossAxisExtent: 104,
++                    mainAxisSpacing: 10,
++                    crossAxisSpacing: 8,
++                    childAspectRatio: 0.72,
++                  ),
++                  itemCount: guardianBadges.length,
++                  itemBuilder: (context, i) {
++                    final b = guardianBadges[i];
++                    final selected = b.id == _badge;
++                    return InkWell(
++                      onTap: () => setState(() => _badge = b.id),
++                      borderRadius: BorderRadius.circular(14),
++                      child: Container(
++                        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
++                        decoration: BoxDecoration(
++                          borderRadius: BorderRadius.circular(14),
++                          border: Border.all(color: selected ? cs.primary : cs.onSurface.withValues(alpha: 0.12), width: selected ? 2 : 1),
++                          color: selected ? cs.primary.withValues(alpha: 0.08) : Colors.transparent,
++                        ),
++                        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
++                          GuardianAvatar(badge: b, size: 56),
++                          const SizedBox(height: 5),
++                          Flexible(
++                            child: Text(
++                              b.title,
++                              maxLines: 1,
++                              overflow: TextOverflow.ellipsis,
++                              style: TextStyle(fontSize: 11.5, fontWeight: selected ? FontWeight.w700 : FontWeight.w500),
++                            ),
++                          ),
++                        ]),
++                      ),
++                    );
++                  },
++                ),
++                FilledButton(
++                  style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(46)),
++                  onPressed: () async {
++                    await widget.people.put(Person(
++                      phone: widget.phone,
++                      name: _name.text.trim(),
++                      badge: _badge,
++                    ));
++                    if (context.mounted) Navigator.of(context).pop(true);
++                  },
++                  child: Text(t('contacts.save')),
++                ),
++              ],
++            ),
++          ),
++        ]),
+       ),
+     );
+   }
+diff --git a/mobile/lib/features/location/location.dart b/mobile/lib/features/location/location.dart
+--- a/mobile/lib/features/location/location.dart
++++ b/mobile/lib/features/location/location.dart
+@@ -63,13 +63,15 @@
+     }
+   }
+ 
+-  /// A reading this good (in metres) is as good as a phone gets outdoors, so there is no need to wait longer.
+-  /// 12 m was measured too loose on real phones: a "good enough" fix that was actually a weak GPS read ended
+-  /// up drawn as ±100 m on the map. 8 m keeps waiting briefly for the honest pinpoint.
+-  static const _goodEnoughM = 8.0;
++  /// A reading this good (in metres) is as good as a phone gets outdoors, so there is no need
++  /// to wait longer. 8 m was measured too strict on real phones: the pinpoint kept waiting for
++  /// a perfect satellite pass the phone never gives, so the map showed an old or wrong spot
++  /// (people saw it "about 300 m off"). 15 m keeps the honest fast-fix behaviour - accuracy
++  /// at that level is still within shouting distance, and the reading is fresh.
++  static const _goodEnoughM = 15.0;
+ 
+   @override
+-  Future<GeoFix?> preciseFix({Duration timeout = const Duration(seconds: 40)}) async {
++  Future<GeoFix?> preciseFix({Duration timeout = const Duration(seconds: 25)}) async {
+     GeoFix? best;
+     final done = Completer<void>();
+     StreamSubscription<Position>? sub;
+diff --git a/mobile/lib/features/push/push_service.dart b/mobile/lib/features/push/push_service.dart
+--- a/mobile/lib/features/push/push_service.dart
++++ b/mobile/lib/features/push/push_service.dart
+@@ -49,6 +49,11 @@
+ /// Repeats the drink-water reminder at the person's own pace. Cancels the previous one first
+ /// (including "off"), then asks for the notification permission once, right when the person
+ /// turns reminders on.
++///
++/// The quiet problem this fights: phones purge scheduled alarms (reboot, battery saving,
++/// "auto-start" managers), so a reminder set weeks ago can die without anyone noticing. So
++/// this asks for exact-alarm permission when the system offers it, and callers re-run it
++/// every time the app opens - each fresh schedule outlives what the system dropped.
+ Future<void> scheduleWaterReminder(int minutes, String title, String body) async {
+   const details = NotificationDetails(
+     android: AndroidNotificationDetails(
+@@ -66,14 +71,24 @@
+     final android = _local.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+     await android?.createNotificationChannel(_healthChannel);
+     await android?.requestNotificationsPermission();
++    // When the system allows exact alarms, use them - precise chimes at the chosen pace even
++    // when the phone has been asleep. On phones that deny them, ask once (the system shows its
++    // own page) and keep the alarm-clock mode, which still rings on time in practice.
++    var exactAllowed = false;
+     try {
++      exactAllowed = await android?.canScheduleExactNotifications() ?? false;
++      if (!exactAllowed) await android?.requestExactAlarmsPermission();
++    } catch (_) {
++      exactAllowed = false;
++    }
++    try {
+       await _local.periodicallyShowWithDuration(
+         _waterId,
+         title,
+         body,
+         Duration(minutes: minutes),
+         details,
+-        androidScheduleMode: AndroidScheduleMode.alarmClock,
++        androidScheduleMode: exactAllowed ? AndroidScheduleMode.exactAllowWhileIdle : AndroidScheduleMode.alarmClock,
+       );
+     } on PlatformException {
+       // Some phones lock exact alarms: a gently inexact chime still keeps the habit.
+diff --git a/mobile/lib/services.dart b/mobile/lib/services.dart
+--- a/mobile/lib/services.dart
++++ b/mobile/lib/services.dart
+@@ -23,6 +23,7 @@
+ import 'features/share/share_controller.dart';
+ import 'features/onboarding/onboarding_controller.dart';
+ import 'features/push/push_service.dart';
++import 'features/sos/contact_people.dart';
+ import 'features/sos/local_pin_vault.dart';
+ import 'features/sos/sos_controller.dart';
+ 
+@@ -36,6 +37,7 @@
+     required this.bridge,
+     required this.vault,
+     required this.contacts,
++    required this.people,
+     required this.settings,
+     required this.sos,
+     required this.lowBattery,
+@@ -55,6 +57,9 @@
+   final NativeBridge bridge;
+   final LocalPinVault vault;
+   final ContactStore contacts;
++
++  /// Names and drawn guardian characters for the contacts (saved on this phone only).
++  final ContactPeople people;
+   final AppSettings settings;
+   final SosController sos;
+   final LowBatteryAlerter lowBattery;
+@@ -95,6 +100,7 @@
+     final bridge = MethodChannelBridge();
+     final vault = LocalPinVault(store);
+     final contacts = ContactStore(store);
++    final people = ContactPeople(store);
+     const timers = RealTimers();
+     final location = GeolocatorSource();
+     final battery = BatteryPlusSource();
+@@ -156,6 +162,7 @@
+       bridge: bridge,
+       vault: vault,
+       contacts: contacts,
++      people: people,
+       settings: settings,
+       sos: sos,
+       lowBattery: lowBattery,
+diff --git a/mobile/lib/app.dart b/mobile/lib/app.dart
+--- a/mobile/lib/app.dart
++++ b/mobile/lib/app.dart
+@@ -150,7 +150,7 @@
+     final body = IndexedStack(
+       index: _tab,
+       children: [
+-        HomeScreen(sos: s.sos, settings: s.settings, i18n: s.i18n, bridge: s.bridge, api: s.api, inbox: s.inbox, share: s.share, checkin: s.checkin, police: s.police),
++        HomeScreen(sos: s.sos, settings: s.settings, i18n: s.i18n, bridge: s.bridge, api: s.api, inbox: s.inbox, share: s.share, checkin: s.checkin, police: s.police, people: s.people),
+         MapScreen(location: s.location, api: s.api, i18n: s.i18n, placeLookup: const DevicePlaceLookup(), onPlace: (p) => _state = p?.state, police: _directoryFuture),
+         HealthScreen(health: s.health, i18n: s.i18n),
+         PoliceScreen(directory: _directory, i18n: s.i18n, currentState: _state),
+diff --git a/mobile/lib/features/home/home_screen.dart b/mobile/lib/features/home/home_screen.dart
+--- a/mobile/lib/features/home/home_screen.dart
++++ b/mobile/lib/features/home/home_screen.dart
+@@ -19,10 +19,11 @@
+ import '../checkin/checkin_controller.dart';
+ import '../onboarding/permissions_panel.dart';
+ import '../sos/pin_pad.dart';
++import '../sos/contact_people.dart';
+ import '../sos/sos_controller.dart';
+ 
+ class HomeScreen extends StatefulWidget {
+-  const HomeScreen({super.key, required this.sos, required this.settings, required this.i18n, required this.bridge, required this.api, required this.inbox, required this.share, required this.checkin, required this.police});
++  const HomeScreen({super.key, required this.sos, required this.settings, required this.i18n, required this.bridge, required this.api, required this.inbox, required this.share, required this.checkin, required this.police, required this.people});
+   final SentriApi api;
+   final InboxController inbox;
+   final ShareController share;
+@@ -33,6 +34,9 @@
+   final I18n i18n;
+   final NativeBridge bridge;
+ 
++  /// Names and drawn characters for the emergency contacts.
++  final ContactPeople people;
++
+   @override
+   State<HomeScreen> createState() => _HomeScreenState();
+ }
+@@ -182,7 +186,7 @@
+                         const Divider(height: 0.5, thickness: 0.5, indent: 16),
+                         _MenuRow(
+                           label: t('contacts.title'),
+-                          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ContactsScreen(api: widget.api, i18n: widget.i18n))),
++                          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ContactsScreen(api: widget.api, people: widget.people, i18n: widget.i18n))),
+                         ),
+                         const Divider(height: 0.5, thickness: 0.5, indent: 16),
+                         _MenuRow(
+diff --git a/mobile/android/app/src/main/AndroidManifest.xml b/mobile/android/app/src/main/AndroidManifest.xml
+--- a/mobile/android/app/src/main/AndroidManifest.xml
++++ b/mobile/android/app/src/main/AndroidManifest.xml
+@@ -13,6 +13,10 @@
+     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+     <uses-permission android:name="android.permission.VIBRATE" />
+     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
++    <!-- The drink-water reminder fires through exact alarms when the system allows them,
++         so a schedule survives doze and battery saving. Dropped schedules are re-armed
++         inside the app on every open (see scheduleWaterReminder). -->
++    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+     <!-- Health Connect: the accurate heart-rate source on the phone. Read-only, one data type. -->
+     <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
+     <!-- The app's own pulse reading: fingertip over the rear lens, torch on. Optional hardware. -->
+diff --git a/mobile/assets/i18n/en.json b/mobile/assets/i18n/en.json
+--- a/mobile/assets/i18n/en.json
++++ b/mobile/assets/i18n/en.json
+@@ -88,12 +88,14 @@
+   "health.hosp_no_phone": "No phone number saved on the map yet",
+   "health.hosp_km": "{n} km away",
+   "health.call": "Call",
++  "health.heart_cam": "The app reads your pulse itself: press a fingertip gently over the front camera, at the top of the screen, then tap the button below. No health app needed.",
++  "health.measure_nofeed": "The camera did not send any picture. Make sure the screen is bright, you are not on a call, and try again.",
+   "health.measure": "Measure with the camera",
+   "health.measure_again": "Take the reading again",
+   "health.measure_left": "Hold still — {n} s left",
+-  "health.measure_tip": "Cover the small back camera and its light completely with your fingertip. Hand relaxed, nothing moving — that is how the reading comes out clean.",
++  "health.measure_tip": "Press your fingertip over the front camera at the top of the screen until it fully covers it. Keep the phone facing you, screen bright, hand still - the bright screen lights the reading.",
+   "health.measure_fail": "That reading was not strong enough. Press the fingertip firmly over the lens, sit still, and try again.",
+-  "health.measure_no_cam": "No working back camera, or the camera permission was not given. Check the camera permission and try again.",
++  "health.measure_no_cam": "No working camera, or the camera permission was not given. Check the camera permission and try again.",
+   "health.hosp_location": "We could not get your location yet. Turn on location, step outside or near a window, and open this tab again.",
+   "map.you_are_at": "You are at",
+   "map.unknown_place": "Finding the name of this place...",
+@@ -148,6 +150,9 @@
+   "contacts.declined": "Declined",
+   "contacts.declined_note": "A contact declined. Add someone else so at least three people can help.",
+   "contacts.load_failed": "Could not load your contacts. Check your connection.",
++  "contacts.characters": "Tap a contact to give them their own name and pick one of 20 friendly security characters. Names and characters are saved on this phone only.",
++  "contacts.name_hint": "Their name (optional)",
++  "contacts.save": "Save",
+   "contacts.retry": "Try again",
+   "inbox.title": "Messages",
+   "inbox.quiet": "No new messages",
+diff --git a/mobile/assets/i18n/ha.json b/mobile/assets/i18n/ha.json
+--- a/mobile/assets/i18n/ha.json
++++ b/mobile/assets/i18n/ha.json
+@@ -87,12 +87,14 @@
+   "health.hosp_no_phone": "Ba a zuba lambar waya a taswira tukuna",
+   "health.hosp_km": "Kusancin {n} km",
+   "health.call": "Kira",
++  "health.heart_cam": "App din kanta zai iya karanta bugun zuciya: ka danna yatsarka a kan kyamarar gaba, a sama ta allo, ka danna maballin da ke kasa. Ba a bukatar app na lafiya.",
++  "health.measure_nofeed": "Kyamarar ba ta aika hoto ko daya ba. Ka duba allo yana haske, ba kana waya ba, ka sake gwadawa.",
+   "health.measure": "Auna da kyamarar",
+   "health.measure_again": "Sake auna",
+   "health.measure_left": "Ka kasance a jinkiri — dakika {n} sun rage",
+-  "health.measure_tip": "Rufe kyamarar baya da haskenta gaba daya da yatsarka. Hannu laushi, babu motsi — haka karatu ya fito kyau.",
++  "health.measure_tip": "Ka danna yatsarka a kan kyamarar gaba a sama ta allo har ta cika rufa. Ka riqa wayar ka na gabanka, allo yana haske, hannu a jinkiri - hasken allo ne zai haskaka karatu.",
+   "health.measure_fail": "Karatu bai isa ba. Ka danna yatsarka sosai a kan kyamarar, zauna a jinkiri, ka sake gwadawa.",
+-  "health.measure_no_cam": "Babu kyamarar baya mai aiki, ko ba a ba da izinin kyamarar ba. Ka duba izinin kyamarar, ka sake gwadawa.",
++  "health.measure_no_cam": "Babu kyamarar mai aiki, ko ba a ba da izinin kyamarar ba. Ka duba izinin kyamarar, ka sake gwadawa.",
+   "health.hosp_location": "Ba mu sami wurin da kake ba tukuna. Ka kunna wurin (location), ka fita waje ko kusa da taga, ka sake bude sashen nan.",
+   "tabs.police": "’Yan sanda",
+   "map.you_are_at": "Kana a",
+@@ -148,6 +150,9 @@
+   "contacts.declined": "Ya ƙi",
+   "contacts.declined_note": "Wani ya ƙi. Ƙara wani don aƙalla mutum uku su iya taimaka maka.",
+   "contacts.load_failed": "Ba a iya ɗora abokanka ba. Duba haɗinka.",
++  "contacts.characters": "Ka danna lamba ka ba ta sunanta, ka zabi daya daga cikin halittu 20 masu kyau na tsaro. Suna da halittu ana ajiye su a wayarka kadai.",
++  "contacts.name_hint": "Sunansu (baza tilas ba)",
++  "contacts.save": "Ajiye",
+   "contacts.retry": "Sake gwadawa",
+   "inbox.title": "Saƙonni",
+   "inbox.quiet": "Babu sabon saƙo",
+diff --git a/mobile/assets/i18n/ig.json b/mobile/assets/i18n/ig.json
+--- a/mobile/assets/i18n/ig.json
++++ b/mobile/assets/i18n/ig.json
+@@ -87,12 +87,14 @@
+   "health.hosp_no_phone": "Enweghá»‹ ná»mba ekwentá»‹ edekwa na mapá»¥ ahá»¥",
+   "health.hosp_km": "á»Œ ná» n'ogologo {n} km",
+   "health.call": "Kpá»á»",
++  "health.heart_cam": "Appụ a na-agụ mkpụ obi gị n'onwe ya: tinye mkpịsị aka gị n'elu kyamarọ ihu, n'elu ekranị, pịa bọtịnụ dị n'okpuru. Ọ chọrọghị appụ ahụ ike.",
++  "health.measure_nofeed": "Kyamarọ ahụ ezitereghị foto ọ bụla. Lee na ekranị gbara ọkụ, ị nọghị n'oku ekwentị, gbalịa ọzọ.",
+   "health.measure": "Gụọ mkpụ obi gị na kyamarọ",
+   "health.measure_again": "Gụọ ya ọzọ",
+   "health.measure_left": "Jụnọ dị jụụ — sekọnd {n} fụdụrụ",
+-  "health.measure_tip": "Mechie kyamarọ azụ na ọkụ ya kpamkpam na mkpịsị aka gị. Aka dịla mfe, adịghị agagharị — otu a ka ọgụgụ ga-amasị.",
++  "health.measure_tip": "Tinye mkpịsị aka gị n'elu kyamarọ ihu dị n'elu ekranị ruo mgbe ọ mechaa. Jide ekwentị ahụ n'ihu gị, ekranị gbara ọkụ, mkpịsị aka dị jụụ - ọkụ ekranị ka ọgụgụ ahụ na-agbara.",
+   "health.measure_fail": "Ọgụgụ ahụ adịghi ike. Bibịa mkpịsị aka gị nke ọma na lens ahụ, jụnọ dị jụụ, gbalịa ọzọ.",
+-  "health.measure_no_cam": "Enweghị kyamarọ azụ na-arụ ọrụ, ma ọ bụ enyeghị ikike kyamarọ. Lelee ikike kyamarọ, gbalịa ọzọ.",
++  "health.measure_no_cam": "Enweghị kyamarọ na-arụ ọrụ, ma ọ bụ enyeghị ikike kyamarọ. Lelee ikike kyamarọ, gbalịa ọzọ.",
+   "health.hosp_location": "Anyị enwetaghị ebe ị nọ ugbu a. Tanyere ebe a (location) etu o si arụ ọrụ, pụta n'èzí ma ọ bụ nso windọ, megharịa tab a.",
+   "tabs.police": "Ndị uwe ojii",
+   "map.you_are_at": "Ị nọ na",
+@@ -148,6 +150,9 @@
+   "contacts.declined": "Jụrụ",
+   "contacts.declined_note": "Otu onye jụrụ. Tinye onye ọzọ ka mmadụ atọ nwee ike inyere gị aka.",
+   "contacts.load_failed": "Enweghị ike ibuga ndị gị. Lelee njikọ gị.",
++  "contacts.characters": "Pịa onye ahụ ka ị nye ya aha ya onwe, họrọ otu n'ime ndị nche 20 ntụrụndụ. Aha na ndị nche ana-edekọ ha na ekwentị a naanị.",
++  "contacts.name_hint": "Aha ya (ọnọghị mkpa)",
++  "contacts.save": "Chekwaa",
+   "contacts.retry": "Nwaa ọzọ",
+   "inbox.title": "Ozi",
+   "inbox.quiet": "Enweghị ozi ọhụrụ",
+diff --git a/mobile/assets/i18n/pcm.json b/mobile/assets/i18n/pcm.json
+--- a/mobile/assets/i18n/pcm.json
++++ b/mobile/assets/i18n/pcm.json
+@@ -87,12 +87,14 @@
+   "health.hosp_no_phone": "No phone number dey saved on di map yet",
+   "health.hosp_km": "{n} km away",
+   "health.call": "Call",
++  "health.heart_cam": "Di app go check your heart by imsef: press your finger on top di front camera, for di top of di screen, den tap di button below. No health app dey needed.",
++  "health.measure_nofeed": "Di camera no send any picture at all. Make sure your screen dey bright, you no dey call, den try again.",
+   "health.measure": "Check your heart with di camera",
+   "health.measure_again": "Check am again",
+   "health.measure_left": "Dey still — {n} s remain",
+-  "health.measure_tip": "Cover di small back camera and im light with your finger finish. Hand soft, no shaking — na how di reading go come out clean.",
++  "health.measure_tip": "Press your finger on top di front camera for di top of di screen until e cover am finish. Hold di phone facing you, screen bright, hand still - na di bright screen go light di reading.",
+   "health.measure_fail": "Dat reading no strong enough. Press your finger wella on top di lens, sit still, try again.",
+-  "health.measure_no_cam": "No working back camera, or camera permission no dey given. Check di camera permission and try again.",
++  "health.measure_no_cam": "No working camera, or camera permission no dey given. Check di camera permission and try again.",
+   "health.hosp_location": "We no see where you dey yet. Turn on location, waka go outside or near window, den open dis tab again.",
+   "tabs.police": "Police",
+   "map.you_are_at": "You dey",
+@@ -148,6 +150,9 @@
+   "contacts.declined": "E refuse",
+   "contacts.declined_note": "Person refuse. Add another person make at least three fit help you.",
+   "contacts.load_failed": "We no fit load your people. Check your network.",
++  "contacts.characters": "Tap any contact give am im own name, and pick one of di 20 fine security characters. Name and character dey save for dis phone only.",
++  "contacts.name_hint": "Dem name (no compulsory)",
++  "contacts.save": "Save am",
+   "contacts.retry": "Try again",
+   "inbox.title": "Messages",
+   "inbox.quiet": "No new message",
+diff --git a/mobile/assets/i18n/yo.json b/mobile/assets/i18n/yo.json
+--- a/mobile/assets/i18n/yo.json
++++ b/mobile/assets/i18n/yo.json
+@@ -87,12 +87,14 @@
+   "health.hosp_no_phone": "Nomba fÃ³nÃ¹ kÃ² tÃ­Ã­ kÃ¡ri mÃ pÃ¬",
+   "health.hosp_km": "NgbÃ  {n} km jinÃ¡",
+   "health.call": "PÃ¨",
++  "health.heart_cam": "Àpplẹ́ yìí lè ka ibú okan rẹ fúnra rẹ̀: fi ọmọ́ ẹ̀yín rẹ bọ́ kàmẹ́rà ìwájú, lókè ibòjú, tẹ̀ bọ́tìnnì tí ó wà ní isalẹ̀. Kò nílo àpplẹ́ ìlera.",
++  "health.measure_nofeed": "Kàmẹ́rà kò fi àwòrán ránṣẹ́ rárá. Rii dájú pé ibòjú rẹ gbà ìmọ́lẹ̀, o kì í wà nínú ìpè fọ́n, tún gbiyanjú.",
+   "health.measure": "Ka ibú okan rẹ pẹ̀lú kàmẹ́rà",
+   "health.measure_again": "Ka ibú okan rẹ lẹ́ẹ̀kan sí",
+   "health.measure_left": "Dúró déédé — ìṣẹ́jú {n} ṣòkù",
+-  "health.measure_tip": "Fi ọmọ́ ẹ̀yín rẹ bọ́ kàmẹ́rà tí ó wà ní ẹ̀yìn pẹ̀lú ìmọ́lẹ̀ rẹ̀ fúnra rẹ. Ọwọ́ dákẹ́, kò sí ìgbegbó — bẹ́ẹ̀ ni ìwọ̀n ó dọ́tí.",
++  "health.measure_tip": "Fi ọmọ́ ẹ̀yín rẹ bọ́ kàmẹ́rà ìwájú tí ó wà lókè ibòjú títí tí ọmọ́ ẹ̀yín ó fi bọ́ ọ́ mọ́ pátápátá. Jẹ́ kì í fọ́n ṣojú ọ, ibòjú gbà ìmọ́lẹ̀, ọwọ́ dúró - ìmọ́lẹ̀ ibòjú ni yóò fún ìmọ́ àgbékalẹ̀.",
+   "health.measure_fail": "Ìwọ̀n yìí kò tó lágbára. Tẹ́ ọmọ́ ẹ̀yín rẹ dára mú lórí lẹ́nsì náà, jọ̀kọ́ dúró, tún gbiyanjú.",
+-  "health.measure_no_cam": "Kò sí kàmẹ́rà tí ó ń ṣiṣẹ́ ní ẹ̀yìn, tàbí wọn kò fúnnilọ́wọ́ kàmẹ́rà. Ṣàyèwò ìyàwò fún kàmẹ́rà, tún gbiyanjú.",
++  "health.measure_no_cam": "Kò sí kàmẹ́rà tí ó ń ṣiṣẹ́, tàbí wọn kò fúnnilọ́wọ́ kàmẹ́rà. Ṣàyèwò ìyàwò fún kàmẹ́rà, tún gbiyanjú.",
+   "health.hosp_location": "A kò tì í rí ipò rẹ. Tan ipò rẹ sí, jáde sódè tàbí sún mọ́ fèrèse, ṣí tab yìí lẹ́ẹ̀kan sí.",
+   "tabs.police": "Ọlọ́pàá",
+   "map.you_are_at": "O wà ní",
+@@ -148,6 +150,9 @@
+   "contacts.declined": "Ó kọ̀",
+   "contacts.declined_note": "Ẹnìkan kọ̀. Fi ẹlòmíràn kún kí ènìyàn mẹ́ta lè ràn ọ́ lọ́wọ́.",
+   "contacts.load_failed": "Kò lè gbé àwọn olùkàn sí rẹ jáde. Ṣàyẹ̀wò ìsopọ̀ rẹ.",
++  "contacts.characters": "Tẹ olùbáṣọ́tẹ̀lẹ́ kọ̀ọ̀kan láti fún un ní orúkọ tirẹ̀, yan ọ̀kan lára ẹ̀dá ìbáṣọ́tẹ̀lẹ́ 20 tó lààmì-yẹ. Orúkọ àti ẹ̀dá wà ní pamọ́ sí fọn yìí péré.",
++  "contacts.name_hint": "Orúkọ wọn (tí o bá fẹ́)",
++  "contacts.save": "Fipamọ́",
+   "contacts.retry": "Gbìyànjú lẹ́ẹ̀kan sí i",
+   "inbox.title": "Àwọn ìfiránṣẹ́",
+   "inbox.quiet": "Kò sí ìfiránṣẹ́ tuntun",
