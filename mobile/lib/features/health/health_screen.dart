@@ -233,6 +233,13 @@ class _HealthScreenState extends State<HealthScreen> {
             Padding(padding: const EdgeInsets.all(16), child: Text(t('health.hosp_location'), textAlign: TextAlign.center, style: const TextStyle(fontSize: 14, height: 1.45))),
           ] else if (h.hospitalsFailed && list.isEmpty) ...[
             Padding(padding: const EdgeInsets.all(16), child: Text(t('health.hosp_error'), textAlign: TextAlign.center, style: const TextStyle(fontSize: 14, height: 1.45))),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: OutlinedButton(
+                onPressed: () => unawaited(h.loadHospitals(force: true)),
+                child: Text(t('contacts.retry')),
+              ),
+            ),
           ] else if (list.isEmpty) ...[
             Padding(padding: const EdgeInsets.all(16), child: Text(t('health.hosp_none'), textAlign: TextAlign.center, style: TextStyle(fontSize: 14, height: 1.45, color: Flat.muted(context)))),
           ] else

@@ -27,12 +27,15 @@ class NearbyHospital {
   final String? phone;
 }
 
-/// Free mirrors of the OpenStreetMap query service, tried in order: the main one rate-limits
-/// and hiccups on mobile networks, so no single failure should be able to blank the list.
+/// Free mirrors of the OpenStreetMap query service. Instead of trying them one after
+/// another (up to six slow timeouts stacked is what blanked the list before), all are
+/// raced at once and whichever answers first wins - worst case costs one timeout, not six.
 const _overpassEndpoints = <String>[
   'https://overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
   'https://overpass.private.coffee/api/interpreter',
+  'https://overpass.osm.ch/api/interpreter',
+  'https://overpass.openstreetmap.ru/api/interpreter',
   'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
 ];
 
@@ -70,6 +73,12 @@ class HealthController extends ChangeNotifier with WidgetsBindingObserver {
   List<NearbyHospital> hospitals = const [];
   bool hospitalsLoading = false;
   bool hospitalsFailed = false;
+
+  /// How many automatic re-tries the last hospital failure has spawned (max
+  /// [_hospMaxRetries]); reset to 0 on every success so a temporary hiccup never
+  /// gives up permanently.
+  int _hospRetries = 0;
+  Timer? _hospRetryTimer;
 
   /// true when the map service answered fine but no location could be had - a different
   /// problem with a different advice than "service unreachable".
@@ -110,6 +119,8 @@ class HealthController extends ChangeNotifier with WidgetsBindingObserver {
   static const _chronicCooldown = Duration(hours: 6);
   static const _episodeWindow = Duration(minutes: 60);
   static const _hospitalsRefetch = Duration(minutes: 10);
+  static const _hospMaxRetries = 2;
+  static const _hospRetryDelay = Duration(seconds: 20);
 
   void start() {
     if (_poll != null) return;
@@ -352,7 +363,7 @@ class HealthController extends ChangeNotifier with WidgetsBindingObserver {
   /// mirrors, so one busy server cannot blank the list). Refreshed at most every ten minutes.
   ///
   /// Two lessons from the field are built in:
-  ///  * every step gets a short timeout (location 8 s per attempt, mirrors 25 s each) so
+  ///  * every step gets a short timeout (location 8 s per attempt, the mirror race 45 s) so
   ///    the whole load can never crawl for minutes before anything shows, and
   ///  * if the location comes in rough or late, we still use it - a slightly less exact
   ///    area is far better than no hospitals shown.
@@ -386,21 +397,36 @@ class HealthController extends ChangeNotifier with WidgetsBindingObserver {
         return;
       }
       final here = LatLng(f.lat, f.lon);
-      List<NearbyHospital>? got;
-      for (final url in _overpassEndpoints) {
+      // Race all mirrors at once instead of walking them one by one: the first one that
+      // answers with usable data wins and releases everyone else, so the whole run costs
+      // at most one timeout instead of one per mirror.
+      final done = Completer<List<NearbyHospital>?>();
+      var pending = _overpassEndpoints.length;
+      Future<void> race(String url) async {
         try {
-          got = await _overpassQuery(url, here).timeout(const Duration(seconds: 25));
-          if (got != null) break;
+          final r = await _overpassQuery(url, here).timeout(const Duration(seconds: 45));
+          if (r != null && !done.isCompleted) done.complete(r);
         } catch (_) {
-          got = null;
+          // this mirror is out; the others keep racing
+        } finally {
+          pending--;
+          if (pending <= 0 && !done.isCompleted) done.complete(null);
         }
       }
+      for (final url in _overpassEndpoints) {
+        unawaited(race(url));
+      }
+      final got = await done.future;
       if (got == null) {
         hospitalsFailed = true;
+        // Mobile networks trip far more often than the mirrors actually being down:
+        // quietly try again a little later instead of just showing an error.
+        _scheduleHospRetry();
       } else {
         hospitals = got;
         _hospitalsAt = DateTime.now();
         hospitalsFailed = false;
+        _hospRetries = 0;
       }
     } catch (_) {
       // Nothing may leave this spinner stuck: any surprise ends as a refreshable error.
@@ -413,23 +439,69 @@ class HealthController extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
+  /// When the map service could not be reached at all, quietly try again a bit later -
+  /// a busy mirror or a flaky mobile link is much more common than genuinely no data.
+  void _scheduleHospRetry() {
+    if (_hospRetries >= _hospMaxRetries) return;
+    _hospRetries++;
+    _hospRetryTimer?.cancel();
+    _hospRetryTimer = Timer(_hospRetryDelay, () {
+      _hospRetryTimer = null;
+      unawaited(loadHospitals(force: true));
+    });
+  }
+
   /// One Overpass mirror; returns null when that mirror answers badly (bad code, timeout).
   Future<List<NearbyHospital>?> _overpassQuery(String url, LatLng here) async {
-    const radius = 15000.0;
-    final q = '[out:json][timeout:25];('
+    const radius = 10000.0;
+    final q = '[out:json][timeout:20];('
         'node(around:\$radius,${here.latitude},${here.longitude})["amenity"~"^(hospital|clinic)\$"];'
         'way(around:\$radius,${here.latitude},${here.longitude})["amenity"~"^(hospital|clinic)\$"];'
-        ');out center tags;';
-    final res = await http
-        .post(
-          Uri.parse(url),
-          headers: const {'User-Agent': 'SentriApp/1.0 (health tab hospitals)'},
-          body: {'data': q},
-        )
-        .timeout(const Duration(seconds: 25));
-    if (res.statusCode != 200 || res.bodyBytes.isEmpty) return null;
-    final j = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
-    return _hospitalsFromOverpass(j, here);
+        ');out center tags 150;';
+    Future<List<NearbyHospital>?> read(http.Response res) async {
+      if (res.statusCode != 200 || res.bodyBytes.isEmpty) return null;
+      try {
+        final j = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+        return _hospitalsFromOverpass(j, here);
+      } catch (_) {
+        return null;
+      }
+    }
+    try {
+      final res = await http
+          .post(
+            Uri.parse(url),
+            headers: const {'User-Agent': 'SentriApp/1.0 (health tab hospitals)'},
+            body: {'data': q},
+          )
+          .timeout(const Duration(seconds: 40));
+      final got = await read(res);
+      if (got != null) return got;
+      if (res.statusCode >= 400 && res.statusCode < 500) {
+        return _overpassGet(url, q, here);
+      }
+      return null;
+    } catch (_) {
+      return _overpassGet(url, q, here);
+    }
+  }
+
+  /// Some mirrors refuse the form-posted query on mobile networks but accept the same
+  /// query as a plain GET link; worth one more exact attempt before giving up.
+  Future<List<NearbyHospital>?> _overpassGet(String url, String q, LatLng here) async {
+    try {
+      final res = await http
+          .get(
+            Uri.parse('$url?data=${Uri.encodeQueryComponent(q)}'),
+            headers: const {'User-Agent': 'SentriApp/1.0 (health tab hospitals)'},
+          )
+          .timeout(const Duration(seconds: 40));
+      if (res.statusCode != 200 || res.bodyBytes.isEmpty) return null;
+      final j = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+      return _hospitalsFromOverpass(j, here);
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<List<NearbyHospital>> _hospitalsFromOverpass(Map<String, dynamic> j, LatLng here) async {
@@ -459,6 +531,8 @@ class HealthController extends ChangeNotifier with WidgetsBindingObserver {
   void dispose() {
     _poll?.cancel();
     _poll = null;
+    _hospRetryTimer?.cancel();
+    _hospRetryTimer = null;
     settings.removeListener(_onSettings);
     try {
       WidgetsBinding.instance.removeObserver(this);

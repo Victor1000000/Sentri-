@@ -104,13 +104,21 @@ class HeartCamera {
     } catch (_) {}
     await _close();
 
-    final n = _samples.length;
-    frames = n;
-    if (n < 60 || _times.isEmpty) return null;
-    final span = _times.last - _times.first;
+    // Skip the first ~2 seconds: that is when the finger press is still settling and
+    // the exposure is still hunting - analysis runs only on the settled stream.
+    var i0 = 0;
+    while (i0 < _times.length && _times[i0] < 2.0) {
+      i0++;
+    }
+    final samples = _samples.sublist(i0);
+    final times = _times.sublist(i0);
+    final n = samples.length;
+    frames = _samples.length;
+    if (n < 48 || times.isEmpty) return null;
+    final span = times.last - times.first;
     if (span < 5) return null;
     final fps = n / span;
-    final ys = detrend(smoothMedian3(_samples), (fps * 1.5).round().clamp(3, n));
+    final ys = detrend(smoothMedian3(samples), (fps * 1.5).round().clamp(3, n));
     final bpm = bpmFromSamples(ys, fps);
     if (bpm == null) return null;
     return bpm.round().clamp(30, 220);

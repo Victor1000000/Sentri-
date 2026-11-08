@@ -82,7 +82,7 @@
   "health.water_title": "Time to drink water",
   "health.water_body": "Small sips now go keep you steady for di day.",
   "health.hospitals": "Hospitals near you",
-  "health.hosp_error": "Di map service no reach. Check your data and open di Health tab again.",
+  "health.hosp_error": "Di map service dey slow dis time. We still dey try for background; check your data, or press Try again.",
   "health.hosp_none": "No hospital phone number dey saved nearby yet.",
   "health.hosp_no_phone": "No phone number dey saved on di map yet",
   "health.hosp_km": "{n} km away",
