@@ -76,7 +76,7 @@ Future<void> scheduleWaterReminder(int minutes, String title, String body) async
     // own page) and keep the alarm-clock mode, which still rings on time in practice.
     var exactAllowed = false;
     try {
-      exactAllowed = await android?.canScheduleExactAlarms() ?? false;
+      exactAllowed = await android?.canScheduleExactNotifications() ?? false;
       if (!exactAllowed) await android?.requestExactAlarmsPermission();
     } catch (_) {
       exactAllowed = false;
