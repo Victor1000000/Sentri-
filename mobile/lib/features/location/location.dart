@@ -63,13 +63,15 @@ class GeolocatorSource implements LocationSource {
     }
   }
 
-  /// A reading this good (in metres) is as good as a phone gets outdoors, so there is no need to wait longer.
-  /// 12 m was measured too loose on real phones: a "good enough" fix that was actually a weak GPS read ended
-  /// up drawn as ±100 m on the map. 8 m keeps waiting briefly for the honest pinpoint.
-  static const _goodEnoughM = 8.0;
+  /// A reading this good (in metres) is as good as a phone gets outdoors, so there is no need
+  /// to wait longer. 8 m was measured too strict on real phones: the pinpoint kept waiting for
+  /// a perfect satellite pass the phone never gives, so the map showed an old or wrong spot
+  /// (people saw it "about 300 m off"). 15 m keeps the honest fast-fix behaviour - accuracy
+  /// at that level is still within shouting distance, and the reading is fresh.
+  static const _goodEnoughM = 15.0;
 
   @override
-  Future<GeoFix?> preciseFix({Duration timeout = const Duration(seconds: 40)}) async {
+  Future<GeoFix?> preciseFix({Duration timeout = const Duration(seconds: 25)}) async {
     GeoFix? best;
     final done = Completer<void>();
     StreamSubscription<Position>? sub;

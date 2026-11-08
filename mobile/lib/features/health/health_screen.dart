@@ -9,11 +9,11 @@ import '../../core/i18n/i18n.dart';
 import '../../core/widgets/flat.dart';
 import 'health_controller.dart';
 
-/// The Health tab: honest heart-rate readings - straight from the person's fingertip with
-/// the camera when no health app is around (plus Health Connect when a band or health app
-/// is feeding it), drink-water reminders at the person's own pace, and hospitals near them -
-/// nearest first, with a call button. The same calm card look as the rest of the app: big
-/// number, plain words, nothing loud.
+/// The Health tab: heart-rate readings taken by the app itself - fingertip over the
+/// front camera, lit by the screen - plus a passive read of Health Connect when a band
+/// or health app is feeding it, drink-water reminders at the person's own pace, and
+/// hospitals near them - nearest first, with a call button. The same calm card look as
+/// the rest of the app: big number, plain words, nothing loud.
 class HealthScreen extends StatefulWidget {
   const HealthScreen({super.key, required this.health, required this.i18n});
   final HealthController health;
@@ -27,7 +27,8 @@ class _HealthScreenState extends State<HealthScreen> {
   @override
   void initState() {
     super.initState();
-    unawaited(widget.health.loadHospitals());
+    // Re-arms the water reminder on every open and refreshes hospitals when they are stale.
+    unawaited(widget.health.onHealthTabOpen());
   }
 
   String t(String k, [Map<String, String> a = const {}]) => widget.i18n.t(k, a);
@@ -75,46 +76,37 @@ class _HealthScreenState extends State<HealthScreen> {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           if (h.measuring) ...[
             _measureArea(context, cs),
-          ] else if (h.connected == null) ...[
-            const LinearProgressIndicator(minHeight: 2),
-            const SizedBox(height: 8),
-          ] else if (h.bpm != null) ...[
-            Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-              Text('${h.bpm}', style: const TextStyle(fontSize: 46, fontWeight: FontWeight.w800, height: 1)),
-              const SizedBox(width: 8),
-              Padding(padding: const EdgeInsets.only(bottom: 7), child: Text('bpm', style: TextStyle(fontSize: 14, color: Flat.muted(context), fontWeight: FontWeight.w600))),
-              const Spacer(),
-              Icon(Icons.monitor_heart_outlined, size: 22, color: cs.primary),
-            ]),
-            const SizedBox(height: 6),
-            if (h.baseline != null) Text(t('health.heart_base', {'n': '${h.baseline}'}), style: TextStyle(fontSize: 13.5, color: Flat.muted(context))),
-            const SizedBox(height: 4),
-            Text(t('health.heart_watch'), style: const TextStyle(fontSize: 13, height: 1.4)),
           ] else ...[
-            Text(
-              h.connected == false ? t('health.heart_none') : t('health.heart_perm'),
-              style: const TextStyle(fontSize: 14, height: 1.45),
-            ),
-            if (h.connected == true) ...[
-              const SizedBox(height: 14),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: FilledButton(
-                  style: FilledButton.styleFrom(minimumSize: const Size(0, 44), padding: const EdgeInsets.symmetric(horizontal: 22)),
-                  onPressed: () => unawaited(h.authorize()),
-                  child: Text(t('health.allow')),
-                ),
-              ),
+            // The measure flow is the primary path; no "connect a health app" homework.
+            // A saved reading (from the camera or a band via Health Connect) still shows.
+            if (h.bpm != null) ...[
+              Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                Text('${h.bpm}', style: const TextStyle(fontSize: 46, fontWeight: FontWeight.w800, height: 1)),
+                const SizedBox(width: 8),
+                Padding(padding: const EdgeInsets.only(bottom: 7), child: Text('bpm', style: TextStyle(fontSize: 14, color: Flat.muted(context), fontWeight: FontWeight.w600))),
+                const Spacer(),
+                Icon(Icons.monitor_heart_outlined, size: 22, color: cs.primary),
+              ]),
+              if (h.baseline != null) ...[
+                const SizedBox(height: 6),
+                Text(t('health.heart_base', {'n': '${h.baseline}'}), style: TextStyle(fontSize: 13.5, color: Flat.muted(context))),
+              ],
+              const SizedBox(height: 4),
+              Text(t('health.heart_watch'), style: const TextStyle(fontSize: 13, height: 1.4)),
+            ] else ...[
+              Text(t('health.heart_cam'), style: const TextStyle(fontSize: 14, height: 1.45)),
             ],
-          ],
-          // The app measures the person directly - camera + torch on the fingertip. It
-          // stays available even while Health Connect is waiting for permission.
-          const SizedBox(height: 14),
-          if (h.measureFailed && h.noCamera)
-            Text(t('health.measure_no_cam'), textAlign: TextAlign.center, style: TextStyle(fontSize: 13.5, height: 1.4, color: cs.error.withValues(alpha: 0.85)))
-          else if (h.measureFailed)
-            Text(t('health.measure_fail'), textAlign: TextAlign.center, style: TextStyle(fontSize: 13.5, height: 1.4, color: Flat.muted(context))),
-          if (!h.measuring) ...[
+            // Honest failure notes, each with its own advice.
+            if (h.measureFailed && h.noCamera) ...[
+              const SizedBox(height: 12),
+              Text(t('health.measure_no_cam'), textAlign: TextAlign.center, style: TextStyle(fontSize: 13.5, height: 1.4, color: cs.error.withValues(alpha: 0.85))),
+            ] else if (h.measureFailed && h.measureNofeed) ...[
+              const SizedBox(height: 12),
+              Text(t('health.measure_nofeed'), textAlign: TextAlign.center, style: TextStyle(fontSize: 13.5, height: 1.4, color: cs.error.withValues(alpha: 0.85))),
+            ] else if (h.measureFailed) ...[
+              const SizedBox(height: 12),
+              Text(t('health.measure_fail'), textAlign: TextAlign.center, style: TextStyle(fontSize: 13.5, height: 1.4, color: Flat.muted(context))),
+            ],
             const SizedBox(height: 14),
             Center(
               child: FilledButton.icon(
@@ -133,24 +125,48 @@ class _HealthScreenState extends State<HealthScreen> {
   Widget _measureArea(BuildContext context, ColorScheme cs) {
     final h = widget.health;
     final ctrl = h.cameraPreview;
+    // A big warm, near-white panel: with the finger pressed over the front camera, this
+    // bright surface IS the light source for the reading. The small round window shows
+    // the live stream so frames keep flowing.
     return Column(crossAxisAlignment: CrossAxisAlignment.center, children: [
       Text(t('health.measure_left', {'n': '${h.measureLeft}'}),
           style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w800, height: 1, fontFeatures: [FontFeature.tabularFigures()])),
       const SizedBox(height: 12),
       Center(
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(18),
-          child: SizedBox(
-            width: 150,
-            height: 235,
-            child: ctrl == null
-                ? ColoredBox(color: Flat.hairline(context))
-                : CameraPreview(ctrl),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(20, 22, 20, 18),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFDF1E0),
+            gradient: const LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Color(0xFFFFFBF4), Color(0xFFFBEEDC)],
+            ),
+            borderRadius: BorderRadius.circular(22),
           ),
+          child: Column(children: [
+            ClipOval(
+              child: Container(
+                width: 130,
+                height: 130,
+                decoration: BoxDecoration(
+                  border: Border.all(color: const Color(0x338A6D3B), width: 3),
+                ),
+                child: ctrl == null
+                    ? const ColoredBox(color: Color(0xFFFFF6EA))
+                    : CameraPreview(ctrl),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              t('health.measure_tip'),
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 13.5, height: 1.45, color: Colors.black.withValues(alpha: 0.78)),
+            ),
+          ]),
         ),
       ),
-      const SizedBox(height: 12),
-      Text(t('health.measure_tip'), textAlign: TextAlign.center, style: const TextStyle(fontSize: 13.5, height: 1.45)),
       const SizedBox(height: 12),
       const LinearProgressIndicator(minHeight: 2),
     ]);

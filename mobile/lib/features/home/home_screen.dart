@@ -19,10 +19,11 @@ import '../../core/widgets/glass.dart';
 import '../checkin/checkin_controller.dart';
 import '../onboarding/permissions_panel.dart';
 import '../sos/pin_pad.dart';
+import '../sos/contact_people.dart';
 import '../sos/sos_controller.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key, required this.sos, required this.settings, required this.i18n, required this.bridge, required this.api, required this.inbox, required this.share, required this.checkin, required this.police});
+  const HomeScreen({super.key, required this.sos, required this.settings, required this.i18n, required this.bridge, required this.api, required this.inbox, required this.share, required this.checkin, required this.police, required this.people});
   final SentriApi api;
   final InboxController inbox;
   final ShareController share;
@@ -32,6 +33,9 @@ class HomeScreen extends StatefulWidget {
   final AppSettings settings;
   final I18n i18n;
   final NativeBridge bridge;
+
+  /// Names and drawn characters for the emergency contacts.
+  final ContactPeople people;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -182,7 +186,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                         const Divider(height: 0.5, thickness: 0.5, indent: 16),
                         _MenuRow(
                           label: t('contacts.title'),
-                          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ContactsScreen(api: widget.api, i18n: widget.i18n))),
+                          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ContactsScreen(api: widget.api, people: widget.people, i18n: widget.i18n))),
                         ),
                         const Divider(height: 0.5, thickness: 0.5, indent: 16),
                         _MenuRow(

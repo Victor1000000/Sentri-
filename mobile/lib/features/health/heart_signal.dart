@@ -3,12 +3,38 @@
 ///
 /// How it works: blood flowing under the skin changes how much light the finger
 /// reflects. The camera sees that as tiny brightness swings. This file turns those
-/// swings into beats per minute: drop the slow drift, check that the remaining wiggle
-/// is strong enough to trust, then find the swing spacing that best correlates with
-/// itself - that spacing, in seconds, is the beat.
+/// swings into beats per minute: blow away single-frame speckle, drop the slow drift,
+/// check that the remaining wiggle is strong enough to trust, then find the swing
+/// spacing that best correlates with itself - that spacing, in seconds, is the beat.
+///
+/// The search is patient: if the whole take does not give a confident answer, the same
+/// search runs again on its most recent slices, where the finger press has usually
+/// settled most.
 library;
 
 import 'dart:math' as math;
+
+/// Median of each sample and its two neighbours: kills one-frame white speckle
+/// (auto-exposure hiccups) without smearing the pulse rhythm.
+List<double> smoothMedian3(List<double> xs) {
+  final n = xs.length;
+  if (n == 0) return <double>[];
+  final out = List<double>.filled(n, 0);
+  for (var i = 0; i < n; i++) {
+    final a = i > 0 ? xs[i - 1] : xs[i];
+    final b = xs[i];
+    final c = i + 1 < n ? xs[i + 1] : xs[i];
+    final v = a >= b
+        ? (b >= c
+            ? b
+            : (a >= c ? c : a))
+        : (a >= c
+            ? a
+            : (c >= b ? b : c));
+    out[i] = v;
+  }
+  return out;
+}
 
 /// Removes slow drift (lighting changes, the finger pressing in and out): shifts each
 /// sample by the mean of the samples within `window` around it, keeping only the
@@ -30,21 +56,44 @@ List<double> detrend(List<double> xs, int window) {
   return out;
 }
 
-/// Estimates the pulse in beats per minute: finds the sample spacing (the "lag")
-/// whose self-correlation is strongest inside the possible heart range, and returns
-/// that spacing in seconds as a rate. Returns null when the signal is too short, too
-/// flat, or too noisy to trust - the app must show "could not read it" rather than
-/// invent a number.
+/// Estimates the pulse in beats per minute. Returns null when no slice of the take
+/// looks trustworthy - the app must show "could not read it" rather than invent a
+/// number.
 double? bpmFromSamples(
   List<double> ys,
   double fps, {
   double minBpm = 40,
   double maxBpm = 180,
-  double trust = 0.22,
-  double minWiggle = 0.35,
+  double trust = 0.18,
+  double minWiggle = 0.6,
+}) {
+  if (ys.length < 8 || fps <= 0) return null;
+
+  // The whole take first; then its most recent slices, where the finger press has
+  // usually settled most. Whichever slice gives a confident answer wins.
+  for (final seconds in _windows) {
+    final take = (fps * seconds).round();
+    final slice = take < ys.length ? ys.sublist(ys.length - take) : ys;
+    if (slice.length < 40) continue;
+    final r = _bpmOneWindow(slice, fps, minBpm: minBpm, maxBpm: maxBpm, trust: trust, minWiggle: minWiggle);
+    if (r != null) return r;
+  }
+  return null;
+}
+
+const _windows = <double>[999999.0, 24.0, 16.0];
+
+/// One autocorrelation search on one slice.
+double? _bpmOneWindow(
+  List<double> ys,
+  double fps, {
+  required double minBpm,
+  required double maxBpm,
+  required double trust,
+  required double minWiggle,
 }) {
   final n = ys.length;
-  if (n < 8 || fps <= 0) return null;
+  if (n < 8) return null;
 
   // Zero-mean.
   var mean = 0.0;

@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:camera/camera.dart' show CameraController;
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:health/health.dart';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
@@ -46,7 +47,7 @@ const _overpassEndpoints = <String>[
 ///  * keeps hospitals near the person ready to show and call.
 ///
 /// It never invents a number: with no source connected, it says so plainly.
-class HealthController extends ChangeNotifier {
+class HealthController extends ChangeNotifier with WidgetsBindingObserver {
   HealthController({required this.api, required this.settings, required this.location, required this.i18n});
   final SentriApi api;
   final AppSettings settings;
@@ -74,13 +75,17 @@ class HealthController extends ChangeNotifier {
   /// problem with a different advice than "service unreachable".
   bool hospitalsNoLocation = false;
 
-  // ---- the app's own pulse reading (camera + torch on the fingertip) ----
+  // ---- the app's own pulse reading (camera on the fingertip, screen light) ----
   final HeartCamera _camera = HeartCamera();
   bool measuring = false;
   int measureLeft = 0;
   int? cameraBpm;
   bool measureFailed = false;
   bool noCamera = false;
+
+  /// true when the last reading failed because the camera stream delivered no frames
+  /// at all (dark screen, camera busy) - different advice than a weak pulse.
+  bool measureNofeed = false;
 
   /// The active camera controller during a measurement - the screen shows its preview so
   /// frames keep flowing. Null when not measuring.
@@ -108,10 +113,41 @@ class HealthController extends ChangeNotifier {
 
   void start() {
     if (_poll != null) return;
+    WidgetsBinding.instance.addObserver(this);
     unawaited(_init());
     _poll = Timer.periodic(_pollEvery, (_) => unawaited(_pollOnce()));
     settings.addListener(_onSettings);
     _onSettings();
+  }
+
+  /// Re-arms the water reminder and refreshes hospitals when this tab is opened.
+  /// Both are cheap and idempotent; called from the Health screen's initState.
+  Future<void> onHealthTabOpen() async {
+    ensureWaterReminder();
+    if (hospitalsFailed || hospitalsNoLocation || hospitals.isEmpty) {
+      unawaited(loadHospitals(force: hospitalsFailed || hospitalsNoLocation));
+    }
+  }
+
+  /// The drink-water reminder is scheduled on the phone's alarm system, which the system
+  /// can drop after a reboot or a battery-saving purge. Re-arming it every time the app
+  /// becomes visible is how the reminder "sticks" - one fresh schedule each app open.
+  /// Water reminders must fire even though scheduled alarms on some phones quietly stop
+  /// after a while; scheduleWaterReminder makes them exact when the system allows it and
+  /// bumps itself back into shape whenever the app is opened (see ensureWaterReminder).
+  void ensureWaterReminder() {
+    unawaited(scheduleWaterReminder(
+      settings.waterMinutes,
+      i18n.t('health.water_title'),
+      i18n.t('health.water_body'),
+    ));
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      ensureWaterReminder();
+    }
   }
 
   void _onSettings() {
@@ -121,11 +157,7 @@ class HealthController extends ChangeNotifier {
       return;
     }
     _lastWaterKey = key;
-    unawaited(scheduleWaterReminder(
-      settings.waterMinutes,
-      i18n.t('health.water_title'),
-      i18n.t('health.water_body'),
-    ));
+    ensureWaterReminder();
     notifyListeners();
   }
 
@@ -278,13 +310,14 @@ class HealthController extends ChangeNotifier {
     }
   }
 
-  /// One pulse reading taken by the app itself: camera torch on, fingertip over the lens,
-  /// about thirty seconds, then the maths decides whether it can trust the numbers. The
-  /// result feeds the same display as Health Connect readings; no health app needed.
+  /// One pulse reading taken by the app itself: fingertip over the front camera with the
+  /// bright screen lighting it, about thirty seconds, then the maths decides whether it
+  /// can trust the numbers. No health app involved at any step.
   Future<void> measureWithCamera() async {
     if (measuring) return;
     measuring = true;
     measureFailed = false;
+    measureNofeed = false;
     noCamera = false;
     cameraBpm = null;
     measureLeft = HeartCamera.secondsTarget;
@@ -302,6 +335,9 @@ class HealthController extends ChangeNotifier {
     measureLeft = 0;
     noCamera = _camera.cameraMissing;
     if (r == null) {
+      // Distinguish "no frames at all" (dark screen, camera busy) from "the reading was
+      // not strong enough" - each gets its own honest advice.
+      measureNofeed = _camera.frames == 0;
       measureFailed = true;
       notifyListeners();
       return;
@@ -314,8 +350,12 @@ class HealthController extends ChangeNotifier {
 
   /// Hospitals near the person, straight from the free OpenStreetMap service (with backup
   /// mirrors, so one busy server cannot blank the list). Refreshed at most every ten minutes.
-  /// A rough fix is plenty here: if the exact fix does not come in time, the last known spot
-  /// still shows useful hospitals.
+  ///
+  /// Two lessons from the field are built in:
+  ///  * every step gets a short timeout (location 8 s per attempt, mirrors 25 s each) so
+  ///    the whole load can never crawl for minutes before anything shows, and
+  ///  * if the location comes in rough or late, we still use it - a slightly less exact
+  ///    area is far better than no hospitals shown.
   Future<void> loadHospitals({bool force = false}) async {
     if (hospitalsLoading) return;
     final had = _hospitalsAt;
@@ -324,47 +364,53 @@ class HealthController extends ChangeNotifier {
     hospitalsFailed = false;
     hospitalsNoLocation = false;
     notifyListeners();
-    GeoFix? f;
     try {
-      f = await location.preciseFix(timeout: const Duration(seconds: 20));
-    } catch (_) {}
-    if (f == null) {
+      GeoFix? f;
       try {
-        f = await location.fix(highAccuracy: true, timeout: const Duration(seconds: 20));
+        f = await location.preciseFix(timeout: const Duration(seconds: 8));
       } catch (_) {}
-    }
-    if (f == null) {
-      try {
-        f = await location.lastKnown();
-      } catch (_) {}
-    }
-    if (f == null) {
-      // Honest split: the map service may be fine - the problem is no location yet.
-      hospitalsNoLocation = true;
-      _hospitalsAt = DateTime.now();
-      hospitalsLoading = false;
-      notifyListeners();
-      return;
-    }
-    final here = LatLng(f.lat, f.lon);
-    List<NearbyHospital>? got;
-    for (final url in _overpassEndpoints) {
-      try {
-        got = await _overpassQuery(url, here);
-        if (got != null) break;
-      } catch (_) {
-        got = null;
+      if (f == null) {
+        try {
+          f = await location.fix(highAccuracy: true, timeout: const Duration(seconds: 8));
+        } catch (_) {}
+      }
+      if (f == null) {
+        try {
+          f = await location.lastKnown();
+        } catch (_) {}
+      }
+      if (f == null) {
+        // Honest split: the map service may be fine - the problem is no location yet.
+        hospitalsNoLocation = true;
+        _hospitalsAt = DateTime.now();
+        return;
+      }
+      final here = LatLng(f.lat, f.lon);
+      List<NearbyHospital>? got;
+      for (final url in _overpassEndpoints) {
+        try {
+          got = await _overpassQuery(url, here).timeout(const Duration(seconds: 25));
+          if (got != null) break;
+        } catch (_) {
+          got = null;
+        }
+      }
+      if (got == null) {
+        hospitalsFailed = true;
+      } else {
+        hospitals = got;
+        _hospitalsAt = DateTime.now();
+        hospitalsFailed = false;
+      }
+    } catch (_) {
+      // Nothing may leave this spinner stuck: any surprise ends as a refreshable error.
+      hospitalsFailed = true;
+    } finally {
+      if (hospitalsLoading) {
+        hospitalsLoading = false;
+        notifyListeners();
       }
     }
-    if (got == null) {
-      hospitalsFailed = true;
-    } else {
-      hospitals = got;
-      _hospitalsAt = DateTime.now();
-      hospitalsFailed = false;
-    }
-    hospitalsLoading = false;
-    notifyListeners();
   }
 
   /// One Overpass mirror; returns null when that mirror answers badly (bad code, timeout).
@@ -380,7 +426,7 @@ class HealthController extends ChangeNotifier {
           headers: const {'User-Agent': 'SentriApp/1.0 (health tab hospitals)'},
           body: {'data': q},
         )
-        .timeout(const Duration(seconds: 35));
+        .timeout(const Duration(seconds: 25));
     if (res.statusCode != 200 || res.bodyBytes.isEmpty) return null;
     final j = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
     return _hospitalsFromOverpass(j, here);
@@ -414,6 +460,9 @@ class HealthController extends ChangeNotifier {
     _poll?.cancel();
     _poll = null;
     settings.removeListener(_onSettings);
+    try {
+      WidgetsBinding.instance.removeObserver(this);
+    } catch (_) {}
     super.dispose();
   }
 }

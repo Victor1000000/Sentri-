@@ -13,6 +13,10 @@
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- The drink-water reminder fires through exact alarms when the system allows them,
+         so a schedule survives doze and battery saving. Dropped schedules are re-armed
+         inside the app on every open (see scheduleWaterReminder). -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <!-- Health Connect: the accurate heart-rate source on the phone. Read-only, one data type. -->
     <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
     <!-- The app's own pulse reading: fingertip over the rear lens, torch on. Optional hardware. -->

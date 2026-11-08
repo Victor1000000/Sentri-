@@ -23,6 +23,7 @@ import 'features/police/police_directory.dart';
 import 'features/share/share_controller.dart';
 import 'features/onboarding/onboarding_controller.dart';
 import 'features/push/push_service.dart';
+import 'features/sos/contact_people.dart';
 import 'features/sos/local_pin_vault.dart';
 import 'features/sos/sos_controller.dart';
 
@@ -36,6 +37,7 @@ class AppServices {
     required this.bridge,
     required this.vault,
     required this.contacts,
+    required this.people,
     required this.settings,
     required this.sos,
     required this.lowBattery,
@@ -55,6 +57,9 @@ class AppServices {
   final NativeBridge bridge;
   final LocalPinVault vault;
   final ContactStore contacts;
+
+  /// Names and drawn guardian characters for the contacts (saved on this phone only).
+  final ContactPeople people;
   final AppSettings settings;
   final SosController sos;
   final LowBatteryAlerter lowBattery;
@@ -95,6 +100,7 @@ class AppServices {
     final bridge = MethodChannelBridge();
     final vault = LocalPinVault(store);
     final contacts = ContactStore(store);
+    final people = ContactPeople(store);
     const timers = RealTimers();
     final location = GeolocatorSource();
     final battery = BatteryPlusSource();
@@ -156,6 +162,7 @@ class AppServices {
       bridge: bridge,
       vault: vault,
       contacts: contacts,
+      people: people,
       settings: settings,
       sos: sos,
       lowBattery: lowBattery,

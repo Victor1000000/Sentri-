@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter_test/flutter_test.dart';
@@ -23,7 +22,8 @@ List<double> fakeFingertipSignal(double bpm, double fps, double secs, [double no
 void main() {
   test('a clean fingertip signal comes out near the true rate', () {
     const fps = 25.0;
-    final ys = detrend(fakeFingertipSignal(72, fps, 30), (fps * 1.5).round());
+    final raw = smoothMedian3(fakeFingertipSignal(72, fps, 30));
+    final ys = detrend(raw, (fps * 1.5).round());
     final bpm = bpmFromSamples(ys, fps);
     expect(bpm, isNotNull);
     expect(bpm!, greaterThanOrEqualTo(68));
@@ -32,8 +32,8 @@ void main() {
 
   test('a faster pulse is found as faster', () {
     const fps = 25.0;
-    final a = detrend(fakeFingertipSignal(60, fps, 30), (fps * 1.5).round());
-    final b = detrend(fakeFingertipSignal(95, fps, 30), (fps * 1.5).round());
+    final a = detrend(smoothMedian3(fakeFingertipSignal(60, fps, 30)), (fps * 1.5).round());
+    final b = detrend(smoothMedian3(fakeFingertipSignal(95, fps, 30)), (fps * 1.5).round());
     final ba = bpmFromSamples(a, fps);
     final bb = bpmFromSamples(b, fps);
     expect(ba, isNotNull);
@@ -45,10 +45,18 @@ void main() {
     const fps = 25.0;
     final rnd = math.Random(3);
     final flat = List<double>.generate(750, (_) => 128.0 + (rnd.nextDouble() - 0.5) * 0.4);
-    expect(bpmFromSamples(detrend(flat, 38), fps), isNull);
+    expect(bpmFromSamples(detrend(smoothMedian3(flat), 38), fps), isNull);
+  });
+
+  test('weak flat light near the threshold is also refused', () {
+    const fps = 25.0;
+    // Very small wiggle: rms around 0.115 owned by pure flat light, not a pulse.
+    final rnd = math.Random(5);
+    final faint = List<double>.generate(750, (_) => 128.0 + (rnd.nextDouble() - 0.5) * 0.25);
+    expect(bpmFromSamples(detrend(smoothMedian3(faint), 38), fps), isNull);
   });
 
   test('too-short data is refused', () {
-    expect(bpmFromSamples(detrend(<double>[130, 131, 130, 129, 130], 2), 25.0), isNull);
+    expect(bpmFromSamples(detrend(smoothMedian3(<double>[130, 131, 130, 129, 130]), 2), 25.0), isNull);
   });
 }

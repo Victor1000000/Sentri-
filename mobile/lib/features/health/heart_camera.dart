@@ -4,11 +4,11 @@ import 'package:camera/camera.dart';
 
 import 'heart_signal.dart';
 
-/// Reads the pulse straight from the person, with no health app in between: the back
-/// camera and its torch, with the fingertip covering both. Each heartbeat pushes a
-/// little more blood through the finger, which changes how much light reflects back -
-/// the camera turns that into a brightness wiggle, and the maths turns the wiggle into
-/// beats per minute.
+/// Reads the pulse straight from the person, with no health app in between: the front
+/// camera, with the fingertip pressed over it and the bright screen lighting the finger
+/// from behind. Each heartbeat pushes a little more blood through the finger, which
+/// changes how much light reflects back - the camera turns that into a brightness wiggle,
+/// and the maths turns the wiggle into beats per minute.
 ///
 /// Deliberately patient and honest: it records about thirty seconds, and returns null
 /// (not a guess) whenever the wiggle is too weak or too messy to trust.
@@ -18,6 +18,10 @@ class HeartCamera {
   /// true after a run that never had a working camera or was not given permission -
   /// different advice on the screen than "the reading was not strong enough".
   bool cameraMissing = false;
+
+  /// Frames that actually arrived last run. A run with zero frames means the camera
+  /// stream never delivered anything - different advice than a weak pulse.
+  int frames = 0;
 
   final _samples = <double>[];
   final _times = <double>[];
@@ -42,10 +46,11 @@ class HeartCamera {
       ..start();
     CameraDescription? cam;
     cameraMissing = false;
+    frames = 0;
     try {
       final cams = await availableCameras();
       for (final c in cams) {
-        if (c.lensDirection == CameraLensDirection.back) {
+        if (c.lensDirection == CameraLensDirection.front) {
           cam = c;
           break;
         }
@@ -73,11 +78,8 @@ class HeartCamera {
       return null; // never pretend a number
     }
     _controller = ctrl;
-    try {
-      await ctrl.setFlashMode(FlashMode.torch);
-    } catch (_) {
-      // A phone without a torch still has a pulse reading chance in bright light.
-    }
+    // No torch here: the front camera has none. The bright screen supplies the light;
+    // the measure screen shows a big bright panel for exactly that.
     try {
       await ctrl.startImageStream(_onFrame);
     } catch (_) {
@@ -100,17 +102,15 @@ class HeartCamera {
     try {
       await ctrl.stopImageStream();
     } catch (_) {}
-    try {
-      await ctrl.setFlashMode(FlashMode.off);
-    } catch (_) {}
     await _close();
 
     final n = _samples.length;
+    frames = n;
     if (n < 60 || _times.isEmpty) return null;
     final span = _times.last - _times.first;
     if (span < 5) return null;
     final fps = n / span;
-    final ys = detrend(_samples, (fps * 1.5).round().clamp(3, n));
+    final ys = detrend(smoothMedian3(_samples), (fps * 1.5).round().clamp(3, n));
     final bpm = bpmFromSamples(ys, fps);
     if (bpm == null) return null;
     return bpm.round().clamp(30, 220);
@@ -140,6 +140,7 @@ class HeartCamera {
     if (cnt == 0) return;
     _samples.add(sum / cnt);
     _times.add(_sw.elapsedMicroseconds / 1e6);
+    frames = _samples.length;
   }
 
   /// Waits until the sample buffer stops growing for a beat (the stream has caught up),

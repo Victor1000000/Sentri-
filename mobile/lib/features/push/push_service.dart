@@ -49,6 +49,11 @@ const _healthNoteId = 7202;
 /// Repeats the drink-water reminder at the person's own pace. Cancels the previous one first
 /// (including "off"), then asks for the notification permission once, right when the person
 /// turns reminders on.
+///
+/// The quiet problem this fights: phones purge scheduled alarms (reboot, battery saving,
+/// "auto-start" managers), so a reminder set weeks ago can die without anyone noticing. So
+/// this asks for exact-alarm permission when the system offers it, and callers re-run it
+/// every time the app opens - each fresh schedule outlives what the system dropped.
 Future<void> scheduleWaterReminder(int minutes, String title, String body) async {
   const details = NotificationDetails(
     android: AndroidNotificationDetails(
@@ -66,6 +71,16 @@ Future<void> scheduleWaterReminder(int minutes, String title, String body) async
     final android = _local.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
     await android?.createNotificationChannel(_healthChannel);
     await android?.requestNotificationsPermission();
+    // When the system allows exact alarms, use them - precise chimes at the chosen pace even
+    // when the phone has been asleep. On phones that deny them, ask once (the system shows its
+    // own page) and keep the alarm-clock mode, which still rings on time in practice.
+    var exactAllowed = false;
+    try {
+      exactAllowed = await android?.canScheduleExactAlarms() ?? false;
+      if (!exactAllowed) await android?.requestExactAlarmsPermission();
+    } catch (_) {
+      exactAllowed = false;
+    }
     try {
       await _local.periodicallyShowWithDuration(
         _waterId,
@@ -73,7 +88,7 @@ Future<void> scheduleWaterReminder(int minutes, String title, String body) async
         body,
         Duration(minutes: minutes),
         details,
-        androidScheduleMode: AndroidScheduleMode.alarmClock,
+        androidScheduleMode: exactAllowed ? AndroidScheduleMode.exactAllowWhileIdle : AndroidScheduleMode.alarmClock,
       );
     } on PlatformException {
       // Some phones lock exact alarms: a gently inexact chime still keeps the habit.
