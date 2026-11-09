@@ -213,9 +213,9 @@ class HttpSentriApi implements SentriApi {
     http.Client? client,
     this.timeout = const Duration(seconds: 8),
     this.patientTimeout = const Duration(seconds: 20),
-    this.wakeBudget = const Duration(seconds: 70),
-    this.wakeProbe = const Duration(seconds: 10),
-    this.wakePause = const Duration(seconds: 3),
+    this.wakeBudget = const Duration(seconds: 240),
+    this.wakeProbe = const Duration(seconds: 15),
+    this.wakePause = const Duration(seconds: 4),
     this.onSessionExpired,
   }) : _http = client ?? http.Client();
 
@@ -254,6 +254,11 @@ class HttpSentriApi implements SentriApi {
 
   /// [patient] false is for emergencies (an alert, a PIN, a location update): fail fast and let the phone keep the
   /// alert and retry. Everything else is patient: it waits longer, and if the server is asleep it waits for it to wake.
+  ///
+  /// The wake is tried twice back to back. GitHub's keep-alive pings only run every few hours when the
+  /// scheduler does not skip slots, so the free hosting platform may sit cold-booting for over a minute;
+  /// one failed wake cycle is then not proof the phone is offline, and giving up showed "something went
+  /// wrong" on sign-in even though a few more seconds were all that was missing.
   Future<http.Response> _call(String method, String path, {Object? body, bool auth = true, bool patient = true}) async {
     try {
       return await _attempt(method, path, body, auth, patient);
@@ -262,7 +267,9 @@ class HttpSentriApi implements SentriApi {
       // platform's own "not ready" reply, means a sleeping server worth waiting for.
       final slow = e.cause is TimeoutException || e.cause is String;
       if (!patient || !slow) rethrow;
-      if (!await _wake()) rethrow;
+      if (!await _wake()) {
+        if (!await _wake()) rethrow;
+      }
       return _attempt(method, path, body, auth, patient);
     }
   }
@@ -302,8 +309,8 @@ class HttpSentriApi implements SentriApi {
     onSessionExpired?.call();
   }
 
-  /// A server that has been idle can take up to a minute to start. Checks on it until it answers or [wakeBudget]
-  /// runs out. One check at a time, however many requests are waiting.
+  /// A server that has been idle spins down and can take minutes to start again. Checks on it until it answers
+  /// or the whole [wakeBudget] runs out. One check at a time, however many requests are waiting.
   Future<bool>? _waking;
   Future<bool> _wake() => _waking ??= _doWake().whenComplete(() => _waking = null);
 
