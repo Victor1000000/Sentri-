@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:camera/camera.dart' show CameraController;
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter/widgets.dart';
 import 'package:health/health.dart';
 import 'package:http/http.dart' as http;
@@ -15,21 +16,78 @@ import '../location/location.dart';
 import '../push/push_service.dart';
 import 'heart_camera.dart';
 
-/// One hospital around the person, from the free OpenStreetMap service.
-class NearbyHospital {
-  const NearbyHospital({required this.name, required this.km, this.phone});
+/// One hospital, gym or stadium around the person, from the free OpenStreetMap
+/// services (Overpass mirrors, Nominatim, Photon) plus the embedded verified
+/// directories. Carries its position so tapping it can start a route on the map.
+class NearbyPlace {
+  const NearbyPlace({
+    required this.name,
+    required this.km,
+    required this.lat,
+    required this.lon,
+    this.phone,
+    this.city,
+  });
   final String name;
 
   /// Straight-line distance in kilometres.
   final double km;
+  final double lat;
+  final double lon;
 
-  /// The public phone line as saved on the map, or null when OSM has none yet.
+  /// The public phone line: verified from official sources in the embedded
+  /// directories, or as saved on the map. Null when nobody published one yet.
   final String? phone;
+
+  /// City/area label from the embedded directory, when it came from there.
+  final String? city;
+
+  /// A forgiving match key for de-duplicating the same place found by several
+  /// sources: lowercase, letters and digits only.
+  String get key {
+    final sb = StringBuffer();
+    for (final c in name.toLowerCase().runes) {
+      final ch = String.fromCharCode(c);
+      if ((c >= 0x30 && c <= 0x39) || (c >= 0x61 && c <= 0x7a)) sb.write(ch);
+    }
+    return sb.toString();
+  }
+
+  bool similarNameTo(NearbyPlace o) {
+    final a = key, b = o.key;
+    if (a.isEmpty || b.isEmpty) return false;
+    if (a == b) return true;
+    final short = a.length < b.length ? a : b;
+    final long = a.length < b.length ? b : a;
+    return short.length >= 6 && (long.contains(short) || _withinEdits(short, long, 2));
+  }
+
+  static bool _withinEdits(String a, String b, int max) {
+    if ((b.length - a.length).abs() > max) return false;
+    var i = 0, j = 0, edits = 0;
+    while (i < a.length && j < b.length) {
+      if (a.codeUnitAt(i) == b.codeUnitAt(j)) {
+        i++;
+        j++;
+        continue;
+      }
+      if (++edits > max) return false;
+      if (a.length < b.length) {
+        j++;
+      } else if (a.length > b.length) {
+        i++;
+      } else {
+        i++;
+        j++;
+      }
+    }
+    return true;
+  }
 }
 
 /// Free mirrors of the OpenStreetMap query service. Instead of trying them one after
 /// another (up to six slow timeouts stacked is what blanked the list before), all are
-/// raced at once and whichever answers first wins - worst case costs one timeout, not six.
+/// raced at once and merged when they answer.
 const _overpassEndpoints = <String>[
   'https://overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
@@ -47,7 +105,7 @@ const _overpassEndpoints = <String>[
 ///    far above it for more than a moment,
 ///  * if it happens again and again inside an hour, the emergency contacts are told once
 ///    (through the backend, exactly like a low-battery note),
-///  * keeps hospitals near the person ready to show and call.
+///  * keeps hospitals AND gyms/stadiums near the person ready to show, call and route to.
 ///
 /// It never invents a number: with no source connected, it says so plainly.
 class HealthController extends ChangeNotifier with WidgetsBindingObserver {
@@ -70,19 +128,31 @@ class HealthController extends ChangeNotifier with WidgetsBindingObserver {
   /// The resting heart rate the person's own records show, when enough data exists.
   int? baseline;
 
-  List<NearbyHospital> hospitals = const [];
+  List<NearbyPlace> hospitals = const [];
   bool hospitalsLoading = false;
   bool hospitalsFailed = false;
 
-  /// How many automatic re-tries the last hospital failure has spawned (max
+  List<NearbyPlace> gyms = const [];
+  bool gymsLoading = false;
+  bool gymsFailed = false;
+
+  /// How many automatic re-tries the last place failure has spawned (max
   /// [_hospMaxRetries]); reset to 0 on every success so a temporary hiccup never
   /// gives up permanently.
-  int _hospRetries = 0;
-  Timer? _hospRetryTimer;
+  int _placeRetries = 0;
+  Timer? _placeRetryTimer;
+  Future<void> Function()? _placeRetryAction;
 
   /// true when the map service answered fine but no location could be had - a different
   /// problem with a different advice than "service unreachable".
   bool hospitalsNoLocation = false;
+  bool gymsNoLocation = false;
+
+  /// The drink-water reminder's honest state, refreshed whenever the tab opens or the
+  /// pace changes: off (no reminder chosen), ok (scheduled and allowed by the phone),
+  /// noPermission (the phone blocks notifications) or notScheduled (the schedule did
+  /// not land - battery savers et al).
+  WaterStatus waterStatus = WaterStatus.off;
 
   // ---- the app's own pulse reading (camera on the fingertip, screen light) ----
   final HeartCamera _camera = HeartCamera();
@@ -104,6 +174,7 @@ class HealthController extends ChangeNotifier with WidgetsBindingObserver {
   DateTime? _historyAt;
   String? _lastWaterKey;
   DateTime? _hospitalsAt;
+  DateTime? _gymsAt;
 
   // ---- anomaly bookkeeping -------------------------------------------------
   final _recent = <DateTime, double>{};
@@ -118,9 +189,14 @@ class HealthController extends ChangeNotifier with WidgetsBindingObserver {
   static const _localCooldown = Duration(minutes: 30);
   static const _chronicCooldown = Duration(hours: 6);
   static const _episodeWindow = Duration(minutes: 60);
-  static const _hospitalsRefetch = Duration(minutes: 10);
+  static const _placesRefetch = Duration(minutes: 10);
   static const _hospMaxRetries = 2;
-  static const _hospRetryDelay = Duration(seconds: 20);
+  static const _placeRetryDelay = Duration(seconds: 20);
+
+  /// After the first map source answers, the others get this long to also finish;
+  /// everything that arrives inside the grace window is merged into one list, so the
+  /// result covers ALL the hospitals/gyms the sources know, not just the fastest one's.
+  static const _mergeGrace = Duration(seconds: 8);
 
   void start() {
     if (_poll != null) return;
@@ -135,23 +211,34 @@ class HealthController extends ChangeNotifier with WidgetsBindingObserver {
   /// Both are cheap and idempotent; called from the Health screen's initState.
   Future<void> onHealthTabOpen() async {
     ensureWaterReminder();
+    unawaited(refreshWaterStatus());
     if (hospitalsFailed || hospitalsNoLocation || hospitals.isEmpty) {
       unawaited(loadHospitals(force: hospitalsFailed || hospitalsNoLocation));
+    }
+    if (gymsFailed || gymsNoLocation || gyms.isEmpty) {
+      unawaited(loadGyms(force: gymsFailed || gymsNoLocation));
     }
   }
 
   /// The drink-water reminder is scheduled on the phone's alarm system, which the system
   /// can drop after a reboot or a battery-saving purge. Re-arming it every time the app
   /// becomes visible is how the reminder "sticks" - one fresh schedule each app open.
-  /// Water reminders must fire even though scheduled alarms on some phones quietly stop
-  /// after a while; scheduleWaterReminder makes them exact when the system allows it and
-  /// bumps itself back into shape whenever the app is opened (see ensureWaterReminder).
   void ensureWaterReminder() {
     unawaited(scheduleWaterReminder(
       settings.waterMinutes,
       i18n.t('health.water_title'),
       i18n.t('health.water_body'),
     ));
+  }
+
+  /// Reads back what actually happened to the reminder on this phone: is it really
+  /// scheduled and allowed? The Health tab shows the honest answer to the person.
+  Future<void> refreshWaterStatus() async {
+    final st = await waterReminderStatus(settings.waterMinutes);
+    if (st != waterStatus) {
+      waterStatus = st;
+      notifyListeners();
+    }
   }
 
   @override
@@ -359,30 +446,40 @@ class HealthController extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
   }
 
-  /// Hospitals near the person, straight from the free OpenStreetMap service (with backup
-  /// mirrors, so one busy server cannot blank the list). Refreshed at most every ten minutes.
+  /// Hospitals - and gyms/stadiums - near the person. Nine sources are raced at once:
+  /// six Overpass mirrors, Nominatim (hospital query and a gym/general query) and
+  /// Photon - deliberately different families, so one blocked service cannot blank
+  /// the list. When the first source answers, the others get a short grace window;
+  /// EVERYTHING that lands inside it is merged and de-duplicated, so the list covers
+  /// all the places around, not just the fastest source's findings. Numbers come from
+  /// the map where it has them, plus the embedded verified directory.
   ///
-  /// Two lessons from the field are built in:
-  ///  * every step gets a short timeout (location 8 s per attempt, the mirror race 45 s) so
-  ///    the whole load can never crawl for minutes before anything shows, and
-  ///  * if the location comes in rough or late, we still use it - a slightly less exact
-  ///    area is far better than no hospitals shown.
+  /// Every step gets a short timeout (location per attempt, the race 45 s) so the
+  /// whole load can never crawl for minutes before anything shows.
   Future<void> loadHospitals({bool force = false}) async {
-    if (hospitalsLoading) return;
-    final had = _hospitalsAt;
-    if (!force && had != null && had.isAfter(DateTime.now().subtract(_hospitalsRefetch))) return;
-    hospitalsLoading = true;
-    hospitalsFailed = false;
-    hospitalsNoLocation = false;
-    notifyListeners();
+    await _loadPlaces(gym: false, force: force);
+  }
+
+  Future<void> loadGyms({bool force = false}) async {
+    await _loadPlaces(gym: true, force: force);
+  }
+
+  Future<void> _loadPlaces({required bool gym, bool force = false}) async {
+    final loading = gym ? gymsLoading : hospitalsLoading;
+    if (loading) return;
+    final had = gym ? _gymsAt : _hospitalsAt;
+    if (!force && had != null && had.isAfter(DateTime.now().subtract(_placesRefetch))) return;
+    _setPlaceFlags(gym: gym, loading: true, failed: false, noLocation: false);
     try {
+      // A precise fix first; if it is slow or refuses, a fast fix, then the last known
+      // spot - a slightly rough area is still far better than nothing to show.
       GeoFix? f;
       try {
-        f = await location.preciseFix(timeout: const Duration(seconds: 8));
+        f = await location.preciseFix(timeout: const Duration(seconds: 20));
       } catch (_) {}
       if (f == null) {
         try {
-          f = await location.fix(highAccuracy: true, timeout: const Duration(seconds: 8));
+          f = await location.fix(highAccuracy: true, timeout: const Duration(seconds: 10));
         } catch (_) {}
       }
       if (f == null) {
@@ -392,91 +489,225 @@ class HealthController extends ChangeNotifier with WidgetsBindingObserver {
       }
       if (f == null) {
         // Honest split: the map service may be fine - the problem is no location yet.
-        hospitalsNoLocation = true;
-        _hospitalsAt = DateTime.now();
+        _setPlaceFlags(gym: gym, loading: false, failed: false, noLocation: true, at: DateTime.now());
         return;
       }
       final here = LatLng(f.lat, f.lon);
-      // Race ALL sources at once instead of walking them one by one: the first one that
-      // answers with usable data wins and releases everyone else, so the whole run costs
-      // at most one timeout. Sources deliberately mix families - six Overpass mirrors,
-      // plus Nominatim and Photon, which are built and hosted entirely differently, so
-      // one blocked family cannot blank the list.
-      final racers = <Future<List<NearbyHospital>?> Function()>[
-        for (final url in _overpassEndpoints) () => _overpassQuery(url, here),
-        () => _nominatimQuery(here),
-        () => _photonQuery(here),
-      ];
-      final done = Completer<List<NearbyHospital>?>();
-      var pending = racers.length;
-      var answeredEmpty = false;
-      Future<void> race(Future<List<NearbyHospital>?> Function() q) async {
-        try {
-          final r = await q().timeout(const Duration(seconds: 45));
-          if (r != null && r.isNotEmpty) {
-            if (!done.isCompleted) done.complete(r);
-          } else if (r != null) {
-            // A service answered properly but found nothing nearby: honest "none"
-            // if every source agrees there is nothing.
-            answeredEmpty = true;
-          }
-        } catch (_) {
-          // this source is out; the others keep racing
-        } finally {
-          pending--;
-          if (pending <= 0 && !done.isCompleted) done.complete(answeredEmpty ? const <NearbyHospital>[] : null);
-        }
-      }
-      for (final q in racers) {
-        unawaited(race(q));
-      }
-      final got = await done.future;
-      if (got == null) {
-        hospitalsFailed = true;
-        // Mobile networks trip far more often than the mirrors actually being down:
+      final results = await _racePlaces(gym: gym, here: here);
+      if (results == null) {
+        _setPlaceFlags(gym: gym, loading: false, failed: true);
+        // Mobile networks trip far more often than the sources actually being down:
         // quietly try again a little later instead of just showing an error.
-        _scheduleHospRetry();
+        _schedulePlaceRetry(gym: gym);
       } else {
-        hospitals = got;
-        _hospitalsAt = DateTime.now();
-        hospitalsFailed = false;
-        _hospRetries = 0;
+        // Embedded verified directory first: real numbers researched from official
+        // sources, added to the same list and de-duplicated against map results.
+        final dir = await _loadDirectory(gym ? 'fitness_directory.json' : 'hospital_directory.json', here);
+        final all = _mergePlaces([...results, ...dir], here);
+        if (gym) {
+          gyms = all;
+          _gymsAt = DateTime.now();
+          gymsFailed = false;
+          gymsLoading = false;
+        } else {
+          hospitals = all;
+          _hospitalsAt = DateTime.now();
+          hospitalsFailed = false;
+          hospitalsLoading = false;
+        }
+        _placeRetries = 0;
       }
     } catch (_) {
       // Nothing may leave this spinner stuck: any surprise ends as a refreshable error.
-      hospitalsFailed = true;
+      _setPlaceFlags(gym: gym, loading: false, failed: true);
     } finally {
-      if (hospitalsLoading) {
-        hospitalsLoading = false;
-        notifyListeners();
-      }
+      _setPlaceFlags(gym: gym, loading: gym ? gymsLoading : hospitalsLoading, failed: null);
+      notifyListeners();
     }
   }
 
+  void _setPlaceFlags({required bool gym, bool? loading, bool? failed, bool? noLocation, DateTime? at}) {
+    if (gym) {
+      if (loading != null) gymsLoading = loading;
+      if (failed != null) gymsFailed = failed;
+      if (noLocation != null) gymsNoLocation = noLocation;
+      if (at != null) _gymsAt = at;
+    } else {
+      if (loading != null) hospitalsLoading = loading;
+      if (failed != null) hospitalsFailed = failed;
+      if (noLocation != null) hospitalsNoLocation = noLocation;
+      if (at != null) _hospitalsAt = at;
+    }
+    notifyListeners();
+  }
+
+  /// Races all sources for one kind of place, waits out the merge grace after the
+  /// first answer, and returns the merged list. Null = no source was reachable.
+  Future<List<NearbyPlace>?> _racePlaces({required bool gym, required LatLng here}) async {
+    final racers = <Future<List<NearbyPlace>?> Function()>[
+      for (final url in _overpassEndpoints) () => _overpassQuery(url, here, gym),
+      () => _nominatimQuery(here, gym),
+      () => _photonQuery(here, gym),
+    ];
+    final got = <List<NearbyPlace>>[];
+    final done = Completer<List<NearbyPlace>?>();
+    var pending = racers.length;
+    var answeredEmpty = false;
+    Timer? grace;
+
+    void settle(List<NearbyPlace>? result) {
+      grace?.cancel();
+      grace = null;
+      if (!done.isCompleted) done.complete(result);
+    }
+
+    Future<void> race(Future<List<NearbyPlace>?> Function() q) async {
+      try {
+        final r = await q().timeout(const Duration(seconds: 45));
+        if (r != null && r.isNotEmpty) {
+          got.add(r);
+          // First answer: give the other sources a short window to also finish,
+          // then merge everything - coverage beats pure speed, once something shows.
+          if (got.length == 1) {
+            grace = Timer(_mergeGrace, () => settle(_mergePlaces(got, here)));
+          }
+        } else if (r != null) {
+          // A service answered properly but found nothing nearby: honest "none"
+          // if every source agrees there is nothing.
+          answeredEmpty = true;
+        }
+      } catch (_) {
+        // this source is out; the others keep racing
+      } finally {
+        pending--;
+        if (pending <= 0) {
+          if (got.isEmpty) {
+            settle(answeredEmpty ? const <NearbyPlace>[] : null);
+          } else {
+            settle(_mergePlaces(got, here));
+          }
+        }
+      }
+    }
+
+    for (final q in racers) {
+      unawaited(race(q));
+    }
+    final res = await done.future;
+    return res;
+  }
+
+  /// One list out of many: nearest first, same place found by several sources kept
+  /// once (same forgiving name, or same phone number, or within ~100 m of each other).
+  List<NearbyPlace> _mergePlaces(List<List<NearbyPlace>> lists, LatLng here) {
+    final all = <NearbyPlace>[];
+    for (final l in lists) {
+      for (final p in l) {
+        all.add(p);
+      }
+    }
+    all.sort((a, b) => a.km.compareTo(b.km));
+    final out = <NearbyPlace>[];
+    for (final p in all) {
+      NearbyPlace twin = p;
+      var merged = false;
+      for (var i = 0; i < out.length; i++) {
+        final q = out[i];
+        if (_samePlace(p, q)) {
+          // Keep the richer twin: fuller name, and a phone when only one has it.
+          twin = NearbyPlace(
+            name: q.name.length >= p.name.length ? q.name : p.name,
+            km: q.km <= p.km ? q.km : p.km,
+            lat: q.lat,
+            lon: q.lon,
+            phone: q.phone ?? p.phone,
+            city: q.city ?? p.city,
+          );
+          out[i] = twin;
+          merged = true;
+          break;
+        }
+      }
+      if (!merged) out.add(p);
+    }
+    return out.take(40).toList();
+  }
+
+  bool _samePlace(NearbyPlace a, NearbyPlace b) {
+    if (a.phone != null && b.phone != null) {
+      final pa = a.phone!.replaceAll(RegExp(r'[^0-9+]'), '');
+      final pb = b.phone!.replaceAll(RegExp(r'[^0-9+]'), '');
+      final na = pa.length > 9 ? pa.substring(pa.length - 9) : pa;
+      final nb = pb.length > 9 ? pb.substring(pb.length - 9) : pb;
+      if (pa.length >= 7 && na == nb) return true;
+    }
+    if (a.similarNameTo(b)) return true;
+    final d = const Distance().as(LengthUnit.Kilometer, LatLng(a.lat, a.lon), LatLng(b.lat, b.lon));
+    return d < 0.1 && a.similarNameTo(b);
+  }
+
+  /// The embedded verified directories (researched from official hospital and gym
+  /// sources): name, position and public phone for major places, added to the map
+  /// results. Entries further than the search area are skipped.
+  Future<List<NearbyPlace>> _loadDirectory(String asset, LatLng here) async {
+    final out = <NearbyPlace>[];
+    try {
+      final text = await rootBundle.loadString('assets/directory/$asset');
+      final j = jsonDecode(text);
+      if (j is! List) return out;
+      final dist = const Distance();
+      for (final el in j) {
+        if (el is! Map<String, dynamic>) continue;
+        final name = el['name'] as String?;
+        final lat = (el['lat'] as num?)?.toDouble();
+        final lon = (el['lon'] as num?)?.toDouble();
+        if (name == null || lat == null || lon == null) continue;
+        final km = dist.as(LengthUnit.Kilometer, here, LatLng(lat, lon));
+        if (km > 25) continue;
+        final ph = (el['phone'] as String?) ?? '';
+        out.add(NearbyPlace(
+          name: name,
+          km: km,
+          lat: lat,
+          lon: lon,
+          phone: ph.isEmpty ? null : ph,
+          city: el['city'] as String?,
+        ));
+      }
+    } catch (_) {
+      // A missing or broken directory must never break the map list.
+    }
+    return out;
+  }
+
   /// When the map service could not be reached at all, quietly try again a bit later -
-  /// a busy mirror or a flaky mobile link is much more common than genuinely no data.
-  void _scheduleHospRetry() {
-    if (_hospRetries >= _hospMaxRetries) return;
-    _hospRetries++;
-    _hospRetryTimer?.cancel();
-    _hospRetryTimer = Timer(_hospRetryDelay, () {
-      _hospRetryTimer = null;
-      unawaited(loadHospitals(force: true));
+  /// a busy source or a flaky mobile link is much more common than genuinely no data.
+  void _schedulePlaceRetry({required bool gym}) {
+    if (_placeRetries >= _hospMaxRetries) return;
+    _placeRetries++;
+    _placeRetryTimer?.cancel();
+    _placeRetryAction = () => _loadPlaces(gym: gym, force: true);
+    _placeRetryTimer = Timer(_placeRetryDelay, () {
+      _placeRetryTimer = null;
+      final a = _placeRetryAction;
+      _placeRetryAction = null;
+      if (a != null) unawaited(a());
     });
   }
 
   /// One Overpass mirror; returns null when that mirror answers badly (bad code, timeout).
-  Future<List<NearbyHospital>?> _overpassQuery(String url, LatLng here) async {
-    const radius = 10000.0;
+  Future<List<NearbyPlace>?> _overpassQuery(String url, LatLng here, [bool gym = false]) async {
+    const radius = 15000.0;
+    final sel = gym ? '"leisure"~"^(fitness_centre|sports_centre|stadium)\$"' : '"amenity"~"^(hospital|clinic)\$"';
     final q = '[out:json][timeout:20];('
-        'node(around:\$radius,${here.latitude},${here.longitude})["amenity"~"^(hospital|clinic)\$"];'
-        'way(around:\$radius,${here.latitude},${here.longitude})["amenity"~"^(hospital|clinic)\$"];'
-        ');out center tags 150;';
-    Future<List<NearbyHospital>?> read(http.Response res) async {
+        'node(around:\$radius,${here.latitude},${here.longitude})[$sel];'
+        'way(around:\$radius,${here.latitude},${here.longitude})[$sel];'
+        ');out center tags 250;';
+    Future<List<NearbyPlace>?> read(http.Response res) async {
       if (res.statusCode != 200 || res.bodyBytes.isEmpty) return null;
       try {
         final j = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
-        return _hospitalsFromOverpass(j, here);
+        return _placesFromOverpass(j, here);
       } catch (_) {
         return null;
       }
@@ -485,7 +716,7 @@ class HealthController extends ChangeNotifier with WidgetsBindingObserver {
       final res = await http
           .post(
             Uri.parse(url),
-            headers: const {'User-Agent': _hospUa},
+            headers: const {'User-Agent': _placesUa},
             body: {'data': q},
           )
           .timeout(const Duration(seconds: 40));
@@ -502,55 +733,57 @@ class HealthController extends ChangeNotifier with WidgetsBindingObserver {
 
   /// Some mirrors refuse the form-posted query on mobile networks but accept the same
   /// query as a plain GET link; worth one more exact attempt before giving up.
-  Future<List<NearbyHospital>?> _overpassGet(String url, String q, LatLng here) async {
+  Future<List<NearbyPlace>?> _overpassGet(String url, String q, LatLng here) async {
     try {
       final res = await http
           .get(
             Uri.parse('$url?data=${Uri.encodeQueryComponent(q)}'),
-            headers: const {'User-Agent': _hospUa},
+            headers: const {'User-Agent': _placesUa},
           )
           .timeout(const Duration(seconds: 40));
       if (res.statusCode != 200 || res.bodyBytes.isEmpty) return null;
       final j = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
-      return _hospitalsFromOverpass(j, here);
+      return _placesFromOverpass(j, here);
     } catch (_) {
       return null;
     }
   }
 
-  static const _hospUa = 'SentriApp/1.0 (health tab; hospitals near you)';
+  static const _placesUa = 'SentriApp/1.0 (health tab; hospitals and gyms near you)';
 
   /// Nominatim (the OpenStreetMap search service, hosted separately from Overpass). It
   /// often answers when the Overpass mirrors are unreachable, and its "extratags" carry
-  /// the saved phone numbers. Bounded to a box around the person, amenities only.
-  Future<List<NearbyHospital>?> _nominatimQuery(LatLng here) async {
-    const spanLon = 0.13; // roughly 14 km across at Nigerian latitudes
-    const spanLat = 0.10;
+  /// the saved phone numbers. Bounded to a box around the person.
+  Future<List<NearbyPlace>?> _nominatimQuery(LatLng here, [bool gym = false]) async {
+    const spanLon = 0.15; // roughly 16 km across at Nigerian latitudes
+    const spanLat = 0.12;
     final vb = '${(here.longitude - spanLon).toStringAsFixed(4)},'
         '${(here.latitude - spanLat).toStringAsFixed(4)},'
         '${(here.longitude + spanLon).toStringAsFixed(4)},'
         '${(here.latitude + spanLat).toStringAsFixed(4)}';
     final uri = Uri.parse('https://nominatim.openstreetmap.org/search').replace(queryParameters: {
       'format': 'jsonv2',
-      'q': 'hospital',
+      'q': gym ? 'gym' : 'hospital',
       'viewbox': vb,
       'bounded': '1',
-      'limit': '40',
+      'limit': '50',
       'extratags': '1',
     });
     try {
-      final res = await http.get(uri, headers: {'User-Agent': _hospUa}).timeout(const Duration(seconds: 40));
+      final res = await http.get(uri, headers: {'User-Agent': _placesUa}).timeout(const Duration(seconds: 40));
       if (res.statusCode != 200 || res.bodyBytes.isEmpty) return null;
       final j = jsonDecode(utf8.decode(res.bodyBytes));
       if (j is! List) return null;
-      final out = <NearbyHospital>[];
+      final out = <NearbyPlace>[];
       final dist = const Distance();
       for (final el in j) {
         if (el is! Map<String, dynamic>) continue;
         final cat = el['category'];
         final typ = el['type'];
-        if (cat != 'amenity') continue;
-        if (typ != 'hospital' && typ != 'clinic' && typ != 'doctors') continue;
+        final okType = gym
+            ? (cat == 'leisure' && (typ == 'fitness_centre' || typ == 'sports_centre' || typ == 'stadium'))
+            : (cat == 'amenity' && (typ == 'hospital' || typ == 'clinic'));
+        if (!okType) continue;
         final la = double.tryParse('${el['lat']}');
         final lo = el['lon'] is num ? (el['lon'] as num).toDouble() : double.tryParse('${el['lon']}');
         if (la == null || lo == null) continue;
@@ -560,16 +793,18 @@ class HealthController extends ChangeNotifier with WidgetsBindingObserver {
         final display = el['display_name'] as String?;
         if (name == null || name.isEmpty) {
           // No own name saved: use the first line of the address so the row is not blank.
-          name = (display != null && display.isNotEmpty) ? display.split(',').first.trim() : 'Hospital';
+          name = (display != null && display.isNotEmpty) ? display.split(',').first.trim() : (gym ? 'Gym' : 'Hospital');
         }
-        out.add(NearbyHospital(
+        out.add(NearbyPlace(
           name: name,
           km: dist.as(LengthUnit.Kilometer, here, LatLng(la, lo)),
+          lat: la,
+          lon: lo,
           phone: (phone == null || phone.isEmpty) ? null : phone,
         ));
       }
       out.sort((a, b) => a.km.compareTo(b.km));
-      return out.take(12).toList();
+      return out.take(40).toList();
     } catch (_) {
       return null;
     }
@@ -577,47 +812,56 @@ class HealthController extends ChangeNotifier with WidgetsBindingObserver {
 
   /// Photon (komoot's search service, on entirely different infrastructure again). A
   /// last resort that at least fills the list with names and distances, with phone
-  /// numbers when the map data has them. POIs only, amenities only.
-  Future<List<NearbyHospital>?> _photonQuery(LatLng here) async {
-    final qs = 'q=hospital&lat=${here.latitude.toStringAsFixed(5)}&lon=${here.longitude.toStringAsFixed(5)}'
-        '&limit=40&osm_tag=amenity%3Ahospital&osm_tag=amenity%3Aclinic';
+  /// numbers when the map data has them.
+  Future<List<NearbyPlace>?> _photonQuery(LatLng here, [bool gym = false]) async {
+    final qs = gym
+        ? 'q=gym&lat=${here.latitude.toStringAsFixed(5)}&lon=${here.longitude.toStringAsFixed(5)}'
+            '&limit=50&osm_tag=leisure%3Afitness_centre&osm_tag=leisure%3Asports_centre&osm_tag=leisure%3Astadium'
+        : 'q=hospital&lat=${here.latitude.toStringAsFixed(5)}&lon=${here.longitude.toStringAsFixed(5)}'
+            '&limit=50&osm_tag=amenity%3Ahospital&osm_tag=amenity%3Aclinic';
     final uri = Uri.parse('https://photon.komoot.io/api/?$qs');
     try {
-      final res = await http.get(uri, headers: {'User-Agent': _hospUa}).timeout(const Duration(seconds: 40));
+      final res = await http.get(uri, headers: {'User-Agent': _placesUa}).timeout(const Duration(seconds: 40));
       if (res.statusCode != 200 || res.bodyBytes.isEmpty) return null;
       final j = jsonDecode(utf8.decode(res.bodyBytes));
       final features = (j is Map<String, dynamic> ? j['features'] : null) as List?;
       if (features == null) return null;
-      final out = <NearbyHospital>[];
+      final out = <NearbyPlace>[];
       final dist = const Distance();
+      final wantKey = gym ? 'leisure' : 'amenity';
       for (final f in features) {
         if (f is! Map<String, dynamic>) continue;
         final props = f['properties'] is Map<String, dynamic> ? f['properties'] as Map<String, dynamic> : const <String, dynamic>{};
-        if (props['osm_key'] != 'amenity') continue;
+        if (props['osm_key'] != wantKey) continue;
         final val = '${props['osm_value']}';
-        if (val != 'hospital' && val != 'clinic') continue;
+        final okVal = gym
+            ? (val == 'fitness_centre' || val == 'sports_centre' || val == 'stadium')
+            : (val == 'hospital' || val == 'clinic');
+        if (!okVal) continue;
         final geometry = f['geometry'] is Map<String, dynamic> ? f['geometry'] as Map<String, dynamic> : null;
         final coords = (geometry?['coordinates'] ?? const []) as List;
         if (coords.length < 2) continue;
         final lo = coords[0] is num ? (coords[0] as num).toDouble() : double.tryParse('${coords[0]}');
         final la = coords[1] is num ? (coords[1] as num).toDouble() : double.tryParse('${coords[1]}');
         if (la == null || lo == null) continue;
-        final name = (props['name'] as String?) ?? 'Hospital';
-        out.add(NearbyHospital(
+        final name = (props['name'] as String?) ?? (gym ? 'Gym' : 'Hospital');
+        out.add(NearbyPlace(
           name: name,
           km: dist.as(LengthUnit.Kilometer, here, LatLng(la, lo)),
+          lat: la,
+          lon: lo,
           phone: null,
         ));
       }
       out.sort((a, b) => a.km.compareTo(b.km));
-      return out.take(12).toList();
+      return out.take(40).toList();
     } catch (_) {
       return null;
     }
   }
 
-  Future<List<NearbyHospital>> _hospitalsFromOverpass(Map<String, dynamic> j, LatLng here) async {
-    final out = <NearbyHospital>[];
+  Future<List<NearbyPlace>> _placesFromOverpass(Map<String, dynamic> j, LatLng here) async {
+    final out = <NearbyPlace>[];
     final dist = const Distance();
     for (final el in (j['elements'] as List? ?? const [])) {
       if (el is! Map<String, dynamic>) continue;
@@ -626,25 +870,27 @@ class HealthController extends ChangeNotifier with WidgetsBindingObserver {
       final lo = center['lon'];
       if (la is! num || lo is! num) continue;
       final tags = (el['tags'] is Map ? el['tags'] as Map<String, dynamic> : const <String, dynamic>{}) as Map<String, dynamic>;
-      final phone = (tags['phone'] ?? tags['contact:phone'] ?? tags['healthcare:phone']) as String?;
+      final phone = (tags['phone'] ?? tags['contact:phone'] ?? tags['contact:mobile'] ?? tags['healthcare:phone']) as String?;
       final name = tags['name'] as String?;
       if ((name == null || name.isEmpty) && (phone == null || phone.isEmpty)) continue;
-      out.add(NearbyHospital(
+      out.add(NearbyPlace(
         name: (name == null || name.isEmpty) ? 'Hospital' : name,
         km: dist.as(LengthUnit.Kilometer, here, LatLng(la.toDouble(), lo.toDouble())),
+        lat: la.toDouble(),
+        lon: lo.toDouble(),
         phone: (phone == null || phone.isEmpty) ? null : phone,
       ));
     }
     out.sort((a, b) => a.km.compareTo(b.km));
-    return out.take(12).toList();
+    return out.take(40).toList();
   }
 
   @override
   void dispose() {
     _poll?.cancel();
     _poll = null;
-    _hospRetryTimer?.cancel();
-    _hospRetryTimer = null;
+    _placeRetryTimer?.cancel();
+    _placeRetryTimer = null;
     settings.removeListener(_onSettings);
     try {
       WidgetsBinding.instance.removeObserver(this);

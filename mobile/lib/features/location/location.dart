@@ -31,6 +31,11 @@ LocationPlan locationPlan({required int batteryPct, required bool dataSaver}) {
   return LocationPlan(interval: Duration(seconds: seconds), highAccuracy: high);
 }
 
+/// True when a fix is a real GPS-grade position, not a rough tower/Wi-Fi guess.
+/// Movement tracking must only sum distances between fixes this good, otherwise
+/// drifting readings silently add hundreds of phantom metres.
+bool usableForDistance(GeoFix f, {double limitM = 30}) => (f.accuracyM ?? double.infinity) <= limitM;
+
 /// Where fixes come from. A fake implements this in tests.
 abstract class LocationSource {
   /// A fresh fix, or null if none could be had within [timeout].
@@ -63,12 +68,18 @@ class GeolocatorSource implements LocationSource {
     }
   }
 
-  /// A reading this good (in metres) is as good as a phone gets outdoors, so there is no need
-  /// to wait longer. 8 m was measured too strict on real phones: the pinpoint kept waiting for
-  /// a perfect satellite pass the phone never gives, so the map showed an old or wrong spot
-  /// (people saw it "about 300 m off"). 15 m keeps the honest fast-fix behaviour - accuracy
-  /// at that level is still within shouting distance, and the reading is fresh.
-  static const _goodEnoughM = 15.0;
+  /// A reading this good (in metres) is as good as a phone gets outdoors, so there is no
+  /// need to wait longer. 8 m was measured too strict on real phones: the pinpoint kept
+  /// waiting for a perfect satellite pass the phone never gives. But 15 m was measured too
+  /// LOOSE on inexpensive phones: their first satellite pass can sit far off, actually
+  /// feeling like "about 300 m wrong" to the person. 10 m keeps the honest fast-fix
+  /// behaviour while refusing the first rough pass when the GPS can do better within the
+  /// caller's timeout.
+  static const _goodEnoughM = 10.0;
+
+  /// A fix worse than this is a tower/Wi-Fi guess, not a position. preciseFix holds it
+  /// back unless the timeout runs out with nothing better - a rough area beats nothing.
+  static const _uselessM = 120.0;
 
   @override
   Future<GeoFix?> preciseFix({Duration timeout = const Duration(seconds: 25)}) async {
@@ -81,8 +92,9 @@ class GeolocatorSource implements LocationSource {
       ).listen(
         (p) {
           final f = _toFix(p);
-          if (best == null || (f.accuracyM ?? double.infinity) < (best!.accuracyM ?? double.infinity)) best = f;
-          if ((best!.accuracyM ?? double.infinity) <= _goodEnoughM && !done.isCompleted) done.complete();
+          final acc = f.accuracyM ?? double.infinity;
+          if (best == null || acc < (best!.accuracyM ?? double.infinity)) best = f;
+          if (acc <= _goodEnoughM && !done.isCompleted) done.complete();
         },
         onError: (Object _) {
           if (!done.isCompleted) done.complete();

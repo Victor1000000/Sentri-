@@ -68,10 +68,12 @@ class MapScreen extends StatefulWidget {
   final Duration refresh;
 
   @override
-  State<MapScreen> createState() => _MapScreenState();
+  MapScreenState createState() => MapScreenState();
 }
 
-class _MapScreenState extends State<MapScreen> {
+/// Public so the tab shell can hold a [GlobalKey] to it: the Health tab sends
+/// a tapped hospital or gym here with [routeTo] and the map plans the route.
+class MapScreenState extends State<MapScreen> {
   final _map = MapController();
   final _voice = StepVoice();
   GeoFix? _fix;
@@ -584,6 +586,24 @@ class _MapScreenState extends State<MapScreen> {
       _pickMode = null;
     });
     unawaited(_planRoute());
+  }
+
+  /// A place tapped in another tab (a nearby hospital or gym in the Health tab) becomes the
+  /// destination and the route is planned at once. The map stays built inside the tab shell,
+  /// so this works even while the Map tab is not the one on screen.
+  void routeTo(LatLng dest, String name) {
+    _routeSeq++; // any run of directions still in flight is irrelevant now
+    setState(() {
+      _toPick = dest;
+      _toName = name;
+      _pickMode = null;
+    });
+    unawaited(_planRoute());
+    try {
+      _map.move(dest, _map.camera.zoom < 12 ? 16 : _map.camera.zoom);
+    } catch (_) {
+      // The map is off-screen: the route fit that follows starts it regardless.
+    }
   }
 
   // ---- directions: any point to any point ----

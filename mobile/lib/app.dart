@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:latlong2/latlong.dart';
 
 import 'core/theme.dart';
 import 'core/widgets/brand.dart';
@@ -130,6 +131,10 @@ class _TabsState extends State<_Tabs> {
   Future<PoliceDirectory>? _directoryFuture;
   String? _state;
 
+  /// The live Map tab's state, so the Health tab can ask it to plan a route to a
+  /// nearby hospital or gym with one tap - the map is already built and warm.
+  final GlobalKey<MapScreenState> _mapKey = GlobalKey<MapScreenState>();
+
   @override
   void initState() {
     super.initState();
@@ -151,8 +156,20 @@ class _TabsState extends State<_Tabs> {
       index: _tab,
       children: [
         HomeScreen(sos: s.sos, settings: s.settings, i18n: s.i18n, bridge: s.bridge, api: s.api, inbox: s.inbox, share: s.share, checkin: s.checkin, police: s.police, people: s.people),
-        MapScreen(location: s.location, api: s.api, i18n: s.i18n, placeLookup: const DevicePlaceLookup(), onPlace: (p) => _state = p?.state, police: _directoryFuture),
-        HealthScreen(health: s.health, i18n: s.i18n),
+        MapScreen(key: _mapKey, location: s.location, api: s.api, i18n: s.i18n, placeLookup: const DevicePlaceLookup(), onPlace: (p) => _state = p?.state, police: _directoryFuture),
+        HealthScreen(
+          health: s.health,
+          i18n: s.i18n,
+          exercise: s.exercise,
+          awards: s.awards,
+          checkin: s.checkin,
+          onRoute: (place) {
+            // Tap a hospital or gym in the Health tab: the map plans the route to it
+            // and the app switches to the Map tab, which is already warm.
+            _mapKey.currentState?.routeTo(LatLng(place.lat, place.lon), place.name);
+            setState(() => _tab = 1);
+          },
+        ),
         PoliceScreen(directory: _directory, i18n: s.i18n, currentState: _state),
       ],
     );

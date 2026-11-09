@@ -3,21 +3,43 @@ import 'dart:ui' show FontFeature;
 
 import 'package:camera/camera.dart' show CameraController, CameraPreview;
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/config.dart';
 import '../../core/i18n/i18n.dart';
 import '../../core/widgets/flat.dart';
+import '../checkin/checkin_controller.dart';
+import 'awards.dart';
+import 'exercise_controller.dart';
 import 'health_controller.dart';
+import 'workout_screen.dart';
 
 /// The Health tab: heart-rate readings taken by the app itself - fingertip over the
-/// front camera, lit by the screen - plus a passive read of Health Connect when a band
-/// or health app is feeding it, drink-water reminders at the person's own pace, and
-/// hospitals near them - nearest first, with a call button. The same calm card look as
-/// the rest of the app: big number, plain words, nothing loud.
+/// front camera, lit by the screen - drink-water reminders at the person's own pace
+/// (with an honest status of what the phone actually allows), the exercise section -
+/// walk/run/bike with live steps, distance, history and award badges - and hospitals
+/// AND gyms/stadiums near them: nearest first, numbers where they exist, and a tap
+/// plans the route on the app's map. The same calm card look as the rest of the app.
 class HealthScreen extends StatefulWidget {
-  const HealthScreen({super.key, required this.health, required this.i18n});
+  const HealthScreen({
+    super.key,
+    required this.health,
+    required this.i18n,
+    required this.exercise,
+    required this.awards,
+    required this.checkin,
+    this.onRoute,
+  });
   final HealthController health;
   final I18n i18n;
+  final ExerciseController exercise;
+  final AwardStore awards;
+  final CheckInController checkin;
+
+  /// Plans a route to a place on the app's map and switches to the Map tab.
+  final void Function(NearbyPlace place)? onRoute;
 
   @override
   State<HealthScreen> createState() => _HealthScreenState();
@@ -27,8 +49,10 @@ class _HealthScreenState extends State<HealthScreen> {
   @override
   void initState() {
     super.initState();
-    // Re-arms the water reminder on every open and refreshes hospitals when they are stale.
+    // Re-arms the water reminder on every open and refreshes nearby lists when stale.
     unawaited(widget.health.onHealthTabOpen());
+    if (widget.exercise.history.isEmpty) unawaited(widget.exercise.load());
+    if (widget.awards.awards.isEmpty) unawaited(widget.awards.load());
   }
 
   String t(String k, [Map<String, String> a = const {}]) => widget.i18n.t(k, a);
@@ -37,7 +61,7 @@ class _HealthScreenState extends State<HealthScreen> {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return ListenableBuilder(
-      listenable: widget.health,
+      listenable: Listenable.merge([widget.health, widget.exercise, widget.awards, widget.checkin]),
       builder: (context, _) => Scaffold(
         appBar: AppBar(title: Text(t('tabs.health'))),
         body: ListView(
@@ -49,8 +73,35 @@ class _HealthScreenState extends State<HealthScreen> {
             _section('WATER', t('health.water'), Icons.water_drop_outlined),
             _waterCard(context),
             const SizedBox(height: 20),
+            _section('EXERCISE', t('exercise.title'), Icons.directions_run),
+            _exerciseCard(context, cs),
+            const SizedBox(height: 10),
+            _awardsCard(context, cs),
+            _historyCard(context, cs),
+            const SizedBox(height: 20),
             _section('NEARBY', t('health.hospitals'), Icons.local_hospital_outlined),
-            _hospitalsCard(context, cs),
+            _placesCard(
+              context,
+              cs,
+              loading: widget.health.hospitalsLoading,
+              failed: widget.health.hospitalsFailed,
+              noLocation: widget.health.hospitalsNoLocation,
+              list: widget.health.hospitals,
+              emptyKey: 'health.hosp_none',
+              retry: () => unawaited(widget.health.loadHospitals(force: true)),
+            ),
+            const SizedBox(height: 20),
+            _section('NEARBY', t('health.gyms'), Icons.fitness_center),
+            _placesCard(
+              context,
+              cs,
+              loading: widget.health.gymsLoading,
+              failed: widget.health.gymsFailed,
+              noLocation: widget.health.gymsNoLocation,
+              list: widget.health.gyms,
+              emptyKey: 'health.gym_none',
+              retry: () => unawaited(widget.health.loadGyms(force: true)),
+            ),
           ],
         ),
       ),
@@ -175,7 +226,9 @@ class _HealthScreenState extends State<HealthScreen> {
   // ---------------------------------------------------------------- water
 
   Widget _waterCard(BuildContext context) {
-    final s = widget.health.settings;
+    final h = widget.health;
+    final s = h.settings;
+    final cs = Theme.of(context).colorScheme;
     const options = [0, 30, 60, 120, 180];
     String label(int m) => switch (m) {
           0 => t('health.water_off'),
@@ -200,7 +253,11 @@ class _HealthScreenState extends State<HealthScreen> {
                     button: true,
                     selected: s.waterMinutes == m,
                     child: GestureDetector(
-                      onTap: () => unawaited(s.update(waterMinutes: m)),
+                      onTap: () async {
+                        await s.update(waterMinutes: m);
+                        // After every pace change, the honest state is read back.
+                        await h.refreshWaterStatus();
+                      },
                       child: AnimatedContainer(
                         duration: const Duration(milliseconds: 160),
                         height: 38,
@@ -213,46 +270,323 @@ class _HealthScreenState extends State<HealthScreen> {
                 ),
             ]),
           ),
+          // The honest line: what actually became of the reminder on THIS phone.
+          if (s.waterMinutes > 0) ...[
+            const SizedBox(height: 12),
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Icon(
+                h.waterStatus == WaterStatus.ok ? Icons.verified_outlined : Icons.warning_amber_rounded,
+                size: 17,
+                color: h.waterStatus == WaterStatus.ok ? cs.tertiary : Colors.amber.shade700,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  h.waterStatus == WaterStatus.ok
+                      ? t('health.water_ok', {'n': label(s.waterMinutes)})
+                      : t('health.water_broken'),
+                  style: TextStyle(fontSize: 12.5, height: 1.4, color: cs.onSurface.withValues(alpha: 0.75)),
+                ),
+              ),
+            ]),
+          ],
         ]),
       ),
     );
   }
 
-  // ------------------------------------------------------------ hospitals
+  // ---------------------------------------------------------------- exercise
 
-  Widget _hospitalsCard(BuildContext context, ColorScheme cs) {
-    final h = widget.health;
-    final list = h.hospitals;
+  ExerciseMode _mode = ExerciseMode.walk;
+  int _checkMinutes = 0;
+
+  Widget _exerciseCard(BuildContext context, ColorScheme cs) {
+    final e = widget.exercise;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(t('exercise.sub'), style: const TextStyle(fontSize: 14, height: 1.45)),
+          const SizedBox(height: 14),
+          // The three ways to move, chosen like radio chips.
+          Container(
+            padding: const EdgeInsets.all(3),
+            decoration: BoxDecoration(color: Flat.hairline(context), borderRadius: BorderRadius.circular(12)),
+            child: Row(children: [
+              for (final m in ExerciseMode.values)
+                Expanded(
+                  child: Semantics(
+                    button: true,
+                    selected: _mode == m,
+                    child: GestureDetector(
+                      onTap: () => setState(() => _mode = m),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 160),
+                        height: 40,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(color: _mode == m ? Flat.card(context) : Colors.transparent, borderRadius: BorderRadius.circular(10)),
+                        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                          Icon(switch (m) {
+                            ExerciseMode.walk => Icons.directions_walk_outlined,
+                            ExerciseMode.run => Icons.directions_run_outlined,
+                            ExerciseMode.bike => Icons.directions_bike_outlined,
+                          }, size: 16),
+                          const SizedBox(width: 5),
+                          Text(switch (m) {
+                            ExerciseMode.walk => t('exercise.walk'),
+                            ExerciseMode.run => t('exercise.run'),
+                            ExerciseMode.bike => t('exercise.bike'),
+                          }, style: TextStyle(fontSize: 12.5, fontWeight: _mode == m ? FontWeight.w600 : FontWeight.w500)),
+                        ]),
+                      ),
+                    ),
+                  ),
+                ),
+            ]),
+          ),
+          // The safety watch for the session, moved here from the home screen:
+          // pick how long the session may take; if it goes past that without
+          // "I'm safe", the contacts get a full alert, same as any other check.
+          const SizedBox(height: 14),
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Icon(Icons.timer_outlined, size: 17, color: cs.primary),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(t('exercise.check_sub'), style: TextStyle(fontSize: 12.5, height: 1.4, color: cs.onSurface.withValues(alpha: 0.75))),
+            ),
+          ]),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(3),
+            decoration: BoxDecoration(color: Flat.hairline(context), borderRadius: BorderRadius.circular(12)),
+            child: Row(children: [
+              for (final m in const [0, 30, 60, 120])
+                Expanded(
+                  child: Semantics(
+                    button: true,
+                    selected: _checkMinutes == m,
+                    child: GestureDetector(
+                      onTap: () => setState(() => _checkMinutes = m),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 160),
+                        height: 36,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(color: _checkMinutes == m ? Flat.card(context) : Colors.transparent, borderRadius: BorderRadius.circular(9)),
+                        child: Text(switch (m) {
+                          0 => t('exercise.check_off'),
+                          30 => t('health.water_30'),
+                          60 => t('health.water_1'),
+                          _ => t('health.water_2'),
+                        }, style: TextStyle(fontSize: 12, fontWeight: _checkMinutes == m ? FontWeight.w600 : FontWeight.w500)),
+                      ),
+                    ),
+                  ),
+                ),
+            ]),
+          ),
+          const SizedBox(height: 14),
+          Center(
+            child: FilledButton.icon(
+              style: FilledButton.styleFrom(minimumSize: const Size(0, 46), padding: const EdgeInsets.symmetric(horizontal: 26)),
+              onPressed: () => unawaited(_startSession(context)),
+              icon: const Icon(Icons.play_arrow_rounded, size: 24),
+              label: Text(t('exercise.start'), style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w700)),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Future<void> _startSession(BuildContext context) async {
+    //   -1 means "inherit a running watch": the person already armed check-on-me.
+    final mins = _checkMinutes;
+    final routes = Navigator.of(context);
+    final started = await routes.push(MaterialPageRoute<bool>(
+      builder: (_) => WorkoutScreen(
+        exercise: widget.exercise,
+        checkin: widget.checkin,
+        i18n: widget.i18n,
+        mode: _mode,
+        checkMinutes: mins,
+      ),
+    ));
+    if (started == null) return; // discarded inside: nothing to celebrate
+  }
+
+  // ---------------------------------------------------------------- awards
+
+  Widget _awardsCard(BuildContext context, ColorScheme cs) {
+    final all = widget.awards.awards;
+    final kinds = AwardKind.values;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Text(t('award.shelf'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+            const Spacer(),
+            Text('${all.length}/${kinds.length}', style: TextStyle(fontSize: 13, color: Flat.muted(context), fontFeatures: const [FontFeature.tabularFigures()])),
+          ]),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              for (final k in kinds)
+                Column(children: [
+                  AwardBadge(kind: k, size: 40, dim: !widget.awards.has(k)),
+                  const SizedBox(height: 4),
+                  SizedBox(
+                    width: 52,
+                    child: Text(
+                      t('award.${awardId(k)}_title'),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 9.5, height: 1.15, color: widget.awards.has(k) ? null : Flat.muted(context)),
+                    ),
+                  ),
+                ]),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(t('award.shelf_hint'), style: TextStyle(fontSize: 12, height: 1.35, color: Flat.muted(context))),
+        ]),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------- history
+
+  Widget _historyCard(BuildContext context, ColorScheme cs) {
+    final hist = widget.exercise.history;
+    String _ageText(DateTime d) => t('exercise.hist_on', {'d': '${d.day}/${d.month}'});
+    return Card(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(18, 14, 18, 0),
+          child: Row(children: [
+            Text(t('exercise.history'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+            const Spacer(),
+            Text(t('exercise.hist_total', {'n': widget.exercise.totalKm.toStringAsFixed(1)}), style: TextStyle(fontSize: 13, color: Flat.muted(context), fontFeatures: const [FontFeature.tabularFigures()])),
+          ]),
+        ),
+        if (hist.isEmpty)
+          Padding(
+            padding: const EdgeInsets.all(18),
+            child: Text(t('exercise.history_empty'), style: TextStyle(fontSize: 13.5, height: 1.4, color: Flat.muted(context))),
+          )
+        else ...[
+          const SizedBox(height: 6),
+          for (var i = 0; i < hist.length && i < 5; i++) ...[
+            if (i > 0) Divider(height: 1, color: Flat.hairline(context)),
+            ListTile(
+              dense: true,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+              leading: Icon(
+                switch (hist[i].mode) {
+                  'walk' => Icons.directions_walk_outlined,
+                  'run' => Icons.directions_run_outlined,
+                  _ => Icons.directions_bike_outlined,
+                },
+                size: 22,
+                color: cs.primary,
+              ),
+              title: Text(
+                '${switch (hist[i].mode) {
+                  'walk' => t('exercise.walk'),
+                  'run' => t('exercise.run'),
+                  _ => t('exercise.bike'),
+                }} · ${_ageText(hist[i].start)}',
+                style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600),
+              ),
+              subtitle: Text(
+                [
+                  if (hist[i].km > 0) '${hist[i].km < 1 ? hist[i].km.toStringAsFixed(2) : hist[i].km.round()} km',
+                  '${hist[i].seconds ~/ 60} ${t('exercise.min_short')}',
+                  if (hist[i].mode != 'bike') t('exercise.steps_n', {'n': '${hist[i].steps}'}),
+                ].join(' · '),
+                style: TextStyle(fontSize: 12.5, color: Flat.muted(context), fontFeatures: const [FontFeature.tabularFigures()]),
+              ),
+              onTap: hist[i].path.isEmpty ? null : () => _showSession(context, hist[i]),
+            ),
+          ],
+        ],
+        const SizedBox(height: 10),
+      ]),
+    );
+  }
+
+  /// One past session on the map: the exact route walked/ran/rode is drawn and
+  /// fitted to the view. Opened as a bottom sheet over the Health tab.
+  void _showSession(BuildContext context, WorkoutRecord r) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (ctx) => SafeArea(
+        child: SizedBox(
+          height: MediaQuery.of(ctx).size.height * 0.55,
+          child: Column(children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 4, 18, 8),
+              child: Row(children: [
+                Text('${switch (r.mode) { 'walk' => t('exercise.walk'), 'run' => t('exercise.run'), _ => t('exercise.bike') }} · ${t('exercise.hist_on', {'d': '${r.start.day}/${r.start.month}'})}', style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w700)),
+                const Spacer(),
+                Text('${r.km < 1 ? r.km.toStringAsFixed(2) : r.km.toStringAsFixed(1)} km · ${r.seconds ~/ 60} ${t('exercise.min_short')}' + (r.mode == 'bike' ? '' : ' · ${t('exercise.steps_n', {'n': '${r.steps}'})}'), style: TextStyle(fontSize: 12.5, color: Flat.muted(ctx))),
+              ]),
+            ),
+            Expanded(
+              child: FlutterMapSheetMap(path: r.path),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  // ------------------------------------------------- hospitals / gyms nearby
+
+  Widget _placesCard(
+    BuildContext context,
+    ColorScheme cs, {
+    required bool loading,
+    required bool failed,
+    required bool noLocation,
+    required List<NearbyPlace> list,
+    required String emptyKey,
+    required VoidCallback retry,
+  }) {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(4),
         child: Column(children: [
-          if (h.hospitalsLoading) ...[
+          if (loading) ...[
             Padding(padding: const EdgeInsets.all(28), child: LinearProgressIndicator(minHeight: 2, color: cs.primary)),
-          ] else if (h.hospitalsNoLocation && list.isEmpty) ...[
+          ] else if (noLocation && list.isEmpty) ...[
             Padding(padding: const EdgeInsets.all(16), child: Text(t('health.hosp_location'), textAlign: TextAlign.center, style: const TextStyle(fontSize: 14, height: 1.45))),
-          ] else if (h.hospitalsFailed && list.isEmpty) ...[
+          ] else if (failed && list.isEmpty) ...[
             Padding(padding: const EdgeInsets.all(16), child: Text(t('health.hosp_error'), textAlign: TextAlign.center, style: const TextStyle(fontSize: 14, height: 1.45))),
             Padding(
               padding: const EdgeInsets.only(bottom: 16),
               child: OutlinedButton(
-                onPressed: () => unawaited(h.loadHospitals(force: true)),
+                onPressed: retry,
                 child: Text(t('contacts.retry')),
               ),
             ),
           ] else if (list.isEmpty) ...[
-            Padding(padding: const EdgeInsets.all(16), child: Text(t('health.hosp_none'), textAlign: TextAlign.center, style: TextStyle(fontSize: 14, height: 1.45, color: Flat.muted(context)))),
+            Padding(padding: const EdgeInsets.all(16), child: Text(t(emptyKey), textAlign: TextAlign.center, style: TextStyle(fontSize: 14, height: 1.45, color: Flat.muted(context)))),
           ] else
             for (var i = 0; i < list.length; i++) ...[
               if (i > 0) Divider(height: 1, color: Flat.hairline(context)),
-              _hospitalTile(context, list[i], cs),
+              _placeTile(context, list[i], cs),
             ],
         ]),
       ),
     );
   }
 
-  Widget _hospitalTile(BuildContext context, NearbyHospital p, ColorScheme cs) {
+  Widget _placeTile(BuildContext context, NearbyPlace p, ColorScheme cs) {
     final phone = p.phone;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
@@ -263,28 +597,36 @@ class _HealthScreenState extends State<HealthScreen> {
           phone == null ? t('health.hosp_no_phone') : '${t('health.hosp_km', {'n': p.km < 10 ? p.km.toStringAsFixed(1) : p.km.round().toString()})} · $phone',
           style: TextStyle(fontSize: 13, color: phone == null ? cs.error.withValues(alpha: 0.7) : Flat.muted(context), fontFeatures: const [FontFeature.tabularFigures()]),
         ),
-        if (phone != null) ...[
-          const SizedBox(height: 9),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size(0, 40),
-                padding: const EdgeInsets.symmetric(horizontal: 18),
-                side: BorderSide(color: cs.primary),
-                foregroundColor: cs.primary,
-              ),
-              onPressed: () => unawaited(_call(phone)),
-              icon: const Icon(Icons.call_outlined, size: 18),
-              label: Text(t('health.call'), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 9),
+        Row(children: [
+          OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size(0, 40),
+              padding: const EdgeInsets.symmetric(horizontal: 18),
+              side: BorderSide(color: cs.primary),
+              foregroundColor: cs.primary,
             ),
+            onPressed: () => unawaited(_call(phone)),
+            icon: const Icon(Icons.call_outlined, size: 18),
+            label: Text(t('health.call'), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
           ),
-        ],
+          const SizedBox(width: 10),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(0, 40),
+              padding: const EdgeInsets.symmetric(horizontal: 18),
+            ),
+            onPressed: () => widget.onRoute?.call(p),
+            icon: const Icon(Icons.directions_outlined, size: 18),
+            label: Text(t('health.route'), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+          ),
+        ]),
       ]),
     );
   }
 
-  Future<void> _call(String phone) async {
+  Future<void> _call(String? phone) async {
+    if (phone == null) return;
     final clean = phone.replaceAll(RegExp(r'[^0-9+*#]'), '');
     if (clean.isEmpty) return;
     try {
@@ -292,5 +634,36 @@ class _HealthScreenState extends State<HealthScreen> {
     } catch (_) {
       // No dialler on this device: nothing to do; the number is still visible and copyable.
     }
+  }
+}
+
+/// A finished session's route, drawn as a bottom-sheet mini map and fitted so the
+/// whole walk/run/ride line is visible at once. No live tracking - just the story.
+class FlutterMapSheetMap extends StatelessWidget {
+  const FlutterMapSheetMap({super.key, required this.path});
+  final List<LatLng> path;
+
+  @override
+  Widget build(BuildContext context) {
+    if (path.length < 2) {
+      return const Center(child: Icon(Icons.route_outlined, size: 40));
+    }
+    return FlutterMap(
+      options: MapOptions(
+        initialCameraFit: CameraFit.coordinates(
+          coordinates: path,
+          padding: const EdgeInsets.fromLTRB(46, 46, 46, 46),
+        ),
+      ),
+      children: [
+        TileLayer(urlTemplate: AppConfig.tileUrl, userAgentPackageName: 'ng.sentri.sentri'),
+        PolylineLayer(polylines: [
+          // A pale casing under the line, same look as the map's live routes.
+          Polyline(points: path, strokeWidth: 7, color: const Color(0x336A5FF0)),
+          Polyline(points: path, strokeWidth: 4, color: const Color(0xFF6A5FF0)),
+        ]),
+        const RichAttributionWidget(attributions: [TextSourceAttribution('© OpenStreetMap contributors'), TextSourceAttribution('© CARTO')]),
+      ],
+    );
   }
 }

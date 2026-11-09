@@ -1,0 +1,13 @@
+[
+  { "name": "Lagos State University Teaching Hospital (LASUTH)", "city": "Ikeja, Lagos", "lat": 6.6018, "lon": 3.3515, "phone": "08176581642" },
+  { "name": "National Hospital Abuja", "city": "Abuja, FCT", "lat": 9.0365, "lon": 7.4918, "phone": "09030097889" },
+  { "name": "University College Hospital (UCH)", "city": "Ibadan, Oyo", "lat": 7.4433, "lon": 3.8950, "phone": "08033230882" },
+  { "name": "Ahmadu Bello University Teaching Hospital (ABUTH)", "city": "Zaria, Kaduna", "lat": 11.1504, "lon": 7.6473, "phone": "08036167448" },
+  { "name": "Aminu Kano Teaching Hospital (AKTH)", "city": "Kano, Kano", "lat": 11.9563, "lon": 8.4857, "phone": "08035905451" },
+  { "name": "University of Nigeria Teaching Hospital (UNTH)", "city": "Ituku-Ozalla, Enugu", "lat": 6.3241, "lon": 7.5331, "phone": "07031322008" },
+  { "name": "University of Port Harcourt Teaching Hospital (UPTH)", "city": "Port Harcourt, Rivers", "lat": 4.8094, "lon": 7.0306, "phone": "08033130512" },
+  { "name": "University of Uyo Teaching Hospital (UUTH)", "city": "Uyo, Akwa Ibom", "lat": 5.0320, "lon": 7.9360, "phone": "08033486981" },
+  { "name": "LAUTECH Teaching Hospital", "city": "Ogbomoso, Oyo", "lat": 8.1350, "lon": 4.2450, "phone": "08023115885" },
+  { "name": "Modibo Adama University Teaching Hospital", "city": "Yola, Adamawa", "lat": 9.2340, "lon": 12.4680, "phone": "08033668948" },
+  { "name": "Abubakar Tafawa Balewa University Teaching Hospital (ATBUTH)", "city": "Bauchi, Bauchi", "lat": 10.3110, "lon": 9.8440, "phone": "07065756164" }
+]

@@ -17,6 +17,8 @@ import 'features/battery/battery.dart';
 import 'features/battery/low_battery_alerter.dart';
 import 'features/checkin/checkin_controller.dart';
 import 'features/health/health_controller.dart';
+import 'features/health/awards.dart';
+import 'features/health/exercise_controller.dart';
 import 'features/inbox/inbox_controller.dart';
 import 'features/location/location.dart';
 import 'features/police/police_directory.dart';
@@ -42,6 +44,8 @@ class AppServices {
     required this.sos,
     required this.lowBattery,
     required this.health,
+    required this.awards,
+    required this.exercise,
     required this.onboarding,
     required this.location,
     required this.inbox,
@@ -64,8 +68,14 @@ class AppServices {
   final SosController sos;
   final LowBatteryAlerter lowBattery;
 
-  /// The Health tab's watch: heart-rate readings, drink-water reminders, nearby hospitals.
+  /// The Health tab's watch: heart-rate readings, drink-water reminders, nearby hospitals and gyms.
   final HealthController health;
+
+  /// Exercise awards: the badges earned for milestones and broken records.
+  final AwardStore awards;
+
+  /// The exercise engine: live walk/run/bike tracking with steps, distance and history.
+  final ExerciseController exercise;
 
   final OnboardingController onboarding;
   final LocationSource location;
@@ -138,9 +148,11 @@ class AppServices {
       i18n: i18n,
     );
 
+    final awards = AwardStore(store);
+    final exercise = ExerciseController(store: store, location: location, awards: awards);
+
     final onboarding = OnboardingController(
       api: api,
-      i18n: i18n,
       session: session,
       keyStore: store,
       vault: vault,
@@ -167,6 +179,8 @@ class AppServices {
       sos: sos,
       lowBattery: lowBattery,
       health: health,
+      awards: awards,
+      exercise: exercise,
       onboarding: onboarding,
       location: location,
       inbox: inbox,
@@ -206,6 +220,8 @@ class AppServices {
     if (settings.onboarded) {
       lowBattery.start();
       health.start();
+      unawaited(exercise.load());
+      unawaited(awards.load());
       unawaited(_push.start());
       unawaited(inbox.refresh());
       unawaited(share.resume());
@@ -224,6 +240,8 @@ class AppServices {
     await _net?.cancel();
     lowBattery.stop();
     health.dispose();
+    exercise.dispose();
+    awards.dispose();
     checkin.dispose();
     sos.dispose();
     share.dispose();

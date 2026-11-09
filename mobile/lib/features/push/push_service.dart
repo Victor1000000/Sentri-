@@ -47,6 +47,46 @@ int _idFor(Map<String, dynamic> data) => ((data['inboxId'] ?? data['sosId'] ?? d
 const _waterId = 7201;
 const _healthNoteId = 7202;
 
+/// The honest state of the drink-water reminder on this phone, as the app can verify it:
+/// * [off] - the person has not chosen a pace (or chose "off").
+/// * [ok] - the reminder really is scheduled and the phone allows notifications.
+/// * [noPermission] - the phone blocks Sentri's notifications entirely.
+/// * [notScheduled] - notifications are allowed but the recurring alarm did not stick
+///   (purged by a battery saver / reboot) or the phone has not excused Sentri from
+///   battery saving, so the reminder may silently die.
+enum WaterStatus { off, ok, noPermission, notScheduled }
+
+/// Checks what actually became of the reminder on this phone instead of assuming it
+/// works: is the notification permission granted, is the recurring alarm still among
+/// the phone's pending scheduled notifications, and has the phone excused Sentri from
+/// battery saving (without which many phones quietly drop scheduled alarms).
+Future<WaterStatus> waterReminderStatus(int minutes) async {
+  if (minutes <= 0) return WaterStatus.off;
+  try {
+    final android = _local.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+    var enabled = true;
+    try {
+      final a = await android?.areNotificationsEnabled();
+      if (a == false) enabled = false;
+    } catch (_) {}
+    if (!enabled) return WaterStatus.noPermission;
+    var scheduled = false;
+    try {
+      final pending = await _local.pendingNotificationRequests();
+      scheduled = pending.any((p) => p.id == '$_waterId');
+    } catch (_) {}
+    var batteryOk = true;
+    try {
+      batteryOk = await Permission.ignoreBatteryOptimizations.isGranted;
+    } catch (_) {}
+    if (!scheduled || !batteryOk) return WaterStatus.notScheduled;
+    return WaterStatus.ok;
+  } catch (_) {
+    // If even the check fails, say the reminder is not verified rather than pretend.
+    return WaterStatus.notScheduled;
+  }
+}
+
 /// Repeats the drink-water reminder at the person's own pace. Cancels the previous one first
 /// (including "off"), then asks for the notification permission once, right when the person
 /// turns reminders on.
@@ -65,6 +105,7 @@ Future<void> scheduleWaterReminder(int minutes, String title, String body) async
       channelDescription: 'Drink-water reminders and gentle heart-rate notes from your own Health tab.',
       importance: Importance.high,
       priority: Priority.high,
+      channelShowBadge: true,
     ),
     iOS: DarwinNotificationDetails(interruptionLevel: InterruptionLevel.timeSensitive),
   );

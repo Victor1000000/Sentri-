@@ -166,13 +166,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                     padding: const EdgeInsets.symmetric(horizontal: 44),
                     child: Text(t('home.hold_help'), textAlign: TextAlign.center, style: TextStyle(fontSize: 13, height: 1.4, color: muted)),
                   ),
-                  const SizedBox(height: 18),
-                  // "Check on me": a timed safety watch. Contacts get a full alert if the
-                  // person has not marked themselves safe when the window ends.
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(22, 0, 22, 12),
-                    child: CheckInCard(checkin: widget.checkin, sos: widget.sos, i18n: widget.i18n),
-                  ),
+                  // "Check on me" has moved to the Exercise section of the Health tab:
+                  // a timed safety watch for walks, runs and rides. Contacts get a full
+                  // alert if the person has not marked themselves safe when it ends.
                   Padding(
                     padding: const EdgeInsets.fromLTRB(22, 0, 22, 16),
                     child: Glass(
@@ -276,7 +272,6 @@ class _MenuRow extends StatelessWidget {
           ]),
         ),
       );
-}
 
 
 /// "Live" tag on the Share location row while a share is running.
