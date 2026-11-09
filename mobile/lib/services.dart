@@ -153,6 +153,7 @@ class AppServices {
 
     final onboarding = OnboardingController(
       api: api,
+      i18n: i18n,
       session: session,
       keyStore: store,
       vault: vault,

@@ -272,7 +272,7 @@ class _MenuRow extends StatelessWidget {
           ]),
         ),
       );
-
+}
 
 /// "Live" tag on the Share location row while a share is running.
 class _SharingTag extends StatelessWidget {

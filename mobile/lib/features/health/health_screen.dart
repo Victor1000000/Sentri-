@@ -11,6 +11,7 @@ import '../../core/config.dart';
 import '../../core/i18n/i18n.dart';
 import '../../core/widgets/flat.dart';
 import '../checkin/checkin_controller.dart';
+import '../push/push_service.dart';
 import 'awards.dart';
 import 'exercise_controller.dart';
 import 'health_controller.dart';

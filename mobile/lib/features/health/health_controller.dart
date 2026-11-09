@@ -503,7 +503,7 @@ class HealthController extends ChangeNotifier with WidgetsBindingObserver {
         // Embedded verified directory first: real numbers researched from official
         // sources, added to the same list and de-duplicated against map results.
         final dir = await _loadDirectory(gym ? 'fitness_directory.json' : 'hospital_directory.json', here);
-        final all = _mergePlaces([...results, ...dir], here);
+        final all = _mergePlaces([results, dir], here);
         if (gym) {
           gyms = all;
           _gymsAt = DateTime.now();

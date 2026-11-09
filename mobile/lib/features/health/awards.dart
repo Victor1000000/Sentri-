@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -126,7 +127,7 @@ AwardLook awardLook(AwardKind k) => switch (k) {
       AwardKind.km5 => const AwardLook(Icons.directions_walk_outlined, Color(0xFF2BB673), Color(0xFF178A52), 'solid'),
       AwardKind.km10 => const AwardLook(Icons.directions_run_outlined, Color(0xFF1F9A8C), Color(0xFF0E6E62), 'solid'),
       AwardKind.km21 => const AwardLook(Icons.flag_outlined, Color(0xFF1F7A8C), Color(0xFF134B57), 'far'),
-      AwardKind.steps10k => const AwardLook(Icons.steps_outlined, Color(0xFFE3A13A), Color(0xFFB27416), 'steps'),
+      AwardKind.steps10k => const AwardLook(Icons.stairs, Color(0xFFE3A13A), Color(0xFFB27416), 'steps'),
       AwardKind.recordKm => const AwardLook(Icons.shield_outlined, Color(0xFFE2574C), Color(0xFFA83228), 'best', round: false),
       AwardKind.recordSteps => const AwardLook(Icons.shield_outlined, Color(0xFFE2574C), Color(0xFFA83228), 'best', round: false),
       AwardKind.sessions5 => const AwardLook(Icons.calendar_today_outlined, Color(0xFF6A5FF0), Color(0xFF4438C9), 'habit'),

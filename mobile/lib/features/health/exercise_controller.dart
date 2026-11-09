@@ -7,6 +7,7 @@ import 'package:pedometer/pedometer.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/storage/key_value_store.dart';
+import '../../core/net/api.dart';
 import '../location/location.dart';
 import 'awards.dart';
 
