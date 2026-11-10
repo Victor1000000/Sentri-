@@ -1,0 +1,63 @@
+diff --git a/mobile/lib/features/health/exercise_controller.dart b/mobile/lib/features/health/exercise_controller.dart
+--- a/mobile/lib/features/health/exercise_controller.dart
++++ b/mobile/lib/features/health/exercise_controller.dart
+@@ -303,13 +303,13 @@
+     if (last == null || lastAt == null) {
+       // First trusted reading of the session: the zero point for distance.
+       _lastAccepted = here;
+-      _lastAcceptedAt = f.at ?? DateTime.now();
++      _lastAcceptedAt = f.at;
+       _lastAcceptedAcc = acc;
+       notifyListeners();
+       return;
+     }
+     final movedM = _dist.as(LengthUnit.Meter, last, here);
+-    final dt = (f.at ?? DateTime.now()).difference(lastAt).inMilliseconds / 1000.0;
++    final dt = f.at.difference(lastAt).inMilliseconds / 1000.0;
+     // Two consecutive errors scatter around the true spot: their average is the
+     // size of the circle the readings can wander in while standing still.
+     // Movement smaller than that is noise, not walking - it is ignored.
+@@ -324,7 +324,7 @@
+       return;
+     }
+     _lastAccepted = here;
+-    _lastAcceptedAt = f.at ?? DateTime.now();
++    _lastAcceptedAt = f.at;
+     _lastAcceptedAcc = acc;
+     if (movedM >= noiseM && movedM >= 0.5) {
+       km += movedM / 1000;
+diff --git a/mobile/lib/features/location/location.dart b/mobile/lib/features/location/location.dart
+--- a/mobile/lib/features/location/location.dart
++++ b/mobile/lib/features/location/location.dart
+@@ -133,7 +133,7 @@
+   Stream<GeoFix> positions({double distanceFilterM = 5}) {
+     try {
+       return Geolocator.getPositionStream(
+-        locationSettings: LocationSettings(accuracy: LocationAccuracy.bestForNavigation, distanceFilter: distanceFilterM),
++        locationSettings: LocationSettings(accuracy: LocationAccuracy.bestForNavigation, distanceFilter: distanceFilterM.round()),
+       ).map(_toFix);
+     } catch (_) {
+       return const Stream.empty();
+diff --git a/mobile/lib/features/home/home_screen.dart b/mobile/lib/features/home/home_screen.dart
+--- a/mobile/lib/features/home/home_screen.dart
++++ b/mobile/lib/features/home/home_screen.dart
+@@ -243,7 +243,6 @@
+                               ),
+                             ],
+                           ),
+-                        ),
+                         );
+                       },
+                     ),
+diff --git a/mobile/lib/features/sos/pin_pad.dart b/mobile/lib/features/sos/pin_pad.dart
+--- a/mobile/lib/features/sos/pin_pad.dart
++++ b/mobile/lib/features/sos/pin_pad.dart
+@@ -47,7 +47,7 @@
+           child: InkWell(
+             borderRadius: radius,
+             onTap: widget.enabled ? onTap : null,
+-            child: SizedBox(
++            child: Container(
+               height: 62,
+               alignment: Alignment.center,
+               child: icon != null
