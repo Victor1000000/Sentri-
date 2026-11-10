@@ -53,6 +53,8 @@ class HealthScreen extends StatefulWidget {
 }
 
 class _HealthScreenState extends State<HealthScreen> {
+  double _scrollY = 0;
+
   @override
   void initState() {
     super.initState();
@@ -71,7 +73,18 @@ class _HealthScreenState extends State<HealthScreen> {
       listenable: Listenable.merge([widget.health, widget.exercise, widget.awards, widget.checkin]),
       builder: (context, _) => Scaffold(
         appBar: AppBar(title: Text(t('tabs.health'))),
-        body: ListView(
+        body: NotificationListener<ScrollNotification>(
+          // The scroll offset drives the banner's parallax: the photo slides
+          // slower than the list, like the police tab's cover.
+          onNotification: (n) {
+            if (n.metrics.axis == Axis.vertical && (n.metrics.pixels - _scrollY).abs() > 0.5) {
+              setState(() => _scrollY = n.metrics.pixels);
+            }
+            return false;
+          },
+          child: ListView(
+          // Bouncy pull: every tab scrolls with the same alive spring.
+          physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
           children: [
             // The tab opens on a person, not on a form: a morning-stretch banner
@@ -83,7 +96,16 @@ class _HealthScreenState extends State<HealthScreen> {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    Image.memory(photoHealthBytes, fit: BoxFit.cover, gaplessPlayback: true),
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      // The photo lags behind the list (parallax) but is drawn
+                      // taller than the box, so no bounce can pull it past an
+                      // edge and show a bare stripe underneath.
+                      top: _scrollY * 0.35 - 60,
+                      height: 288,
+                      child: Image.memory(photoHealthBytes, fit: BoxFit.cover, gaplessPlayback: true),
+                    ),
                     Align(
                       alignment: Alignment.bottomLeft,
                       child: Container(
@@ -157,6 +179,7 @@ class _HealthScreenState extends State<HealthScreen> {
               retry: () => unawaited(widget.health.loadGyms(force: true)),
             ),
           ],
+          ),
         ),
       ),
     );
@@ -533,6 +556,7 @@ class _HealthScreenState extends State<HealthScreen> {
           // fixed width instead of eight of them shrinking into the edge.
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
             child: Row(
               children: [
                 for (final k in kinds)

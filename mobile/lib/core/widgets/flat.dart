@@ -44,7 +44,7 @@ class FlatPage extends StatelessWidget {
         return false;
       },
       child: ListView(
-        physics: physics ?? const AlwaysScrollableScrollPhysics(),
+        physics: physics ?? const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
         padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
         children: [
           Text(title, style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w700, letterSpacing: -0.5, height: 1.1)),
@@ -173,6 +173,69 @@ class _LiveDotState extends State<LiveDot> with SingleTickerProviderStateMixin {
       ),
     );
   }
+}
+
+/// The face the home and SOS screens wear: big vertical eyes and a smile in the
+/// same language as the reference boards. [hold] is 0 calm — a wide open smile —
+/// and 1 when the SOS is held or triggered, where the smile sets into a knowing
+/// smirk with the right corner lifted (never an angry frown). [blink] is 0 with
+/// the eyes open and 1 shut; the home screen drives it so the face blinks every
+/// two seconds and feels alive.
+class MoodFacePainter extends CustomPainter {
+  const MoodFacePainter(this.hold, this.ink, {this.blink = 0});
+  /// 0 = calm, 1 = the SOS hold is nearly done (or the alert is live).
+  final double hold;
+  final Color ink;
+
+  /// 0 = eyes open, 1 = eyes shut for this frame.
+  final double blink;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final r = size.shortestSide / 2;
+    final c = Offset(size.width / 2, size.height / 2);
+    final eye = Paint()..color = ink;
+    // Two big eyes: vertical rounded bars, sitting on the upper half like the reference.
+    // They stretch a touch while holding, and shut smoothly on a blink.
+    final stretch = 1.0 + 0.25 * hold;
+    for (final side in [-1.0, 1.0]) {
+      final ex = c.dx + side * r * 0.40;
+      final ey = c.dy - r * 0.18;
+      final ew = r * 0.155 * (1.0 + 0.35 * hold);
+      final eh = r * 0.26 * stretch * (1.0 - blink);
+      if (eh <= 0) continue;
+      final rect = RRect.fromRectAndRadius(
+        Rect.fromCenter(center: Offset(ex, ey), width: ew * 2, height: eh * 2),
+        Radius.circular(ew),
+      );
+      canvas.drawRRect(rect, eye);
+    }
+    // The mouth: a wide smile when safe; while holding (or with the alert on) it
+    // settles into a smirk, the right corner lifted - a knowing face, not anger.
+    final mouth = Paint()
+      ..color = ink
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = r * 0.07
+      ..strokeCap = StrokeCap.round;
+    final mw = r * 0.62;
+    final my = c.dy + r * 0.26;
+    if (hold < 0.5) {
+      final path = Path()
+        ..moveTo(c.dx - mw / 2, my)
+        ..quadraticBezierTo(c.dx, my + r * (0.30 - 0.34 * hold * 2), c.dx + mw / 2, my);
+      canvas.drawPath(path, mouth);
+    } else {
+      final k = (hold - 0.5) * 2;
+      final path = Path()
+        ..moveTo(c.dx - mw / 2, my + r * 0.02 * k)
+        ..quadraticBezierTo(c.dx + mw * 0.08, my + r * 0.08 * k, c.dx + mw / 2, my - r * 0.20 * k);
+      canvas.drawPath(path, mouth);
+    }
+  }
+
+  @override
+  bool shouldRepaint(MoodFacePainter oldDelegate) =>
+      oldDelegate.hold != hold || oldDelegate.ink != ink || oldDelegate.blink != blink;
 }
 
 /// Solid full-width action. [danger] is for stopping something.

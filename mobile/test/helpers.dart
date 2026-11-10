@@ -244,6 +244,8 @@ class FakeLocation implements LocationSource {
   Future<GeoFix?> lastKnown() async => current;
   @override
   Future<GeoFix?> preciseFix({Duration timeout = const Duration(seconds: 20)}) async => current;
+  @override
+  Stream<GeoFix> positions({double distanceFilterM = 5}) => const Stream.empty();
 }
 
 class FakeBattery implements BatterySource {

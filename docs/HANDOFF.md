@@ -214,5 +214,34 @@ Style rule for the whole app: FLAT. No frosted glass, no translucency. `core/wid
   (`_PillNav` in `app.dart`, still an IndexedStack). Police screen got real one-tap call buttons (`url_launcher tel:`,
   numbers made dialable via `_dialable`). `FlatPage` gained `physics:`/`onScroll:` for the bouncy scroll + parallax
   banner (share + police screens). Photos in banners feature Black models (standing rule).
-- Lesson learned this version: a closure capture defeats null promotion — assign to a `final` local first. Also: CJK or
+- Reinforce this here: a closure capture defeats null promotion — assign to a `final` local first. Also: CJK or
   odd identifiers must NEVER leak into code files (a "大部" byte slipped into a draft once; caught and removed).
+
+## 11. Version 27 (this patch) — engineer's notes
+Vic's fix list: live kilometres, live map path, path in history, app-wide scroll feel, the home face (red SMIRK
+not anger + a blink every 2 s), and the SOS screen now in the flat family. No i18n changes: still 287 keys × 5.
+- Exercise tracking is stream-first. `location.dart` has `LocationSource.positions({double distanceFilterM = 5})` —
+  Geolocator `getPositionStream(accuracy: bestForNavigation, distanceFilter: …)`. The default abstract impl throws
+  `UnsupportedError`; `FakeLocation` returns an empty stream. `exercise_controller.dart` `_track()` listens to it
+  (and centres the map instantly on `lastKnown()`); every stream entry goes through `_onPosition()`. Fallback
+  `_startFallback()` keeps the old one-fix-per-5-s poll (`_pollFix()`) only when the stream errors, closes or the
+  source cannot stream. Count gates: accuracy ≤ 60 m (`_maxAccuracyM`), movement below the average of the last two
+  accuracies is noise (ignored), movement beyond `mode max speed × dt + 15 m` is a GPS jump (dropped, anchor kept).
+  km += moved/1000 and `_appendPoint` at every accepted fix ≥ 0.5 m; path entries need ≥ 8 m; max 300 points, thinned
+  by halving (start+end kept). `stop()`/`start()`/`dispose()` all cancel `_posSub` + both timers.
+- The map already followed `lastFix` and history already showed `record.path` (`_showSession` bottom sheet) — the
+  bug was only that nothing was ever accepted, so both looked dead. No workout/health-screen changes needed.
+- Scroll feel: `FlatPage` default physics is now `AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics())`.
+  Same physics added to home, health (+ parallax on the banner via `_scrollY` state), contacts (3 lists), map (2
+  spring sheets), onboarding, SOS, and the health awards shelf row. Reduced-motion users are unaffected (only our
+  custom painters check `Flat.still`).
+- Home face: `_MoodFacePainter` moved to `flat.dart` as public `MoodFacePainter(hold, ink, blink)`; hold ≥ 0.5 is a
+  RIGHT-LIFTED SMIRK (asymmetric curve), never the old flat grimace. `_HomeScreenState` runs a second controller that
+  repeats every 2 s; `_blinkValue()` shuts the eyes for ~440 ms of that (sine curve), and `Flat.still` keeps the face
+  motionless. `widget.sos` joined the `Listenable.merge` — while `sos.phase != SosPhase.idle` the face field stays
+  red with the smirk (mid-hold too).
+- SOS screen redesigned: mood-face disc (white on alarm red; seconds in the disc during countdown; green + check
+  once contacts acknowledge) inside a thin countdown ring, `Flat.bg` ground, hairline offline chip, `FlatButton` for
+  "I'm safe", everything in `pin_pad.dart` (new leaf; `PinPad`/`PinPadState` API unchanged: `clear()`, `enabled`,
+  4-digit auto-submit) as flat card keys with hairline edges and alarm-red dots. PoliceCallCard untouched.
+

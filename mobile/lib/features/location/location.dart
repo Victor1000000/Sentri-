@@ -48,6 +48,13 @@ abstract class LocationSource {
   /// one from Wi-Fi or mobile towers; the GPS needs a few seconds to do better. For screens where being exact matters
   /// more than being instant (the map). Alerts keep using [fix], which is quick.
   Future<GeoFix?> preciseFix({Duration timeout = const Duration(seconds: 25)}) => fix(highAccuracy: true, timeout: timeout);
+
+  /// A continuous stream of the phone's own positions while the person moves — the device
+  /// reports every time it has travelled [distanceFilterM] further, fresh each time. Live
+  /// workout tracking uses this: distance and the route line grow point by point. Sources
+  /// that cannot stream raise [UnsupportedError]; the workout screen then falls back to
+  /// asking for single fixes on a timer.
+  Stream<GeoFix> positions({double distanceFilterM = 5}) => throw UnsupportedError('no position stream');
 }
 
 class GeolocatorSource implements LocationSource {
@@ -119,6 +126,17 @@ class GeolocatorSource implements LocationSource {
       return p == null ? null : _toFix(p);
     } catch (_) {
       return null;
+    }
+  }
+
+  @override
+  Stream<GeoFix> positions({double distanceFilterM = 5}) {
+    try {
+      return Geolocator.getPositionStream(
+        locationSettings: LocationSettings(accuracy: LocationAccuracy.bestForNavigation, distanceFilter: distanceFilterM),
+      ).map(_toFix);
+    } catch (_) {
+      return const Stream.empty();
     }
   }
 

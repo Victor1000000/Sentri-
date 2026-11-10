@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
 
-/// Number pad for the cancel PIN. The PIN is exactly 4 digits: the fourth digit submits at
-/// once, like a bank card machine, so there is no OK key and no way to type more.
-/// Dots (not digits) are shown, and haptics/sounds are left off so nothing draws attention.
+import '../../core/widgets/flat.dart';
+
+/// Number pad for the cancel PIN — in the flat family: solid card squares with a
+/// hairline edge, like every other card on this app, and the dots fill in the
+/// alarm red as the digits go in. The PIN is exactly 4 digits: the fourth digit
+/// submits at once, like a bank card machine, so there is no OK key and no way
+/// to type more. Dots (not digits) are shown, and haptics/sounds are left off so
+/// nothing draws attention.
 class PinPad extends StatefulWidget {
   const PinPad({super.key, required this.onSubmit, this.enabled = true});
   final void Function(String pin) onSubmit;
@@ -32,20 +37,23 @@ class PinPadState extends State<PinPad> {
   }
 
   Widget _key(BuildContext context, String label, VoidCallback onTap, {IconData? icon}) {
+    final radius = BorderRadius.circular(14);
     return Expanded(
       child: Padding(
         padding: const EdgeInsets.all(5),
-        child: SizedBox(
-          height: 62,
-          child: FilledButton(
-            onPressed: widget.enabled ? onTap : null,
-            style: FilledButton.styleFrom(
-              minimumSize: Size.zero,
-              backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
-              foregroundColor: Theme.of(context).colorScheme.onSurface,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Material(
+          color: Flat.card(context),
+          shape: RoundedRectangleBorder(borderRadius: radius, side: BorderSide(color: Flat.hairline(context))),
+          child: InkWell(
+            borderRadius: radius,
+            onTap: widget.enabled ? onTap : null,
+            child: SizedBox(
+              height: 62,
+              alignment: Alignment.center,
+              child: icon != null
+                  ? Icon(icon, size: 22, color: Flat.muted(context))
+                  : Text(label, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w500)),
             ),
-            child: icon != null ? Icon(icon) : Text(label, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w500)),
           ),
         ),
       ),
@@ -54,7 +62,6 @@ class PinPadState extends State<PinPad> {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 300),
       child: Column(
@@ -73,8 +80,8 @@ class PinPadState extends State<PinPad> {
                     height: 12,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: i < _pin.length ? cs.onSurface : Colors.transparent,
-                      border: Border.all(color: i < _pin.length ? cs.onSurface : cs.outline, width: 1.5),
+                      color: i < _pin.length ? Flat.danger : Colors.transparent,
+                      border: Border.all(color: i < _pin.length ? Flat.danger : Flat.hairline(context), width: 1.5),
                     ),
                   ),
               ],

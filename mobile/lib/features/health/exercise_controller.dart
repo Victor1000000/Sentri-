@@ -84,8 +84,12 @@ class ExerciseController extends ChangeNotifier {
   static const _maxHistory = 60;
   static const _maxPathPoints = 300;
 
-  /// How often the DISTANCE is recomputed from a fresh GPS fix (the clock below
-  /// keeps the visible seconds moving on their own).
+  /// How often the FALLBACK asks for a fresh GPS fix. The session's first
+  /// choice is the device's own position stream ([LocationSource.positions]),
+  /// which reports fresh readings as the person moves; some sources cannot
+  /// stream (and a permission service can fail), so the fallback keeps the
+  /// old ask-one-fix-on-a-timer behaviour, a bit more forgiving than before.
+  /// The clock below keeps the visible seconds moving on their own.
   static const _tick = Duration(seconds: 5);
 
   /// The session clock must tick every single second - "tick tock" - instead of
@@ -112,23 +116,29 @@ class ExerciseController extends ChangeNotifier {
   int get bestSteps => history.fold(0, (a, r) => r.steps > a ? r.steps : a);
 
   DateTime? _startedAt;
-  Timer? _tickTimer;
   Timer? _clockTimer;
+  Timer? _tickTimer; // only the fallback when the device cannot stream
+  StreamSubscription<GeoFix>? _posSub;
   StreamSubscription<StepCount>? _stepSub;
   int _stepBaseline = -1;
-  double? _lastFixLat;
-  double? _lastFixLon;
-  bool _busy = false;
+  LatLng? _lastAccepted; // last fix trusted for the distance count
+  DateTime? _lastAcceptedAt;
+  double? _lastAcceptedAcc;
   final _dist = const Distance();
 
-  /// The plausible kilometres for one 5-second tick per mode: even jogging hard
-  /// cannot cover more than ~55 m in that time, and a bike far less than 150 m.
-  /// Anything longer is a GPS jump (tunnel, tower guess) and its distance is
-  /// thrown away instead of added, so the count stays honest.
-  double get _maxTickKm => switch (mode) {
-        ExerciseMode.walk => 0.05,
-        ExerciseMode.run => 0.08,
-        ExerciseMode.bike => 0.15,
+  /// A fix worse than this is a tower/Wi-Fi guess or heavy drift: it moves the
+  /// camera dot on the map but is never trusted for the distance count. The
+  /// movement noise check below keeps the honest sum even in between.
+  static const _maxAccuracyM = 60.0;
+
+  /// How fast each mode can plausibly move, metres per second, plus a few
+  /// metres of slack: a walk cannot outrun 2.5 m/s, a run fits in 7, a bike
+  /// in 20. A jump bigger than the limit over the time since the last trusted
+  /// fix is a GPS rock (tunnel, tower guess) and is thrown away, NOT added.
+  double get _maxSpeed => switch (mode) {
+        ExerciseMode.walk => 2.5,
+        ExerciseMode.run => 7.0,
+        ExerciseMode.bike => 20.0,
       };
 
   Future<void> load() async {
@@ -173,16 +183,60 @@ class ExerciseController extends ChangeNotifier {
     lastFix = null;
     _startedAt = DateTime.now();
     _stepBaseline = -1;
-    _lastFixLat = null;
-    _lastFixLon = null;
+    _lastAccepted = null;
+    _lastAcceptedAt = null;
+    _lastAcceptedAcc = null;
     notifyListeners();
     _listenSteps(m);
-    _tickTimer?.cancel();
     _clockTimer?.cancel();
-    _tickTimer = Timer.periodic(_tick, (_) => unawaited(_onTick()));
     _clockTimer = Timer.periodic(_clockTick, (_) => _updateSeconds());
-    unawaited(_onTick()); // the first fix right away
+    unawaited(_track());
     return true;
+  }
+
+  /// Follows the person while the session runs: the device's own position
+  /// stream when it can (every fresh reading as they move), one fix per tick
+  /// otherwise. The camera centres on the last known spot right away.
+  Future<void> _track() async {
+    // An instant centre for the map, before the first streamed reading: the
+    // OS's cached position costs nothing.
+    try {
+      final f = await _location.lastKnown();
+      if (f != null && active && lastFix == null) {
+        lastFix = f;
+        notifyListeners();
+      }
+    } catch (_) {}
+    try {
+      _posSub = _location.positions(distanceFilterM: 4).listen(_onPosition, onDone: () {
+        if (active) _startFallback();
+      }, onError: (Object _) {
+        if (active) _startFallback();
+      });
+      // If the source cannot stream at all, go straight to polling.
+      if (_posSub == null) _startFallback();
+    } on UnsupportedError {
+      _startFallback();
+    } catch (_) {
+      _startFallback();
+    }
+  }
+
+  /// Fallback tracking: one fresh fix every [_tick]. Used when the device
+  /// cannot stream (or the stream died): same honest counting, slower cadence.
+  void _startFallback() {
+    if (_tickTimer != null || !active) return;
+    _tickTimer = Timer.periodic(_tick, (_) => unawaited(_pollFix()));
+    unawaited(_pollFix());
+  }
+
+  Future<void> _pollFix() async {
+    if (!active) return;
+    GeoFix? f;
+    try {
+      f = await _location.fix(highAccuracy: true, timeout: const Duration(seconds: 5));
+    } catch (_) {}
+    if (f != null) _onPosition(f);
   }
 
   /// Re-reads the clock from the start time each second, so the big digits move
@@ -227,48 +281,61 @@ class ExerciseController extends ChangeNotifier {
     }
   }
 
-  /// One tick: one fresh GPS fix fused in honestly. (The seconds read from the
-  /// clock each second in [_updateSeconds]; this tick is about the distance.)
-  Future<void> _onTick() async {
-    if (!active || _busy) return;
-    _busy = true;
-    try {
-      GeoFix? f;
-      try {
-        f = await _location.fix(highAccuracy: true, timeout: const Duration(seconds: 5));
-      } catch (_) {}
-      if (f == null) return;
-      // The camera target is the freshest fix, whatever its quality.
-      lastFix = f;
-      // Only real GPS-grade positions are trusted for distance: a tower/Wi-Fi
-      // guess can sit hundreds of metres off and would corrupt the count.
-      if (!usableForDistance(f, limitM: 35)) return;
-      final lat = _lastFixLat;
-      final lon = _lastFixLon;
-      final here = LatLng(f.lat, f.lon);
-      if (lat == null || lon == null) {
-        _lastFixLat = f.lat;
-        _lastFixLon = f.lon;
-        notifyListeners();
-        return;
-      }
-      final movedKm = _dist.as(LengthUnit.Kilometer, LatLng(lat, lon), here);
-      if (movedKm <= _maxTickKm) {
-        km += movedKm;
-        _maybeAppendPoint(here, movedKm);
-      }
-      _lastFixLat = f.lat;
-      _lastFixLon = f.lon;
+  /// One fresh reading from the phone, streamed or polled. The map camera
+  /// follows whatever comes in; the distance count only trusts readings that
+  /// pass three honest checks - good accuracy, no impossible jump since the
+  /// last trusted reading, and real movement beyond the noise floor.
+  void _onPosition(GeoFix f) {
+    if (!active) return;
+    // The camera target is the freshest fix, whatever its quality.
+    lastFix = f;
+    // A tower/Wi-Fi guess can sit hundreds of metres off and would corrupt
+    // the count: a fix this rough still steers the camera but is not trusted.
+    final acc = f.accuracyM ?? double.infinity;
+    if (acc > _maxAccuracyM) {
       notifyListeners();
-    } finally {
-      _busy = false;
+      return;
     }
+    final here = LatLng(f.lat, f.lon);
+    final last = _lastAccepted;
+    final lastAt = _lastAcceptedAt;
+    final lastAcc = _lastAcceptedAcc;
+    if (last == null || lastAt == null) {
+      // First trusted reading of the session: the zero point for distance.
+      _lastAccepted = here;
+      _lastAcceptedAt = f.at ?? DateTime.now();
+      _lastAcceptedAcc = acc;
+      notifyListeners();
+      return;
+    }
+    final movedM = _dist.as(LengthUnit.Meter, last, here);
+    final dt = (f.at ?? DateTime.now()).difference(lastAt).inMilliseconds / 1000.0;
+    // Two consecutive errors scatter around the true spot: their average is the
+    // size of the circle the readings can wander in while standing still.
+    // Movement smaller than that is noise, not walking - it is ignored.
+    final noiseM = ((lastAcc ?? _maxAccuracyM) + acc) / 2;
+    // ... and it cannot be faster than the mode allows (plus a few metres of
+    // slack): anything bigger is a GPS jump, thrown away instead of counted.
+    final limitM = _maxSpeed * (dt <= 0 ? 1 : dt) + 15;
+    if (movedM > limitM) {
+      // Do not adopt the jump: keep the old anchor so one bad reading cannot
+      // weld itself into the route.
+      notifyListeners();
+      return;
+    }
+    _lastAccepted = here;
+    _lastAcceptedAt = f.at ?? DateTime.now();
+    _lastAcceptedAcc = acc;
+    if (movedM >= noiseM && movedM >= 0.5) {
+      km += movedM / 1000;
+      _appendPoint(here);
+    }
+    notifyListeners();
   }
 
   /// Joins a point onto the route line, but only when the person really moved
   /// (over ~8 m) - standing still would pile dots on one house.
-  void _maybeAppendPoint(LatLng pt, double movedKm) {
-    if (movedKm < 0.005) return;
+  void _appendPoint(LatLng pt) {
     final list = [...path];
     if (list.isNotEmpty && _dist.as(LengthUnit.Meter, list.last, pt) < 8) return;
     list.add(pt);
@@ -294,6 +361,8 @@ class ExerciseController extends ChangeNotifier {
     _tickTimer = null;
     _clockTimer?.cancel();
     _clockTimer = null;
+    unawaited(_posSub?.cancel());
+    _posSub = null;
     unawaited(_stepSub?.cancel());
     _stepSub = null;
     final wasActive = active;
@@ -345,6 +414,8 @@ class ExerciseController extends ChangeNotifier {
   @override
   void dispose() {
     _tickTimer?.cancel();
+    _clockTimer?.cancel();
+    unawaited(_posSub?.cancel());
     unawaited(_stepSub?.cancel());
     super.dispose();
   }

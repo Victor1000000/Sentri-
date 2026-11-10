@@ -541,6 +541,7 @@ class MapScreenState extends State<MapScreen> {
                   Flexible(
                     child: ListView(
                       shrinkWrap: true,
+                      physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
                       padding: const EdgeInsets.only(bottom: 8),
                       children: [
                         for (final hit in hits)
@@ -901,6 +902,7 @@ class MapScreenState extends State<MapScreen> {
       builder: (ctx) => SafeArea(
         child: ListView(
           shrinkWrap: true,
+          physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
           children: [
             Padding(padding: const EdgeInsets.fromLTRB(22, 4, 22, 10), child: Text(t('map.route_steps'), style: Theme.of(ctx).textTheme.titleMedium)),
             Padding(padding: const EdgeInsets.fromLTRB(22, 0, 22, 8), child: Text(plan.destName, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF6A5FF0)))),

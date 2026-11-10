@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io' show Platform;
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -26,58 +27,9 @@ import '../sos/sos_controller.dart';
 /// The face the home screen wears: a big mood face on a full-bleed colour field.
 /// Safe: a calm field of green, closed-shape smiley — the same language as the
 /// reference the app was shown: green smiling face = you are covered. While the
-/// person holds the SOS, the whole screen leans toward alarm red and the face
-/// changes, so "holding" is felt, not just timed.
-class _MoodFacePainter extends CustomPainter {
-  _MoodFacePainter(this.hold, this.ink);
-  /// 0 = calm, 1 = the SOS hold is nearly done.
-  final double hold;
-  final Color ink;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final r = size.shortestSide / 2;
-    final c = Offset(size.width / 2, size.height / 2);
-    final eye = Paint()..color = ink;
-    // Two big eyes: vertical rounded bars, sitting on the upper half like the reference.
-    final stretch = 1.0 + 0.25 * hold;
-    for (final side in [-1.0, 1.0]) {
-      final ex = c.dx + side * r * 0.40;
-      final ey = c.dy - r * 0.18;
-      final ew = r * 0.155 * (1.0 + 0.35 * hold);
-      final eh = r * 0.26 * stretch;
-      final rect = RRect.fromRectAndRadius(
-        Rect.fromCenter(center: Offset(ex, ey), width: ew * 2, height: eh * 2),
-        Radius.circular(ew),
-      );
-      canvas.drawRRect(rect, eye);
-    }
-    // The mouth: a wide smile when safe, a flat open grimace while holding.
-    final mouth = Paint()
-      ..color = ink
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = r * 0.07
-      ..strokeCap = StrokeCap.round;
-    final mw = r * 0.62;
-    final my = c.dy + r * 0.26;
-    if (hold < 0.5) {
-      final path = Path()
-        ..moveTo(c.dx - mw / 2, my)
-        ..quadraticBezierTo(c.dx, my + r * (0.30 - 0.34 * hold * 2), c.dx + mw / 2, my);
-      canvas.drawPath(path, mouth);
-    } else {
-      final k = (hold - 0.5) * 2;
-      final path = Path()
-        ..moveTo(c.dx - mw / 2, my - r * 0.06 * k)
-        ..quadraticBezierTo(c.dx, my + r * 0.16 * k, c.dx + mw / 2, my - r * 0.06 * k);
-      canvas.drawPath(path, mouth);
-    }
-  }
-
-  @override
-  bool shouldRepaint(_MoodFacePainter oldDelegate) => oldDelegate.hold != hold || oldDelegate.ink != ink;
-}
-
+/// person holds the SOS — or the alert is live — the whole screen leans toward
+/// alarm red and the face smirks, not frowns. The face blinks every two seconds
+/// so it feels alive; the shared painter lives in flat.dart.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, required this.sos, required this.settings, required this.i18n, required this.bridge, required this.api, required this.inbox, required this.share, required this.checkin, required this.police, required this.people, required this.profile});
   final SentriApi api;
@@ -98,7 +50,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateMixin {
+class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   late final AnimationController _hold = AnimationController(vsync: this, duration: const Duration(seconds: 1))
     ..addStatusListener((s) {
       if (s == AnimationStatus.completed) {
@@ -106,11 +58,36 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         unawaited(widget.sos.trigger('floating'));
       }
     });
+  /// One blink every two seconds: the controller repeats each cycle, the eyes
+  /// shut and reopen inside the first fifth of it. Motion-reduced phones keep
+  /// the face still.
+  late final AnimationController _blink = AnimationController(vsync: this, duration: const Duration(seconds: 2));
   int _titleTaps = 0;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (Flat.still(context)) {
+      _blink.stop();
+    } else if (!_blink.isAnimating) {
+      _blink.repeat();
+    }
+  }
+
+  /// How shut the eyes are this frame: nothing most of the cycle, one smooth
+  /// blink at the top of it.
+  double _blinkValue() {
+    if (Flat.still(context)) return 0;
+    final v = _blink.value;
+    const blinkSpan = 0.22; // 440 ms of the 2 s cycle: close then open
+    if (v >= blinkSpan) return 0;
+    return math.sin(v / blinkSpan * math.pi);
+  }
 
   @override
   void dispose() {
     _hold.dispose();
+    _blink.dispose();
     super.dispose();
   }
 
@@ -153,12 +130,15 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   Widget build(BuildContext context) {
     final t = widget.i18n.t;
     return ListenableBuilder(
-      listenable: Listenable.merge([widget.settings, widget.i18n, widget.inbox, widget.share, widget.checkin, widget.profile]),
+      listenable: Listenable.merge([widget.settings, widget.i18n, widget.inbox, widget.share, widget.checkin, widget.profile, widget.sos]),
       builder: (context, _) {
         final s = widget.settings;
         final alarm = Theme.of(context).colorScheme.error;
         final muted = Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6);
-        final skin = Color.lerp(const Color(0xFF1E9E56), alarm, _hold.value)!;
+        /// The face reads red once the SOS is held — and stays red (with its
+        /// smirk) for as long as the alert is live: countdown, active, contacts
+        /// responding; only idle calms it back to green.
+        final alarmOn = widget.sos.phase != SosPhase.idle;
         const faceInk = Color(0xFF101B12);
         final greeting = t(_greetKey());
         final name = widget.profile.name;
@@ -166,6 +146,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         return Scaffold(
           backgroundColor: Colors.transparent,
           body: GlassBackdrop(child: SingleChildScrollView(
+            // The bouncy pull pushes the whole mood field as one: the spring
+            // keeps the home screen feeling alive, matching the other tabs.
+            physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
             child: SafeArea(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -228,8 +211,14 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                       onTapUp: (_) => _hold.reset(),
                       onTapCancel: _hold.reset,
                       child: AnimatedBuilder(
-                        animation: _hold,
-                        builder: (context, _) => Container(
+                        animation: Listenable.merge([_hold, _blink]),
+                        builder: (context, _) {
+                          // Red while holding or while the alert is live; the
+                          // colour and face are recomputed every frame here so
+                          // the hold animates smoothly.
+                          final red = math.max(_hold.value, alarmOn ? 1.0 : 0.0);
+                          final skin = Color.lerp(const Color(0xFF1E9E56), alarm, red)!;
+                          return Container(
                           margin: const EdgeInsets.symmetric(horizontal: 22),
                           height: faceHeight,
                           decoration: BoxDecoration(
@@ -240,7 +229,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                           child: Stack(
                             fit: StackFit.expand,
                             children: [
-                              CustomPaint(painter: _MoodFacePainter(_hold.value, faceInk)),
+                              CustomPaint(painter: MoodFacePainter(red, faceInk, blink: _blinkValue())),
                               Align(
                                 alignment: Alignment.bottomCenter,
                                 child: Padding(
@@ -255,8 +244,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                             ],
                           ),
                         ),
-                      ),
+                        );
+                      },
                     ),
+                  ),
                   ),
                   const SizedBox(height: 22),
                   Padding(
@@ -422,6 +413,7 @@ class _ShortcutsPage extends StatelessWidget {
           body: SentriBackground(
             child: SafeArea(
               child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
                 padding: const EdgeInsets.fromLTRB(26, 16, 26, 32),
                 children: [
                   Row(children: [

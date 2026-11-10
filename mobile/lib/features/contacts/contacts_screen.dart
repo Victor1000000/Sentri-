@@ -112,6 +112,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
           final list = snap.data ?? const [];
           final declined = list.where((c) => c.consent == 'declined').length;
           return ListView(
+            physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
             children: [
               // The tab opens on the kind of moment this section is about: friends
@@ -249,6 +250,7 @@ class _PersonSheetState extends State<_PersonSheet> {
           const SizedBox(height: 14),
           Expanded(
             child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
               children: [
                 Text(t('contacts.title'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
@@ -394,6 +396,7 @@ class _AddSheetState extends State<_AddSheet> {
           const SizedBox(height: 14),
           Expanded(
             child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
               children: [
                 Text(t('contacts.add'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),

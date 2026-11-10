@@ -67,6 +67,7 @@ class OnboardingFlow extends StatelessWidget {
                   ),
                   Expanded(
                     child: SingleChildScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
                       padding: const EdgeInsets.fromLTRB(26, 56, 26, 24),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,

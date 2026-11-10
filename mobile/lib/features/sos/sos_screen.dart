@@ -3,14 +3,22 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../core/i18n/i18n.dart';
+import '../../core/widgets/flat.dart';
 import '../police/police_call_card.dart';
 import '../police/police_directory.dart';
 import 'pin_pad.dart';
 import 'sos_controller.dart';
 
-/// Full-screen alert view. Shows over the lock screen (the Android activity is set to do that).
-/// It is shown for [SosPhase.countdown], [SosPhase.active] and [SosPhase.acknowledged] only;
-/// after a duress PIN the controller reports idle, so this screen disappears exactly as on a cancel.
+/// Full-screen alert view — in the flat family now: the grey ground and solid
+/// cards the rest of the app wears, with the mood face at the centre. It shows
+/// over the lock screen (the Android activity is set to do that), for
+/// [SosPhase.countdown], [SosPhase.active] and [SosPhase.acknowledged] only;
+/// after a duress PIN the controller reports idle, so this screen disappears
+/// exactly as on a cancel.
+///
+/// The face matches the home screen: while the alert runs it is red and smirk —
+/// bigger and bolder here, white on the alarm disc, with the countdown circling
+/// it. The contacts card and the cancel PIN sit below like every other flat page.
 class SosScreen extends StatefulWidget {
   const SosScreen({super.key, required this.sos, required this.i18n, required this.police});
   final SosController sos;
@@ -60,7 +68,6 @@ class _SosScreenState extends State<SosScreen> {
   Widget build(BuildContext context) {
     final t = widget.i18n.t;
     final phase = widget.sos.phase;
-    final cs = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
 
     var secs = 0;
@@ -82,46 +89,67 @@ class _SosScreenState extends State<SosScreen> {
     }
 
     final calm = phase == SosPhase.acknowledged;
-    final accent = calm ? cs.tertiary : cs.error;
+    final accent = calm ? Flat.live : Flat.danger;
+
+    // The heart of the screen: the mood face on a solid disc, ringed by the
+    // countdown. Red and smirking while the alert runs; a calm green with a
+    // check when the contacts are on their way.
+    Widget core;
+    const ink = Colors.white;
+    if (phase == SosPhase.countdown) {
+      core = Text('$secs', style: text.displayMedium?.copyWith(color: ink, fontWeight: FontWeight.w800));
+    } else if (calm) {
+      core = const Icon(Icons.check_rounded, size: 52, color: ink);
+    } else {
+      core = const CustomPaint(painter: MoodFacePainter(1, ink), size: Size(96, 96));
+    }
+    final face = SizedBox(
+      width: 132,
+      height: 132,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          SizedBox.expand(
+            child: CircularProgressIndicator(
+              value: phase == SosPhase.countdown ? fraction : 1,
+              strokeWidth: 5,
+              color: accent,
+              backgroundColor: accent.withValues(alpha: 0.16),
+            ),
+          ),
+          Container(
+            width: 112,
+            height: 112,
+            decoration: BoxDecoration(shape: BoxShape.circle, color: accent),
+            alignment: Alignment.center,
+            child: core,
+          ),
+        ],
+      ),
+    );
 
     return Scaffold(
-      backgroundColor: Color.alphaBlend(accent.withValues(alpha: 0.10), cs.surface),
+      backgroundColor: Color.alphaBlend(accent.withValues(alpha: 0.08), Flat.bg(context)),
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Status badge: a ring that drains during the cancel window, then a solid dot.
-                SizedBox(
-                  width: 132,
-                  height: 132,
-                  child: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      SizedBox.expand(
-                        child: CircularProgressIndicator(
-                          value: phase == SosPhase.countdown ? fraction : 1,
-                          strokeWidth: 8,
-                          color: accent,
-                          backgroundColor: accent.withValues(alpha: 0.18),
-                        ),
-                      ),
-                      if (phase == SosPhase.countdown)
-                        Text('$secs', style: text.displayMedium?.copyWith(color: accent, fontWeight: FontWeight.w800))
-                      else
-                        Icon(calm ? Icons.check_rounded : Icons.shield_rounded, size: 56, color: accent),
-                    ],
-                  ),
-                ),
+                face,
                 const SizedBox(height: 20),
                 Text(headline, textAlign: TextAlign.center, style: text.headlineMedium),
                 if (widget.sos.offlineQueued) ...[
                   const SizedBox(height: 12),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(color: cs.surface, borderRadius: BorderRadius.circular(10), border: Border.all(color: cs.outlineVariant)),
+                    decoration: BoxDecoration(
+                      color: Flat.card(context),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Flat.hairline(context)),
+                    ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -148,7 +176,7 @@ class _SosScreenState extends State<SosScreen> {
                 if (calm)
                   ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 320),
-                    child: FilledButton(onPressed: widget.sos.dismiss, child: Text(t('sos.im_safe'))),
+                    child: FlatButton(label: t('sos.im_safe'), onPressed: widget.sos.dismiss),
                   )
                 else ...[
                   Text(t('sos.enter_pin'), style: text.titleMedium),
@@ -160,7 +188,7 @@ class _SosScreenState extends State<SosScreen> {
                         ? null
                         : Padding(
                             padding: const EdgeInsets.only(top: 10),
-                            child: Text(t(_messageKey!), style: TextStyle(color: cs.error, fontWeight: FontWeight.w600)),
+                            child: Text(t(_messageKey!), style: const TextStyle(color: Flat.danger, fontWeight: FontWeight.w600)),
                           ),
                   ),
                 ],
