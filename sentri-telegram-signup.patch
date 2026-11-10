@@ -1,0 +1,697 @@
+diff --git a/mobile/lib/core/widgets/avatar_icons.dart b/mobile/lib/core/widgets/avatar_icons.dart
+new file mode 100644
+--- /dev/null
++++ b/mobile/lib/core/widgets/avatar_icons.dart
+@@ -0,0 +1,151 @@
++import 'dart:math' as math;
++
++import 'package:flutter/material.dart';
++
++/// The app's own profile pictures: 50 flat Sentri faces, men and women, drawn
++/// in code (not shipped as photos) so they cost the app nothing and always
++/// match the flat look. Five skin tones, ten hairstyles (five women, five men)
++/// and ten pastel grounds mix into 50 guaranteed-distinct icons. The person
++/// picks one in the profile sheet; it stays on this phone like everything else.
++class SentriAvatar extends StatelessWidget {
++  const SentriAvatar({super.key, required this.index, this.size = 48});
++  final int index;
++  final double size;
++
++  @override
++  Widget build(BuildContext context) {
++    final i = index % SentriAvatarPainter.count;
++    return Container(
++      width: size,
++      height: size,
++      clipBehavior: Clip.antiAlias,
++      decoration: const BoxDecoration(shape: BoxShape.circle),
++      child: CustomPaint(painter: SentriAvatarPainter(i)),
++    );
++  }
++}
++
++class SentriAvatarPainter extends CustomPainter {
++  SentriAvatarPainter(this.index);
++  static const int count = 50;
++  final int index;
++
++  static const _skins = [
++    Color(0xFFF2CCB0), Color(0xFFE5B98E), Color(0xFFCE9163), Color(0xFFA26B42), Color(0xFF6E4B2A),
++  ];
++  static const _hairs = [
++    Color(0xFF1E1611), Color(0xFF35241A), Color(0xFF4E3427), Color(0xFF6B3F2E), Color(0xFF23201D),
++  ];
++  static const _fabrics = [
++    Color(0xFF5C4D7D), Color(0xFF3E5C76), Color(0xFF71413C), Color(0xFF2F4550), Color(0xFF6B5B95),
++  ];
++  static const _grounds = [
++    Color(0xFFE5DBFF), Color(0xFFD6E5FA), Color(0xFFDFF3E5), Color(0xFFFCE8D8), Color(0xFFFBE7EF),
++    Color(0xFFEDE7F6), Color(0xFFE0F2F1), Color(0xFFF3E5F5), Color(0xFFEFEBE9), Color(0xFFE3F2FD),
++  ];
++
++  @override
++  void paint(Canvas canvas, Size size) {
++    final s = size.shortestSide;
++    final c = Offset(s / 2, s / 2);
++    final female = index < 25;
++    final j = female ? index : index - 25;
++    final skin = _skins[j ~/ 5 % 5];
++    final style = j % 5;
++    final hair = _hairs[(j % 5 + j ~/ 5) % 5];
++    final hijab = female && style == 4;
++    final bald = !female && style == 3;
++
++    final ground = _grounds[j % 10];
++    canvas.drawCircle(c, s / 2, Paint()..color = ground);
++
++    // Draw order: hair volume behind the head, the head itself, the parts that
++    // sit ON the head, then the calm little face.
++    void oval(Rect r, Color color) => canvas.drawOval(r, Paint()..color = color);
++    Rect headRect(double w, double h, double cy) =>
++        Rect.fromCenter(center: Offset(s / 2, cy), width: s * w, height: s * h);
++    final faceW = hijab ? 0.30 : 0.42;
++    final faceH = hijab ? 0.36 : 0.50;
++    final faceY = hijab ? s * 0.50 : s * 0.52;
++    final head = headRect(faceW, faceH, faceY);
++
++    if (female && style == 0) {
++      oval(headRect(0.50, 0.62, s * 0.56), hair); // long straight panels
++    } else if (female && style == 1) {
++      canvas.drawCircle(Offset(s / 2, s * 0.34), s * 0.28, Paint()..color = hair); // afro puff
++    } else if (female && style == 2) {
++      oval(headRect(0.46, 0.56, s * 0.54), hair); // braids behind + strands below
++      for (final side in [-1.0, 1.0]) {
++        for (var k = 0; k < 3; k++) {
++          final x = s / 2 + side * (s * 0.20 + k * s * 0.035);
++          final y0 = s * (0.48 + k * 0.02);
++          canvas.drawRRect(
++            RRect.fromRectAndRadius(
++              Rect.fromCenter(center: Offset(x, y0 + s * 0.12), width: s * 0.055, height: s * 0.26),
++              Radius.circular(s * 0.028),
++            ),
++            Paint()..color = hair,
++          );
++        }
++      }
++    } else if (female && style == 3) {
++      oval(headRect(0.52, 0.60, s * 0.55), hair); // swept hair + high bun above
++      canvas.drawCircle(Offset(s / 2, s * 0.20), s * 0.10, Paint()..color = hair);
++    } else if (hijab) {
++      oval(headRect(0.62, 0.66, s * 0.53), _fabrics[j ~/ 5 % 5]); // the hood
++    } else if (!female && style == 2) {
++      canvas.drawCircle(Offset(s / 2, s * 0.36), s * 0.27, Paint()..color = hair); // medium afro
++    } else if (!female && style == 4) {
++      oval(headRect(0.52, 0.58, s * 0.54), hair); // locs behind the head
++    }
++
++    if (!hijab && !bald) {
++      oval(headRect(faceW + 0.01, faceH + 0.03, faceY - s * 0.05), hair); // rim above the head
++    }
++
++    oval(head, skin);
++
++    if (!hijab && !bald) {
++      // A fringe line, so the rim reads as hair, not a halo.
++      final fringe = Paint()
++        ..color = hair
++        ..style = PaintingStyle.stroke
++        ..strokeWidth = s * 0.055
++        ..strokeCap = StrokeCap.round;
++      final fy = faceY - faceH * s * 0.30;
++      canvas.drawLine(Offset(s / 2 - faceW * s * 0.30, fy), Offset(s / 2 + faceW * s * 0.30, fy), fringe);
++    }
++
++    if (bald) {
++      final beard = Paint()
++        ..color = hair
++        ..style = PaintingStyle.stroke
++        ..strokeWidth = s * 0.085
++        ..strokeCap = StrokeCap.round;
++      canvas.drawArc(head, 0.10 * math.pi, 0.80 * math.pi, false, beard);
++    }
++
++    // The calm face the app wears everywhere: two dark eyes, a light smile.
++    final ink = Paint()..color = const Color(0xFF20242B);
++    final eyeY = hijab ? s * 0.47 : s * 0.49;
++    for (final side in [-1.0, 1.0]) {
++      canvas.drawOval(
++        headRect(0.045, 0.06, eyeY).shift(Offset(side * s * (hijab ? 0.07 : 0.095), 0)),
++        ink,
++      );
++    }
++    final mouth = Paint()
++      ..color = const Color(0xFF20242B)
++      ..style = PaintingStyle.stroke
++      ..strokeWidth = s * 0.022
++      ..strokeCap = StrokeCap.round;
++    final my = hijab ? s * 0.60 : s * 0.63;
++    canvas.drawArc(
++      Rect.fromCenter(center: Offset(s / 2, my), width: s * 0.13, height: s * 0.10),
++      0.10 * math.pi, 0.30 * math.pi, false, mouth,
++    );
++  }
++
++  @override
++  bool shouldRepaint(SentriAvatarPainter oldDelegate) => oldDelegate.index != index;
++}
+diff --git a/docs/HANDOFF.md b/docs/HANDOFF.md
+--- a/docs/HANDOFF.md
++++ b/docs/HANDOFF.md
+@@ -245,3 +245,26 @@
+   "I'm safe", everything in `pin_pad.dart` (new leaf; `PinPad`/`PinPadState` API unchanged: `clear()`, `enabled`,
+   4-digit auto-submit) as flat card keys with hairline edges and alarm-red dots. PoliceCallCard untouched.
+ 
++## 12. Version 28 (this patch) — engineer's notes
++Vic's polish list: circled home functions, a visible profile with the app's own picture icons, pinpoint map
++accuracy, and a lighter Health banner shading. No i18n changes: still 287 keys × 5.
++- Home menu: the three grey rows became `_CircleTile`s in a Row — a 64 px card disc (hairline edge) with the icon
++  in brand indigo and the existing `share.title`/`contacts.title`/`triggers.title` label UNDERNEATH, two lines
++  capped. The share circle carries a LiveDot badge while a share runs (`widget.share.active != null`); the old
++  `_MenuRow`/`_SharingTag` were deleted.
++- Profile is visible: `_Avatar` grew a pencil badge (`showEdit: true` on the greeting) and the sheet is a bigger,
++  bouncy, 0.78-height scrollable with the 50-icon grid. Gallery still works (photo_library badge on the big
++  preview; `setAvatar` wins). The 50 faces live in `core/widgets/avatar_icons.dart` (NEW LEAF): SentriAvatar /
++  SentriAvatarPainter — 5 skin tones × 10 hairstyles (5 female: long, afro puff, braids, bun+swep, hijab;
++  5 male: crop, waves, afro, bald+beard, locs) × 10 pastel grounds, drawn in code so nothing ships as an image.
++  `Profile` persists `profile.avatar.icon.v1` (index) + `profile.avatar.icon.on.v1` (last-choice flag:
++  `setIcon` turns it on, `setAvatar` turns it off — the LAST choice wins, and the photo is never deleted).
++- Map pinpoint: `_MapScreenState._startRefinement()` listens to `LocationSource.positions(distanceFilterM: 2)`
++  and applies a fix when it is ≥1 m more accurate or the person moved 25 m — the ±100 m ring tightens within
++  seconds of opening the tab. Fakes return an empty stream (already in test_helpers); dispose cancels `_refineSub`.
++- Health banner: gradient cut from 70 % black to 25 % and the title got its own soft text shadow — the words
++  stay readable on any photo without the dark wash.
++- Lesson re-confirmed: arrow-`=>` builders cannot become brace bodies by half (stray `),` / `);` broke
++  home_screen in v27's first CI round); and `SizedBox` has no `alignment` (pin_pad needed `Container`).
++
++
+diff --git a/mobile/lib/features/health/health_screen.dart b/mobile/lib/features/health/health_screen.dart
+--- a/mobile/lib/features/health/health_screen.dart
++++ b/mobile/lib/features/health/health_screen.dart
+@@ -109,17 +109,26 @@
+                     Align(
+                       alignment: Alignment.bottomLeft,
+                       child: Container(
++                        // A whisper of shading, not a dark banner: just enough
++                        // under the words to keep them readable, and the words
++                        // also carry their own soft shadow.
+                         decoration: const BoxDecoration(
+                           gradient: LinearGradient(
+                             begin: Alignment.bottomCenter,
+                             end: Alignment.topCenter,
+-                            colors: [Color(0xB2000000), Color(0x00000000)],
++                            colors: [Color(0x40000000), Color(0x00000000)],
+                           ),
+                         ),
+                         padding: const EdgeInsets.fromLTRB(16, 30, 16, 14),
+                         child: Text(
+                           t('tabs.health'),
+-                          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: Colors.white, letterSpacing: -0.4),
++                          style: const TextStyle(
++                            fontSize: 22,
++                            fontWeight: FontWeight.w800,
++                            color: Colors.white,
++                            letterSpacing: -0.4,
++                            shadows: [Shadow(color: Color(0x99000000), blurRadius: 10, offset: Offset(0, 1))],
++                          ),
+                         ),
+                       ),
+                     ),
+diff --git a/mobile/lib/features/home/home_screen.dart b/mobile/lib/features/home/home_screen.dart
+--- a/mobile/lib/features/home/home_screen.dart
++++ b/mobile/lib/features/home/home_screen.dart
+@@ -17,6 +17,7 @@
+ import '../share/share_controller.dart';
+ import '../share/share_screen.dart';
+ import '../../core/widgets/flat.dart';
++import '../../core/widgets/avatar_icons.dart';
+ import '../../core/widgets/glass.dart';
+ import '../checkin/checkin_controller.dart';
+ import '../onboarding/permissions_panel.dart';
+@@ -174,7 +175,7 @@
+                     child: Row(children: [
+                       GestureDetector(
+                         onTap: _openProfile,
+-                        child: _Avatar(profile: widget.profile),
++                        child: _Avatar(profile: widget.profile, showEdit: true),
+                       ),
+                       const SizedBox(width: 12),
+                       Expanded(
+@@ -249,28 +250,30 @@
+                   ),
+                   ),
+                   const SizedBox(height: 22),
++                  // The home functions as circles, the way the flat reference
++                  // boards draw them: icon in a card circle, its name right
++                  // underneath. A green LiveDot rides the share circle while a
++                  // share is running.
+                   Padding(
+                     padding: const EdgeInsets.fromLTRB(22, 0, 22, 16),
+-                    child: Glass(
+-                      radius: 18,
+-                      child: Column(children: [
+-                        _MenuRow(
+-                          label: t('share.title'),
+-                          trailing: widget.share.active != null ? const _SharingTag() : null,
+-                          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ShareScreen(share: widget.share, api: widget.api, i18n: widget.i18n, people: widget.people))),
+-                        ),
+-                        const Divider(height: 0.5, thickness: 0.5, indent: 16),
+-                        _MenuRow(
+-                          label: t('contacts.title'),
+-                          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ContactsScreen(api: widget.api, people: widget.people, i18n: widget.i18n))),
+-                        ),
+-                        const Divider(height: 0.5, thickness: 0.5, indent: 16),
+-                        _MenuRow(
+-                          label: t('triggers.title'),
+-                          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => _ShortcutsPage(home: this))),
+-                        ),
+-                      ]),
+-                    ),
++                    child: Row(children: [
++                      _CircleTile(
++                        label: t('share.title'),
++                        icon: Icons.share_location_rounded,
++                        live: widget.share.active != null,
++                        onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ShareScreen(share: widget.share, api: widget.api, i18n: widget.i18n, people: widget.people))),
++                      ),
++                      _CircleTile(
++                        label: t('contacts.title'),
++                        icon: Icons.people_alt_rounded,
++                        onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ContactsScreen(api: widget.api, people: widget.people, i18n: widget.i18n))),
++                      ),
++                      _CircleTile(
++                        label: t('triggers.title'),
++                        icon: Icons.campaign_rounded,
++                        onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => _ShortcutsPage(home: this))),
++                      ),
++                    ]),
+                   ),
+                   const SizedBox(height: 8),
+                 ],
+@@ -283,28 +286,58 @@
+   }
+ }
+ 
+-/// The person's avatar on the home greeting: their chosen photo, or a friendly initial disc.
++/// The person's avatar on the home greeting: their chosen photo (or one of the
++/// app's 50 drawn Sentri faces), with a pencil badge so it reads as editable —
++/// the profile is one visible tap, not something hidden away.
+ class _Avatar extends StatelessWidget {
+-  const _Avatar({required this.profile});
++  const _Avatar({required this.profile, this.showEdit = false});
+   final Profile profile;
++  final bool showEdit;
+ 
+   @override
+   Widget build(BuildContext context) {
+-    final bytes = profile.avatar;
++    // Whoever was chosen LAST wins: a picked icon beats an old photo and vice
++    // versa (setAvatar/setIcon keep that flag right).
++    final useIcon = profile.useIcon && profile.avatarIcon != null;
++    final bytes = useIcon ? null : profile.avatar;
++    final iconIdx = profile.avatarIcon;
+     final name = profile.name;
+     final letter = name.isNotEmpty ? name.characters.first.toUpperCase() : '?';
+-    return Container(
++    Widget inner;
++    if (bytes != null) {
++      inner = Image.memory(bytes, fit: BoxFit.cover, gaplessPlayback: true);
++    } else if (iconIdx != null) {
++      inner = SentriAvatar(index: iconIdx, size: 46);
++    } else {
++      inner = Center(child: letter != '?' ? Text(letter, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)) : const Icon(Icons.person, size: 24));
++    }
++    return SizedBox(
+       width: 46,
+       height: 46,
+-      decoration: BoxDecoration(
+-        shape: BoxShape.circle,
+-        color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.12),
+-        border: Border.all(color: Brand.indigoHi.withValues(alpha: 0.4), width: 1.5),
+-      ),
+-      clipBehavior: Clip.antiAlias,
+-      child: bytes == null
+-          ? Center(child: letter != '?' ? Text(letter, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)) : const Icon(Icons.person, size: 24))
+-          : Image.memory(bytes, fit: BoxFit.cover, gaplessPlayback: true),
++      child: Stack(clipBehavior: Clip.none, children: [
++        Container(
++          width: 46,
++          height: 46,
++          decoration: BoxDecoration(
++            shape: BoxShape.circle,
++            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.12),
++            border: Border.all(color: Brand.indigoHi.withValues(alpha: 0.4), width: 1.5),
++          ),
++          clipBehavior: Clip.antiAlias,
++          child: inner,
++        ),
++        if (showEdit)
++          Positioned(
++            right: -3,
++            bottom: -3,
++            child: Container(
++              width: 19,
++              height: 19,
++              decoration: BoxDecoration(shape: BoxShape.circle, color: Brand.indigo, border: Border.all(color: Colors.white, width: 2)),
++              child: const Icon(Icons.edit, size: 9, color: Colors.white),
++            ),
++          ),
++      ]),
+     );
+   }
+ }
+@@ -340,55 +373,97 @@
+     final t = widget.i18n.t;
+     final cs = Theme.of(context).colorScheme;
+     final muted = cs.onSurface.withValues(alpha: 0.55);
++    final mq = MediaQuery.of(context);
+     return ListenableBuilder(
+       listenable: widget.profile,
+       builder: (context, _) => Padding(
+-        padding: EdgeInsets.fromLTRB(22, 4, 22, 22 + MediaQuery.of(context).viewInsets.bottom),
+-        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+-          const SizedBox(height: 8),
+-          Center(
+-            child: GestureDetector(
+-              onTap: () async {
+-                final bytes = await pickAvatarImage();
+-                if (bytes != null) await widget.profile.setAvatar(bytes);
+-              },
+-              child: Stack(children: [
+-                _Avatar(profile: widget.profile),
+-                Positioned(
+-                  right: -2,
+-                  bottom: -2,
+-                  child: Container(
+-                    width: 26,
+-                    height: 26,
+-                    decoration: BoxDecoration(shape: BoxShape.circle, color: Brand.indigo, border: Border.all(color: Colors.white, width: 2)),
+-                    child: const Icon(Icons.camera_alt, size: 13, color: Colors.white),
++        padding: EdgeInsets.fromLTRB(22, 4, 22, 22 + mq.viewInsets.bottom),
++        child: ConstrainedBox(
++          constraints: BoxConstraints(maxHeight: mq.size.height * 0.78),
++          child: SingleChildScrollView(
++            physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
++            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
++              const SizedBox(height: 8),
++              // The pick, shown big: tap it for a gallery photo; the pencil
++              // badge says this is where editing happens.
++              Center(
++                child: GestureDetector(
++                  onTap: () async {
++                    final bytes = await pickAvatarImage();
++                    if (bytes != null) await widget.profile.setAvatar(bytes);
++                  },
++                  child: SizedBox(
++                    width: 74,
++                    height: 74,
++                    child: Stack(clipBehavior: Clip.none, children: [
++                      Center(
++                        child: Transform.scale(
++                          scale: 74 / 46,
++                          child: _Avatar(profile: widget.profile),
++                        ),
++                      ),
++                      Positioned(
++                        right: -2,
++                        bottom: -2,
++                        child: Container(
++                          width: 30,
++                          height: 30,
++                          decoration: BoxDecoration(shape: BoxShape.circle, color: Brand.indigo, border: Border.all(color: Colors.white, width: 2)),
++                          child: const Icon(Icons.photo_library_outlined, size: 15, color: Colors.white),
++                        ),
++                      ),
++                    ]),
+                   ),
+                 ),
+-              ]),
+-            ),
+-          ),
+-          const SizedBox(height: 6),
+-          Center(child: Text(t('health.heart_perm'), style: TextStyle(fontSize: 12, color: muted))),
+-          const SizedBox(height: 16),
+-          TextField(
+-            controller: _name,
+-            maxLength: 40,
+-            decoration: InputDecoration(
+-              labelText: t('health.allow'),
+-              counterText: '',
+-              filled: true,
+-              fillColor: cs.onSurface.withValues(alpha: 0.05),
+-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+-            ),
+-          ),
+-          const SizedBox(height: 14),
+-          FilledButton.icon(
+-            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(46), backgroundColor: cs.primary),
+-            onPressed: _save,
+-            icon: const Icon(Icons.check, size: 20),
+-            label: Text(t('common.continue'), style: const TextStyle(fontSize: 15)),
++              ),
++              const SizedBox(height: 6),
++              Center(child: Text(t('health.heart_perm'), style: TextStyle(fontSize: 12, color: muted))),
++              const SizedBox(height: 16),
++              TextField(
++                controller: _name,
++                maxLength: 40,
++                decoration: InputDecoration(
++                  labelText: t('health.allow'),
++                  counterText: '',
++                  filled: true,
++                  fillColor: cs.onSurface.withValues(alpha: 0.05),
++                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
++                ),
++              ),
++              const SizedBox(height: 18),
++              // The app's own 50 Sentri faces: a tap swaps the photo for one of
++              // them. The chosen one wears a ring.
++              GridView.builder(
++                shrinkWrap: true,
++                physics: const NeverScrollableScrollPhysics(),
++                padding: EdgeInsets.zero,
++                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 6, crossAxisSpacing: 10, mainAxisSpacing: 10),
++                itemCount: SentriAvatarPainter.count,
++                itemBuilder: (c, i) {
++                  final selected = widget.profile.useIcon && widget.profile.avatarIcon == i;
++                  return GestureDetector(
++                    onTap: () => unawaited(widget.profile.setIcon(i)),
++                    child: Container(
++                      decoration: BoxDecoration(
++                        shape: BoxShape.circle,
++                        border: Border.all(color: selected ? Brand.indigo : Colors.transparent, width: 2.5),
++                      ),
++                      padding: const EdgeInsets.all(2.5),
++                      child: LayoutBuilder(builder: (c, box) => SentriAvatar(index: i, size: box.biggest.shortestSide)),
++                    ),
++                  );
++                },
++              ),
++              const SizedBox(height: 18),
++              FilledButton.icon(
++                style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(46), backgroundColor: cs.primary),
++                onPressed: _save,
++                icon: const Icon(Icons.check, size: 20),
++                label: Text(t('common.continue'), style: const TextStyle(fontSize: 15)),
++              ),
++            ]),
+           ),
+-        ]),
++        ),
+       ),
+     );
+   }
+@@ -448,34 +523,59 @@
+   }
+ }
+ 
+-class _MenuRow extends StatelessWidget {
+-  const _MenuRow({required this.label, required this.onTap, this.trailing});
++/// One home function as a circle with its name underneath: a solid card disc
++/// with a hairline edge (the flat card language), the icon in brand indigo,
++/// and a LiveDot badge top-right when something is running.
++class _CircleTile extends StatelessWidget {
++  const _CircleTile({required this.label, required this.icon, required this.onTap, this.live = false});
+   final String label;
+-  final Widget? trailing;
++  final IconData icon;
+   final VoidCallback onTap;
+-  @override
+-  Widget build(BuildContext context) => InkWell(
+-        onTap: onTap,
+-        child: Padding(
+-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+-          child: Row(children: [
+-            Expanded(child: Text(label, style: const TextStyle(fontSize: 16))),
+-            if (trailing != null) ...[trailing!, const SizedBox(width: 6)],
+-            Icon(Icons.chevron_right, size: 20, color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.4)),
+-          ]),
+-        ),
+-      );
+-}
++  final bool live;
+ 
+-/// "Live" tag on the Share location row while a share is running.
+-class _SharingTag extends StatelessWidget {
+-  const _SharingTag();
+   @override
+-  Widget build(BuildContext context) => const Row(mainAxisSize: MainAxisSize.min, children: [
+-        SizedBox(width: 22, height: 22, child: LiveDot(size: 7)),
+-        SizedBox(width: 2),
+-        Text('Live', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Flat.live)),
+-      ]);
++  Widget build(BuildContext context) {
++    return InkWell(
++      borderRadius: BorderRadius.circular(20),
++      onTap: onTap,
++      child: Padding(
++        padding: const EdgeInsets.symmetric(horizontal: 4),
++        child: Column(mainAxisSize: MainAxisSize.min, children: [
++          Stack(clipBehavior: Clip.none, children: [
++            Container(
++              width: 64,
++              height: 64,
++              decoration: BoxDecoration(
++                shape: BoxShape.circle,
++                color: Flat.card(context),
++                border: Border.all(color: Flat.hairline(context)),
++              ),
++              child: Icon(icon, size: 28, color: Brand.indigoHi),
++            ),
++            if (live)
++              Positioned(
++                right: 1,
++                top: 1,
++                child: Container(
++                  width: 16,
++                  height: 16,
++                  decoration: BoxDecoration(shape: BoxShape.circle, color: Flat.card(context)),
++                  child: const LiveDot(size: 7),
++                ),
++              ),
++          ]),
++          const SizedBox(height: 8),
++          Text(
++            label,
++            maxLines: 2,
++            overflow: TextOverflow.ellipsis,
++            textAlign: TextAlign.center,
++            style: TextStyle(fontSize: 12.5, height: 1.25, fontWeight: FontWeight.w600, color: Flat.muted(context)),
++          ),
++        ]),
++      ),
++    );
++  }
+ }
+ 
+ /// The message bar. Calm when there is nothing new; turns red and names the person when a live alert needs a response.
+diff --git a/mobile/lib/features/map/map_screen.dart b/mobile/lib/features/map/map_screen.dart
+--- a/mobile/lib/features/map/map_screen.dart
++++ b/mobile/lib/features/map/map_screen.dart
+@@ -125,6 +125,9 @@
+   int _nextStep = 0;
+   StreamSubscription<Position>? _posSub;
+ 
++  // -- live refinement of the own-position dot and its accuracy ring --
++  StreamSubscription<GeoFix>? _refineSub;
++
+   // -- what is around --
+   List<NearbyPlace> _near = const <NearbyPlace>[];
+   bool _nearBusy = false;
+@@ -135,12 +138,35 @@
+     super.initState();
+     unawaited(_update());
+     _timer = Timer.periodic(widget.refresh, (_) => unawaited(_update()));
++    _startRefinement();
+   }
+ 
++  /// The map's ring is only as honest as its newest reading. A live stream of
++  /// fresh positions keeps tightening the dot and the ring within seconds of
++  /// opening the tab - the pinpoint look - and follows real movement too. The
++  /// camera only jumps when the reading is genuinely better or the person has
++  /// walked on, so it never stutters.
++  void _startRefinement() {
++    try {
++      _refineSub = widget.location.positions(distanceFilterM: 2).listen((f) {
++        final cur = _fix;
++        if (!mounted) return;
++        final better = cur == null || ((f.accuracyM ?? 1e9) < ((cur.accuracyM ?? 1e9) - 1.0));
++        final movedFar = cur != null && const Distance()(LatLng(cur.lat, cur.lon), LatLng(f.lat, f.lon)) > 25;
++        if (better || movedFar) _apply(f);
++      }, onError: (Object _) {});
++    } on UnsupportedError {
++      _refineSub = null;
++    } catch (_) {
++      _refineSub = null;
++    }
++  }
++
+   @override
+   void dispose() {
+     _timer?.cancel();
+     unawaited(_posSub?.cancel());
++    unawaited(_refineSub?.cancel());
+     unawaited(_voice.stop());
+     _map.dispose();
+     super.dispose();
+diff --git a/mobile/lib/core/profile.dart b/mobile/lib/core/profile.dart
+--- a/mobile/lib/core/profile.dart
++++ b/mobile/lib/core/profile.dart
+@@ -13,13 +13,23 @@
+   final KeyValueStore _store;
+   static const _nameKey = 'profile.name.v1';
+   static const _avatarKey = 'profile.avatar.v1';
++  static const _iconKey = 'profile.avatar.icon.v1';
++  static const _iconOnKey = 'profile.avatar.icon.on.v1';
+ 
+   String _name = '';
+   Uint8List? _avatar;
++  int? _icon;
++  bool _iconOn = false;
+   bool _loaded = false;
+ 
+   String get name => _name;
+   Uint8List? get avatar => _avatar;
++
++  /// Which of the app's 50 drawn Sentri faces is the person's pick (null = none).
++  int? get avatarIcon => _icon;
++
++  /// True when the app icon (not a gallery photo) is what the person chose last.
++  bool get useIcon => _iconOn;
+   bool get loaded => _loaded;
+ 
+   Future<void> load() async {
+@@ -35,6 +45,9 @@
+         _avatar = null;
+       }
+     }
++    final i = int.tryParse(await _store.read(_iconKey) ?? '');
++    if (i != null && i >= 0 && i < 50) _icon = i;
++    _iconOn = (await _store.read(_iconOnKey)) == '1' && _icon != null;
+     notifyListeners();
+   }
+ 
+@@ -62,6 +75,24 @@
+       await _store.delete(_avatarKey);
+     } else {
+       await _store.write(_avatarKey, base64Encode(bytes));
++    }
++    // A gallery photo is the person's latest choice: it wins over the icon.
++    _iconOn = false;
++    await _store.write(_iconOnKey, '0');
++    notifyListeners();
++  }
++
++  /// Picks one of the app's 50 drawn Sentri faces. Null clears the pick; the
++  /// gallery photo (if any) shows again.
++  Future<void> setIcon(int? i) async {
++    _icon = (i == null || i < 0 || i >= 50) ? null : i;
++    _iconOn = _icon != null;
++    if (_icon == null) {
++      await _store.delete(_iconKey);
++      await _store.write(_iconOnKey, '0');
++    } else {
++      await _store.write(_iconKey, '$_icon');
++      await _store.write(_iconOnKey, '1');
+     }
+     notifyListeners();
+   }
