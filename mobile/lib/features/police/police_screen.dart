@@ -2,6 +2,7 @@ import 'dart:ui' show FontFeature;
 import 'package:flutter/material.dart';
 
 import '../../core/i18n/i18n.dart';
+import '../photos/photo_police.dart';
 import 'police_directory.dart';
 
 /// Lists every state command with its public lines. Numbers are selectable so they can be copied.
@@ -25,6 +26,33 @@ class PoliceScreen extends StatelessWidget {
           : ListView(
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
               children: [
+                // The tab opens on a real officer's face, not on a form: a
+                // Nigerian police banner, the same humane cover the other tabs have.
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(24),
+                  child: SizedBox(
+                    height: 150,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Image.memory(photoPoliceBytes, fit: BoxFit.cover, gaplessPlayback: true),
+                        Align(
+                          alignment: Alignment.bottomCenter,
+                          child: Container(
+                            decoration: const BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.bottomCenter,
+                                end: Alignment.topCenter,
+                                colors: [Color(0x66000000), Color(0x00000000)],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 18),
                 if (mine != null) ...[
                   Text(t('police.your_state').toUpperCase(), style: Theme.of(context).textTheme.labelMedium?.copyWith(letterSpacing: 1.1, color: cs.outline)),
                   const SizedBox(height: 8),

@@ -22,6 +22,7 @@ import '../sos/pin_pad.dart';
 import '../sos/contact_people.dart';
 import '../sos/sos_controller.dart';
 import '../photos/photo_home.dart';
+import '../photos/photo_home_banner.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, required this.sos, required this.settings, required this.i18n, required this.bridge, required this.api, required this.inbox, required this.share, required this.checkin, required this.police, required this.people});
@@ -111,6 +112,37 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                       inbox: widget.inbox,
                       i18n: widget.i18n,
                       onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => InboxScreen(inbox: widget.inbox, api: widget.api, i18n: widget.i18n, police: widget.police))),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 22),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(24),
+                      child: SizedBox(
+                        height: 150,
+                        width: double.infinity,
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            // The home opens on a person too: a calm face in the
+                            // city, the same humane cover the Health tab has.
+                            Image.memory(photoHomeBannerBytes, fit: BoxFit.cover, gaplessPlayback: true),
+                            Align(
+                              alignment: Alignment.bottomCenter,
+                              child: Container(
+                                decoration: const BoxDecoration(
+                                  gradient: LinearGradient(
+                                    begin: Alignment.bottomCenter,
+                                    end: Alignment.topCenter,
+                                    colors: [Color(0x66000000), Color(0x00000000)],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 18),

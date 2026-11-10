@@ -14,6 +14,7 @@ import '../checkin/checkin_controller.dart';
 import '../push/push_service.dart';
 import '../photos/photo_gym.dart';
 import '../photos/photo_health.dart';
+import '../photos/photo_bike.dart';
 import '../photos/photo_run.dart';
 import '../photos/photo_walk.dart';
 import '../photos/photo_water.dart';
@@ -294,52 +295,57 @@ class _HealthScreenState extends State<HealthScreen> {
       child: Padding(
         padding: const EdgeInsets.all(18),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(t('health.water_sub'), style: const TextStyle(fontSize: 14, height: 1.45)),
-          const SizedBox(height: 14),
+          // The photo sits beside the intro and the pace picker gets the whole
+          // card width - the time chips no longer squeeze into a side lane.
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // A bright sip next to the pace picker: the reminder is about a real
-              // person's habit, so the card shows the person, not just controls.
               ClipRRect(
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(14),
                 child: SizedBox(
-                  width: 64,
-                  height: 64,
+                  width: 56,
+                  height: 56,
                   child: Image.memory(photoWaterBytes, fit: BoxFit.cover, gaplessPlayback: true),
                 ),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: Container(
-                  padding: const EdgeInsets.all(3),
-                  decoration: BoxDecoration(color: Flat.hairline(context), borderRadius: BorderRadius.circular(12)),
-                  child: Row(children: [
-                    for (final m in options)
-                      Expanded(
-                        child: Semantics(
-                          button: true,
-                          selected: s.waterMinutes == m,
-                          child: GestureDetector(
-                            onTap: () async {
-                              await s.update(waterMinutes: m);
-                              // After every pace change, the honest state is read back.
-                              await h.refreshWaterStatus();
-                            },
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 160),
-                              height: 38,
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(color: s.waterMinutes == m ? Flat.card(context) : Colors.transparent, borderRadius: BorderRadius.circular(10)),
-                              child: Text(label(m), style: TextStyle(fontSize: 12.5, fontWeight: s.waterMinutes == m ? FontWeight.w600 : FontWeight.w500)),
-                            ),
-                          ),
-                        ),
-                      ),
-                  ]),
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(t('health.water_sub'), style: const TextStyle(fontSize: 13.5, height: 1.4)),
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: 14),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(3),
+            decoration: BoxDecoration(color: Flat.hairline(context), borderRadius: BorderRadius.circular(12)),
+            child: Row(children: [
+              for (final m in options)
+                Expanded(
+                  child: Semantics(
+                    button: true,
+                    selected: s.waterMinutes == m,
+                    child: GestureDetector(
+                      onTap: () async {
+                        await s.update(waterMinutes: m);
+                        // After every pace change, the honest state is read back.
+                        await h.refreshWaterStatus();
+                      },
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 160),
+                        height: 40,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(color: s.waterMinutes == m ? Flat.card(context) : Colors.transparent, borderRadius: BorderRadius.circular(10)),
+                        padding: const EdgeInsets.symmetric(horizontal: 2),
+                        child: Text(label(m), textAlign: TextAlign.center, maxLines: 2, style: TextStyle(fontSize: 12, fontWeight: s.waterMinutes == m ? FontWeight.w600 : FontWeight.w500)),
+                      ),
+                    ),
+                  ),
+                ),
+            ]),
           ),
           // The honest line: what actually became of the reminder on THIS phone.
           if (s.waterMinutes > 0) ...[
@@ -408,10 +414,7 @@ class _HealthScreenState extends State<HealthScreen> {
                           children: [
                             if (m == ExerciseMode.walk) Image.memory(photoWalkBytes, fit: BoxFit.cover, gaplessPlayback: true),
                             if (m == ExerciseMode.run) Image.memory(photoRunBytes, fit: BoxFit.cover, gaplessPlayback: true),
-                            if (m == ExerciseMode.bike) ...[
-                              ColoredBox(color: cs.primary.withValues(alpha: 0.10)),
-                              Icon(Icons.directions_bike, size: 34, color: cs.primary),
-                            ],
+                            if (m == ExerciseMode.bike) Image.memory(photoBikeBytes, fit: BoxFit.cover, gaplessPlayback: true),
                             Align(
                               alignment: Alignment.bottomLeft,
                               child: Padding(
@@ -526,25 +529,32 @@ class _HealthScreenState extends State<HealthScreen> {
             Text('${all.length}/${kinds.length}', style: TextStyle(fontSize: 13, color: Flat.muted(context), fontFeatures: const [FontFeature.tabularFigures()])),
           ]),
           const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              for (final k in kinds)
-                Column(children: [
-                  AwardBadge(kind: k, size: 40, dim: !widget.awards.has(k)),
-                  const SizedBox(height: 4),
-                  SizedBox(
-                    width: 52,
-                    child: Text(
-                      t('award.${awardId(k)}_title'),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 9.5, height: 1.15, color: widget.awards.has(k) ? null : Flat.muted(context)),
+          // The shelf scrolls left and right now: each badge keeps a roomy,
+          // fixed width instead of eight of them shrinking into the edge.
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                for (final k in kinds)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 10),
+                    child: SizedBox(
+                      width: 58,
+                      child: Column(children: [
+                        AwardBadge(kind: k, size: 40, dim: !widget.awards.has(k)),
+                        const SizedBox(height: 4),
+                        Text(
+                          t('award.${awardId(k)}_title'),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(fontSize: 9.5, height: 1.15, color: widget.awards.has(k) ? null : Flat.muted(context)),
+                        ),
+                      ]),
                     ),
                   ),
-                ]),
-            ],
+              ],
+            ),
           ),
           const SizedBox(height: 6),
           Text(t('award.shelf_hint'), style: TextStyle(fontSize: 12, height: 1.35, color: Flat.muted(context))),
