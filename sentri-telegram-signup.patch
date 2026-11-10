@@ -1,0 +1,276 @@
+diff --git a/mobile/lib/core/widgets/brand.dart b/mobile/lib/core/widgets/brand.dart
+--- a/mobile/lib/core/widgets/brand.dart
++++ b/mobile/lib/core/widgets/brand.dart
+@@ -352,7 +352,7 @@
+           contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+           border: border,
+           enabledBorder: border,
+-          focusedBorder: border.copyWith(borderSide: BorderSide(color: Brand.indigoHi, width: 3)),
++          focusedBorder: border.copyWith(borderSide: const BorderSide(color: Brand.indigoHi, width: 3)),
+         ),
+       ),
+     ]);
+diff --git a/mobile/lib/features/police/police_screen.dart b/mobile/lib/features/police/police_screen.dart
+--- a/mobile/lib/features/police/police_screen.dart
++++ b/mobile/lib/features/police/police_screen.dart
+@@ -1,5 +1,4 @@
+ import 'dart:async';
+-import 'dart:ui' show FontFeature;
+ import 'package:flutter/material.dart';
+ import 'package:url_launcher/url_launcher.dart';
+ 
+@@ -22,86 +21,39 @@
+   @override
+   Widget build(BuildContext context) {
+     final t = i18n.t;
+-    final cs = Theme.of(context).colorScheme;
+     final dir = directory;
+-    final mine = dir?.forState(currentState);
+-    Widget listBuilder(double offset) => ListView(
+-          // Bouncy pull like the rest of the refreshed screens.
+-          physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+-          children: [
+-            // The tab opens on a real officer's face, not on a form: a Nigerian
+-            // police banner that slides gently as the page scrolls (parallax).
+-            ClipRRect(
+-              borderRadius: BorderRadius.circular(24),
+-              child: SizedBox(
+-                height: 150,
+-                child: Stack(
+-                  fit: StackFit.expand,
+-                  children: [
+-                    Transform.translate(
+-                      offset: Offset(0, (-offset * 0.35).clamp(-60.0, 60.0)),
+-                      child: Image.memory(photoPoliceBytes, fit: BoxFit.cover, gaplessPlayback: true),
+-                    ),
+-                    Align(
+-                      alignment: Alignment.bottomCenter,
+-                      child: Container(
+-                        decoration: const BoxDecoration(
+-                          gradient: LinearGradient(
+-                            begin: Alignment.bottomCenter,
+-                            end: Alignment.topCenter,
+-                            colors: [Color(0x66000000), Color(0x00000000)],
+-                          ),
+-                        ),
+-                      ),
+-                    ),
+-                  ],
+-                ),
+-              ),
+-            ),
+-            const SizedBox(height: 18),
+-            if (mine != null) ...[
+-              Text(t('police.your_state').toUpperCase(), style: Theme.of(context).textTheme.labelMedium?.copyWith(letterSpacing: 1.1, color: cs.outline)),
+-              const SizedBox(height: 8),
+-              Card(child: _CommandTile(mine, i18n)),
+-              const SizedBox(height: 20),
+-            ],
+-            Text(t('police.note'), style: Theme.of(context).textTheme.bodyMedium),
+-            const SizedBox(height: 16),
+-            Text(t('police.all').toUpperCase(), style: Theme.of(context).textTheme.labelMedium?.copyWith(letterSpacing: 1.1, color: cs.outline)),
+-            const SizedBox(height: 8),
+-            Card(
+-              child: Column(
+-                children: [
+-                  for (var i = 0; i < dir.commands.length; i++) ...[
+-                    if (i > 0) const Divider(height: 1),
+-                    _CommandTile(dir.commands[i], i18n),
+-                  ],
+-                ],
+-              ),
+-            ),
+-          ],
+-        );
+     return Scaffold(
+       appBar: AppBar(title: Text(t('tabs.police'))),
+-      body: dir == null ? const Center(child: CircularProgressIndicator()) : _ParallaxList(builder: listBuilder),
++      body: dir == null
++          ? const Center(child: CircularProgressIndicator())
++          : _ParallaxList(dir: dir, i18n: i18n, state: currentState),
+     );
+   }
+ }
+ 
+ /// Holds the scroll offset so the banner above can slide while the list moves.
+ /// A plain StatefulWidget rebuilds the list with the latest offset; cheap and honest.
++/// The directory (non-null by the time it gets here), the language and the user's
++/// state are handed over as widget fields, so nothing nullable is ever captured
++/// inside this object's closures.
+ class _ParallaxList extends StatefulWidget {
+-  const _ParallaxList({required this.builder});
+-  final Widget Function(double offset) builder;
++  const _ParallaxList({required this.dir, required this.i18n, this.state});
++  final PoliceDirectory dir;
++  final I18n i18n;
++  final String? state;
+   @override
+   State<_ParallaxList> createState() => _ParallaxListState();
+ }
+ 
+ class _ParallaxListState extends State<_ParallaxList> {
+   double _offset = 0;
++
+   @override
+   Widget build(BuildContext context) {
++    final t = widget.i18n.t;
++    final cs = Theme.of(context).colorScheme;
++    final dir = widget.dir;
++    final mine = dir.forState(widget.state);
+     return NotificationListener<ScrollNotification>(
+       onNotification: (n) {
+         if (n.metrics.axis == Axis.vertical && n.metrics.pixels != _offset) {
+@@ -109,7 +61,63 @@
+         }
+         return false;
+       },
+-      child: widget.builder(_offset),
++      child: ListView(
++        // Bouncy pull like the rest of the refreshed screens.
++        physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
++        padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
++        children: [
++          // The tab opens on a real officer's face, not on a form: a Nigerian
++          // police banner that slides gently as the page scrolls (parallax).
++          ClipRRect(
++            borderRadius: BorderRadius.circular(24),
++            child: SizedBox(
++              height: 150,
++              child: Stack(
++                fit: StackFit.expand,
++                children: [
++                  Transform.translate(
++                    offset: Offset(0, (-_offset * 0.35).clamp(-60.0, 60.0)),
++                    child: Image.memory(photoPoliceBytes, fit: BoxFit.cover, gaplessPlayback: true),
++                  ),
++                  Align(
++                    alignment: Alignment.bottomCenter,
++                    child: Container(
++                      decoration: const BoxDecoration(
++                        gradient: LinearGradient(
++                          begin: Alignment.bottomCenter,
++                          end: Alignment.topCenter,
++                          colors: [Color(0x66000000), Color(0x00000000)],
++                        ),
++                      ),
++                    ),
++                  ),
++                ],
++              ),
++            ),
++          ),
++          const SizedBox(height: 18),
++          if (mine != null) ...[
++            Text(t('police.your_state').toUpperCase(), style: Theme.of(context).textTheme.labelMedium?.copyWith(letterSpacing: 1.1, color: cs.outline)),
++            const SizedBox(height: 8),
++            Card(child: _CommandTile(mine, widget.i18n)),
++            const SizedBox(height: 20),
++          ],
++          Text(t('police.note'), style: Theme.of(context).textTheme.bodyMedium),
++          const SizedBox(height: 16),
++          Text(t('police.all').toUpperCase(), style: Theme.of(context).textTheme.labelMedium?.copyWith(letterSpacing: 1.1, color: cs.outline)),
++          const SizedBox(height: 8),
++          Card(
++            child: Column(
++              children: [
++                for (var i = 0; i < dir.commands.length; i++) ...[
++                  if (i > 0) const Divider(height: 1),
++                  _CommandTile(dir.commands[i], widget.i18n),
++                ],
++              ],
++            ),
++          ),
++        ],
++      ),
+     );
+   }
+ }
+@@ -158,15 +166,18 @@
+               Expanded(
+                 child: SelectableText(l, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, fontFeatures: [FontFeature.tabularFigures()])),
+               ),
+-              IconButton(
+-                tooltip: 'Call',
+-                visualDensity: VisualDensity.compact,
+-                icon: Icon(Icons.call, color: cs.primary),
+-                onPressed: () {
+-                  final n = _dialable(l);
+-                  unawaited(launchUrl(Uri(scheme: 'tel', path: n), mode: LaunchMode.externalApplication).catchError((_) => false));
+-                },
+-              ),
++              // Only a real number line gets the call button: text lines like
++              // "767 or 112 (toll-free)" would dial stripped nonsense digits.
++              if (RegExp(r'^\+?[0-9][0-9 ()\-]{5,}$').hasMatch(l))
++                IconButton(
++                  tooltip: 'Call',
++                  visualDensity: VisualDensity.compact,
++                  icon: Icon(Icons.call, color: cs.primary),
++                  onPressed: () {
++                    final n = _dialable(l);
++                    unawaited(launchUrl(Uri(scheme: 'tel', path: n), mode: LaunchMode.externalApplication).catchError((_) => false));
++                  },
++                ),
+             ]),
+         ],
+       ),
+diff --git a/mobile/lib/features/push/push_service.dart b/mobile/lib/features/push/push_service.dart
+--- a/mobile/lib/features/push/push_service.dart
++++ b/mobile/lib/features/push/push_service.dart
+@@ -1,5 +1,4 @@
+ import 'dart:async';
+-import 'dart:typed_data';
+ 
+ import 'package:firebase_core/firebase_core.dart';
+ import 'package:firebase_messaging/firebase_messaging.dart';
+diff --git a/mobile/lib/features/home/home_screen.dart b/mobile/lib/features/home/home_screen.dart
+--- a/mobile/lib/features/home/home_screen.dart
++++ b/mobile/lib/features/home/home_screen.dart
+@@ -1,6 +1,5 @@
+ import 'dart:async';
+ import 'dart:io' show Platform;
+-import 'dart:typed_data';
+ 
+ import 'package:flutter/material.dart';
+ 
+@@ -160,7 +159,7 @@
+         final alarm = Theme.of(context).colorScheme.error;
+         final muted = Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6);
+         final skin = Color.lerp(const Color(0xFF1E9E56), alarm, _hold.value)!;
+-        final faceInk = const Color(0xFF101B12);
++        const faceInk = Color(0xFF101B12);
+         final greeting = t(_greetKey());
+         final name = widget.profile.name;
+         final faceHeight = (MediaQuery.of(context).size.height * 0.42).clamp(300.0, 430.0);
+diff --git a/mobile/lib/features/sos/sos_controller.dart b/mobile/lib/features/sos/sos_controller.dart
+--- a/mobile/lib/features/sos/sos_controller.dart
++++ b/mobile/lib/features/sos/sos_controller.dart
+@@ -60,7 +60,6 @@
+ }
+ 
+ bool _no() => false;
+-bool _yes() => true;
+ 
+ /// The phone-side alert state machine.
+ ///
+diff --git a/mobile/lib/features/share/share_screen.dart b/mobile/lib/features/share/share_screen.dart
+--- a/mobile/lib/features/share/share_screen.dart
++++ b/mobile/lib/features/share/share_screen.dart
+@@ -196,7 +196,7 @@
+       future: _history,
+       builder: (context, snap) {
+         if (snap.connectionState != ConnectionState.done) {
+-          return Padding(padding: const EdgeInsets.only(top: 4, bottom: 20), child: Center(child: SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4))));
++          return const Padding(padding: EdgeInsets.only(top: 4, bottom: 20), child: Center(child: SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4))));
+         }
+         if (snap.hasError) return const SizedBox.shrink();
+         final items = snap.data ?? const <ShareRecord>[];
+diff --git a/mobile/lib/core/profile.dart b/mobile/lib/core/profile.dart
+--- a/mobile/lib/core/profile.dart
++++ b/mobile/lib/core/profile.dart
+@@ -1,5 +1,4 @@
+ import 'dart:convert';
+-import 'dart:typed_data';
+ 
+ import 'package:flutter/foundation.dart';
+ import 'package:image_picker/image_picker.dart';
