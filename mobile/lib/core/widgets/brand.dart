@@ -16,6 +16,10 @@ class Brand {
   static const mint = Color(0xFF13FF47);
   static const lavender = Color(0xFFAAA6F8);
   static const splash = Color(0xFF0D0A9C);
+
+  /// The quiet disc behind round buttons: the card colour of the day/night panels.
+  static Color disc(BuildContext c) =>
+      Theme.of(c).brightness == Brightness.dark ? SentriColors.cardDark : Colors.white;
 }
 
 /// The S mark: a circle cut by three slanted stripes. Drawn in code so it needs no asset.
@@ -108,7 +112,7 @@ class SentriBackground extends StatelessWidget {
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
     // Both modes stay flat and calm: plain surface, no gradients, no glow spots.
-    return DecoratedBox(decoration: BoxDecoration(color: dark ? const Color(0xFF141519) : const Color(0xFFF7F8FA)), child: child);
+    return DecoratedBox(decoration: BoxDecoration(color: dark ? SentriColors.surfaceDark : SentriColors.surfaceLight), child: child);
   }
 }
 
@@ -147,16 +151,14 @@ class SentriTopBar extends StatelessWidget {
             button: true,
             label: i18n.t('lang.title'),
             child: Material(
-              color: compact ? (dark ? const Color(0xFF1B1D23) : Colors.white) : Brand.indigo,
-              shape: CircleBorder(side: compact ? BorderSide(color: (dark ? Colors.white : Colors.black).withValues(alpha: dark ? 0.25 : 0.12)) : BorderSide.none),
-              elevation: compact ? 0 : 4,
-              shadowColor: Brand.indigo.withValues(alpha: 0.4),
+              color: Brand.disc(context),
+              shape: CircleBorder(side: BorderSide(color: (dark ? Colors.white : Colors.black).withValues(alpha: dark ? 0.25 : 0.12))),
               child: InkWell(
                 customBorder: const CircleBorder(),
                 onTap: () => unawaited(showLanguageSheet(context, i18n, onLanguage)),
-                // Dark mode: white icon on the quiet dark disc - indigo on near-black
-                // disappears, and the language switcher must stay easy to find.
-                child: SizedBox(width: compact ? 38 : 46, height: compact ? 38 : 46, child: Icon(Icons.translate, color: compact ? (dark ? Colors.white : Brand.indigo) : Colors.white, size: compact ? 20 : 24)),
+                // On the quiet disc the icon always takes the ink colour of its mode,
+                // so the language switcher stays easy to find in light and dark.
+                child: SizedBox(width: compact ? 38 : 46, height: compact ? 38 : 46, child: Icon(Icons.translate, color: dark ? Colors.white : Colors.black, size: compact ? 20 : 24)),
               ),
             ),
           ),
@@ -213,7 +215,7 @@ class ThemeButton extends StatelessWidget {
       button: true,
       label: dark ? 'Light mode' : 'Dark mode',
       child: Material(
-        color: dark ? const Color(0xFF1B1D23) : Colors.white,
+        color: Brand.disc(context),
         shape: CircleBorder(side: BorderSide(color: (dark ? Colors.white : Colors.black).withValues(alpha: 0.14))),
         child: InkWell(
           customBorder: const CircleBorder(),

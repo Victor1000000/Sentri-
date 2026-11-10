@@ -1,4 +1,7 @@
 [
+  { "name": "Federal Medical Centre (Idi-Aba)", "city": "Abeokuta, Ogun", "lat": 7.143833, "lon": 3.380583, "phone": "08033398341" },
+  { "name": "Sacred Heart Hospital (Lantoro)", "city": "Abeokuta, Ogun", "lat": 7.162724, "lon": 3.362504, "phone": "08061614954" },
+  { "name": "First Contact Hospital & Maternity (Kuto)", "city": "Abeokuta, Ogun", "lat": 7.154800, "lon": 3.352000, "phone": "08029537462" },
   { "name": "Lagos State University Teaching Hospital (LASUTH)", "city": "Ikeja, Lagos", "lat": 6.6018, "lon": 3.3515, "phone": "08176581642" },
   { "name": "National Hospital Abuja", "city": "Abuja, FCT", "lat": 9.0365, "lon": 7.4918, "phone": "09030097889" },
   { "name": "University College Hospital (UCH)", "city": "Ibadan, Oyo", "lat": 7.4433, "lon": 3.8950, "phone": "08033230882" },

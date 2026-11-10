@@ -1,4 +1,6 @@
 [
+  { "name": "Savfol Fitness (Oke Sokori)", "city": "Abeokuta, Ogun", "lat": 7.148900, "lon": 3.352100, "phone": "07079928601" },
+  { "name": "Savfol Fitness (Sam Ewang)", "city": "Abeokuta, Ogun", "lat": 7.138100, "lon": 3.339000, "phone": "07079928601" },
   { "name": "Moshood Abiola National Stadium", "city": "Abuja, FCT", "lat": 9.0381, "lon": 7.4533, "phone": "07062714160" },
   { "name": "i-Fitness Onikan (Campbell Centre)", "city": "Lagos Island, Lagos", "lat": 6.4502, "lon": 3.3891, "phone": "08167993817" },
   { "name": "i-Fitness Surulere (Eagles Club)", "city": "Surulere, Lagos", "lat": 6.4927, "lon": 3.3592, "phone": "08167993817" },

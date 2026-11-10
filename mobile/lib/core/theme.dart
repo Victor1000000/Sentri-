@@ -7,6 +7,17 @@ class SentriColors {
   static const alarmDark = Color(0xFFE0443D);
   static const safe = Color(0xFF1F7A4D);
   static const safeDark = Color(0xFF4CC388);
+
+  // The warm, humane layer (the parts of the app about the person's own day:
+  // Home's greeting, the Health tab, exercise). Near-black panels at night,
+  // white panels in the day, and one lime energy note - the colour of fresh
+  // leaves and morning runs, reading well with photos of real people.
+  static const surfaceDark = Color(0xFF0E0F12);
+  static const cardDark = Color(0xFF17181D);
+  static const surfaceLight = Color(0xFFF4F3F9);
+  static const inkDark = Color(0xFF17181C); // the dark "ink" chip/button in light mode
+  static const lime = Color(0xFFC6F16E); // lime accentic on dark panels
+  static const limeDeep = Color(0xFF8FB836); // lime that still reads on white
 }
 
 /// Light / dark / follow the phone. The language sheet changes it, and the choice is saved with the settings.
@@ -31,7 +42,7 @@ ThemeData sentriTheme(Brightness b) {
     seedColor: const Color(0xFF0E08A3),
     brightness: b,
   ).copyWith(
-    surface: dark ? const Color(0xFF141519) : const Color(0xFFF7F8FA),
+    surface: dark ? SentriColors.surfaceDark : SentriColors.surfaceLight,
     error: dark ? SentriColors.alarmDark : SentriColors.alarm,
     tertiary: dark ? SentriColors.safeDark : SentriColors.safe,
   );
@@ -44,6 +55,10 @@ ThemeData sentriTheme(Brightness b) {
         bodyColor: base.onSurface,
         displayColor: base.onSurface,
       );
+  // The action colour: the near-black "ink" pill in the day, the lime energy pill at
+  // night - both straight from the reference look, always readable with its text.
+  final actionColor = dark ? SentriColors.lime : SentriColors.inkDark;
+  final onAction = dark ? Colors.black.withValues(alpha: 0.85) : Colors.white;
   return ThemeData(
     useMaterial3: true,
     // No ink splashes: the Android 12 sparkle ripple read as a glitch on these buttons.
@@ -67,34 +82,36 @@ ThemeData sentriTheme(Brightness b) {
       titleTextStyle: text.titleLarge?.copyWith(fontWeight: FontWeight.w800, letterSpacing: 0.3, color: base.onSurface),
     ),
     cardTheme: CardThemeData(
-      elevation: 0,
+      elevation: dark ? 0 : 1,
       margin: EdgeInsets.zero,
-      color: dark ? const Color(0xFF1B1D23) : Colors.white,
+      color: dark ? SentriColors.cardDark : Colors.white,
+      shadowColor: Colors.black.withValues(alpha: 0.05),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(24),
-        side: BorderSide(color: base.outlineVariant),
+        side: BorderSide(color: base.outlineVariant.withValues(alpha: dark ? 0.0 : 1)),
       ),
     ),
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
-        backgroundColor: const Color(0xFF0E08A3),
-        // The scheme picks a dark label when the app is dark, which disappeared on this dark
-        // button. White always reads on it, light and dark alike.
-        foregroundColor: Colors.white,
+        backgroundColor: actionColor,
+        // Labels always match their own panel: white on the day-ink, near-black on the
+        // night-lime, so the buttons read in both modes without per-screen fixes.
+        foregroundColor: onAction,
         minimumSize: const Size.fromHeight(52),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-        textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+        textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
         minimumSize: const Size.fromHeight(52),
+        side: BorderSide(color: base.outlineVariant),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
       ),
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: dark ? const Color(0xFF20232A) : Colors.white,
+      fillColor: dark ? SentriColors.cardDark : Colors.white,
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(30), borderSide: BorderSide(color: base.outlineVariant)),
       enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(30), borderSide: BorderSide(color: base.outlineVariant)),
     ),

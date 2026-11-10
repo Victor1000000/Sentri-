@@ -485,8 +485,15 @@ class HealthController extends ChangeNotifier with WidgetsBindingObserver {
       if (f == null) {
         try {
           f = await location.lastKnown();
-        } catch (_) {}
+        } catch (_) {
+          f = null;
+        }
       }
+      // The cached "last known spot" is only useful when it is fresh: after hours it
+      // may describe a different city (an earlier trip), and then the whole nearby
+      // list fills with hospitals from Lagos or Ibadan while the person sits in
+      // Abeokuta. A stale fix is treated the same as no fix at all.
+      if (f != null && DateTime.now().difference(f.at) > const Duration(minutes: 15)) f = null;
       if (f == null) {
         // Honest split: the map service may be fine - the problem is no location yet.
         _setPlaceFlags(gym: gym, loading: false, failed: false, noLocation: true, at: DateTime.now());
@@ -503,7 +510,7 @@ class HealthController extends ChangeNotifier with WidgetsBindingObserver {
         // Embedded verified directory first: real numbers researched from official
         // sources, added to the same list and de-duplicated against map results.
         final dir = await _loadDirectory(gym ? 'fitness_directory.json' : 'hospital_directory.json', here);
-        final all = _mergePlaces([results, dir], here);
+        final all = _nearOnly(_mergePlaces([results, dir], here));
         if (gym) {
           gyms = all;
           _gymsAt = DateTime.now();
@@ -633,6 +640,20 @@ class HealthController extends ChangeNotifier with WidgetsBindingObserver {
     return out.take(40).toList();
   }
 
+  /// The final gate for what may be shown as "near you": only places within the
+  /// search radius, nearest first, at most 20 of them. Even when a source is
+  /// generous with its answer, nothing from another city can slip onto the list.
+  List<NearbyPlace> _nearOnly(List<NearbyPlace> list) {
+    final out = <NearbyPlace>[];
+    for (final p in list) {
+      if (p.km <= _placesRadiusKm) out.add(p);
+    }
+    out.sort((a, b) => a.km.compareTo(b.km));
+    return out.take(20).toList();
+  }
+
+  /// Same place found twice? Same forgiving name (or nearly), or the last nine
+  /// digits of the phone, or within ~100 m of each other with a similar name.
   bool _samePlace(NearbyPlace a, NearbyPlace b) {
     if (a.phone != null && b.phone != null) {
       final pa = a.phone!.replaceAll(RegExp(r'[^0-9+]'), '');
@@ -663,7 +684,7 @@ class HealthController extends ChangeNotifier with WidgetsBindingObserver {
         final lon = (el['lon'] as num?)?.toDouble();
         if (name == null || lat == null || lon == null) continue;
         final km = dist.as(LengthUnit.Kilometer, here, LatLng(lat, lon));
-        if (km > 25) continue;
+        if (km > _placesRadiusKm) continue;
         final ph = (el['phone'] as String?) ?? '';
         out.add(NearbyPlace(
           name: name,
@@ -697,8 +718,12 @@ class HealthController extends ChangeNotifier with WidgetsBindingObserver {
 
   /// One Overpass mirror; returns null when that mirror answers badly (bad code, timeout).
   Future<List<NearbyPlace>?> _overpassQuery(String url, LatLng here, [bool gym = false]) async {
-    const radius = 15000.0;
-    final sel = gym ? '"leisure"~"^(fitness_centre|sports_centre|stadium)\$"' : '"amenity"~"^(hospital|clinic)\$"';
+    final radius = gym ? 20000.0 : _placesRadiusM;
+    // Gyms also hide under shop=fitness and leisure=sports_hall in the map data; the
+    // extra selectors lift the number found in towns where little else is tagged.
+    final sel = gym
+        ? '(leisure~"^(fitness_centre|sports_centre|stadium|sports_hall)\$" || shop="fitness")'
+        : '"amenity"~"^(hospital|clinic)\$"';
     final q = '[out:json][timeout:20];('
         'node(around:\$radius,${here.latitude},${here.longitude})[$sel];'
         'way(around:\$radius,${here.latitude},${here.longitude})[$sel];'
@@ -750,6 +775,11 @@ class HealthController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   static const _placesUa = 'SentriApp/1.0 (health tab; hospitals and gyms near you)';
+
+  /// The only meaning of "near you" in this app: 15 km around where the person
+  /// actually is. Nothing outside it may reach the list, from any source.
+  static const double _placesRadiusKm = 15.0;
+  static const double _placesRadiusM = _placesRadiusKm * 1000;
 
   /// Nominatim (the OpenStreetMap search service, hosted separately from Overpass). It
   /// often answers when the Overpass mirrors are unreachable, and its "extratags" carry

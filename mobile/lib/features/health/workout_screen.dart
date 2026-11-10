@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show FontFeature;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -39,6 +40,7 @@ class WorkoutScreen extends StatefulWidget {
 class _WorkoutScreenState extends State<WorkoutScreen> {
   final _map = MapController();
   int _lastPathLen = 0;
+  bool _cameraOn = false;
 
   @override
   void initState() {
@@ -58,6 +60,8 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
     if (widget.checkMinutes > 0) {
       await widget.checkin.start(Duration(minutes: widget.checkMinutes));
     }
+    // The camera jumps to the person the moment the first fix lands (handled in
+    // build); the map never opens zoomed out over the whole country.
   }
 
   @override
@@ -120,6 +124,14 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
         listenable: e,
         builder: (context, _) {
           final path = e.path;
+          if (!_cameraOn && e.lastFix != null) {
+            // The session just started: jump to the first fix at once, before the
+            // route line exists, so the map never opens over the whole country.
+            _cameraOn = true;
+            try {
+              _map.move(LatLng(e.lastFix!.lat, e.lastFix!.lon), 17);
+            } catch (_) {}
+          }
           // The camera follows the newest point of the line while the session runs.
           if (path.length != _lastPathLen && path.isNotEmpty) {
             _lastPathLen = path.length;
@@ -200,7 +212,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
                       },
                     ),
                   Material(
-                    color: dark ? const Color(0xFF1B1D23) : Colors.white,
+                    color: dark ? const Color(0xFF17181D) : Colors.white,
                     borderRadius: BorderRadius.circular(24),
                     elevation: 6,
                     shadowColor: Colors.black38,
@@ -208,7 +220,24 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
                       padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
                       child: Column(children: [
                         Row(children: [
-                          Expanded(child: _stat(t('exercise.time'), _clock(e.seconds))),
+                          // The clock is the star: big, tabular so every single tick-
+                          // tock holds its one second without any characters jumping.
+                          Expanded(
+                            child: Column(children: [
+                              Text(
+                                _clock(e.seconds),
+                                style: TextStyle(
+                                  fontSize: 34,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: -0.5,
+                                  fontFeatures: const [FontFeature.tabularFigures()],
+                                  color: dark ? const Color(0xFFC6F16E) : cs.primary,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(t('exercise.time'), style: TextStyle(fontSize: 12.5, color: cs.onSurface.withValues(alpha: 0.55))),
+                            ]),
+                          ),
                           Expanded(child: _stat(t('exercise.distance'), '${e.km < 1 ? e.km.toStringAsFixed(2) : e.km.toStringAsFixed(1)} km')),
                           if (widget.mode != ExerciseMode.bike) Expanded(child: _stat(t('exercise.steps'), '${e.steps}')),
                         ]),

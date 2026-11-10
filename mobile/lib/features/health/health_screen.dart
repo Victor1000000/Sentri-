@@ -12,6 +12,11 @@ import '../../core/i18n/i18n.dart';
 import '../../core/widgets/flat.dart';
 import '../checkin/checkin_controller.dart';
 import '../push/push_service.dart';
+import '../photos/photo_gym.dart';
+import '../photos/photo_health.dart';
+import '../photos/photo_run.dart';
+import '../photos/photo_walk.dart';
+import '../photos/photo_water.dart';
 import 'awards.dart';
 import 'exercise_controller.dart';
 import 'health_controller.dart';
@@ -68,6 +73,38 @@ class _HealthScreenState extends State<HealthScreen> {
         body: ListView(
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
           children: [
+            // The tab opens on a person, not on a form: a morning-stretch banner
+            // straight from the reference boards, with the tab's promise on it.
+            ClipRRect(
+              borderRadius: BorderRadius.circular(24),
+              child: SizedBox(
+                height: 168,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Image.memory(photoHealthBytes, fit: BoxFit.cover, gaplessPlayback: true),
+                    Align(
+                      alignment: Alignment.bottomLeft,
+                      child: Container(
+                        decoration: const BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.bottomCenter,
+                            end: Alignment.topCenter,
+                            colors: [Color(0xB2000000), Color(0x00000000)],
+                          ),
+                        ),
+                        padding: const EdgeInsets.fromLTRB(16, 30, 16, 14),
+                        child: Text(
+                          t('tabs.health'),
+                          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: Colors.white, letterSpacing: -0.4),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
             _section('HEART', t('health.heart'), Icons.favorite_border),
             _heartCard(context, cs),
             const SizedBox(height: 20),
@@ -92,7 +129,22 @@ class _HealthScreenState extends State<HealthScreen> {
               retry: () => unawaited(widget.health.loadHospitals(force: true)),
             ),
             const SizedBox(height: 20),
-            _section('NEARBY', t('health.gyms'), Icons.fitness_center),
+            // The gyms list opens on a person training, the way the tab should feel.
+            Padding(
+              padding: const EdgeInsets.only(left: 2, bottom: 8),
+              child: Row(children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: SizedBox(
+                    width: 26,
+                    height: 26,
+                    child: Image.memory(photoGymBytes, fit: BoxFit.cover, gaplessPlayback: true),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(t('health.gyms'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, letterSpacing: -0.3)),
+              ]),
+            ),
             _placesCard(
               context,
               cs,
@@ -244,32 +296,50 @@ class _HealthScreenState extends State<HealthScreen> {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(t('health.water_sub'), style: const TextStyle(fontSize: 14, height: 1.45)),
           const SizedBox(height: 14),
-          Container(
-            padding: const EdgeInsets.all(3),
-            decoration: BoxDecoration(color: Flat.hairline(context), borderRadius: BorderRadius.circular(12)),
-            child: Row(children: [
-              for (final m in options)
-                Expanded(
-                  child: Semantics(
-                    button: true,
-                    selected: s.waterMinutes == m,
-                    child: GestureDetector(
-                      onTap: () async {
-                        await s.update(waterMinutes: m);
-                        // After every pace change, the honest state is read back.
-                        await h.refreshWaterStatus();
-                      },
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 160),
-                        height: 38,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(color: s.waterMinutes == m ? Flat.card(context) : Colors.transparent, borderRadius: BorderRadius.circular(10)),
-                        child: Text(label(m), style: TextStyle(fontSize: 12.5, fontWeight: s.waterMinutes == m ? FontWeight.w600 : FontWeight.w500)),
-                      ),
-                    ),
-                  ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // A bright sip next to the pace picker: the reminder is about a real
+              // person's habit, so the card shows the person, not just controls.
+              ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: SizedBox(
+                  width: 64,
+                  height: 64,
+                  child: Image.memory(photoWaterBytes, fit: BoxFit.cover, gaplessPlayback: true),
                 ),
-            ]),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(3),
+                  decoration: BoxDecoration(color: Flat.hairline(context), borderRadius: BorderRadius.circular(12)),
+                  child: Row(children: [
+                    for (final m in options)
+                      Expanded(
+                        child: Semantics(
+                          button: true,
+                          selected: s.waterMinutes == m,
+                          child: GestureDetector(
+                            onTap: () async {
+                              await s.update(waterMinutes: m);
+                              // After every pace change, the honest state is read back.
+                              await h.refreshWaterStatus();
+                            },
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 160),
+                              height: 38,
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(color: s.waterMinutes == m ? Flat.card(context) : Colors.transparent, borderRadius: BorderRadius.circular(10)),
+                              child: Text(label(m), style: TextStyle(fontSize: 12.5, fontWeight: s.waterMinutes == m ? FontWeight.w600 : FontWeight.w500)),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ]),
+                ),
+              ),
+            ],
           ),
           // The honest line: what actually became of the reminder on THIS phone.
           if (s.waterMinutes > 0) ...[
@@ -309,11 +379,10 @@ class _HealthScreenState extends State<HealthScreen> {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(t('exercise.sub'), style: const TextStyle(fontSize: 14, height: 1.45)),
           const SizedBox(height: 14),
-          // The three ways to move, chosen like radio chips.
-          Container(
-            padding: const EdgeInsets.all(3),
-            decoration: BoxDecoration(color: Flat.hairline(context), borderRadius: BorderRadius.circular(12)),
-            child: Row(children: [
+          // The three ways to move, one photo card each - pick like the reference
+          // boards: tap the tile, the ring shows the choice.
+          Row(
+            children: [
               for (final m in ExerciseMode.values)
                 Expanded(
                   child: Semantics(
@@ -323,27 +392,54 @@ class _HealthScreenState extends State<HealthScreen> {
                       onTap: () => setState(() => _mode = m),
                       child: AnimatedContainer(
                         duration: const Duration(milliseconds: 160),
-                        height: 40,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(color: _mode == m ? Flat.card(context) : Colors.transparent, borderRadius: BorderRadius.circular(10)),
-                        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                          Icon(switch (m) {
-                            ExerciseMode.walk => Icons.directions_walk_outlined,
-                            ExerciseMode.run => Icons.directions_run_outlined,
-                            ExerciseMode.bike => Icons.directions_bike_outlined,
-                          }, size: 16),
-                          const SizedBox(width: 5),
-                          Text(switch (m) {
-                            ExerciseMode.walk => t('exercise.walk'),
-                            ExerciseMode.run => t('exercise.run'),
-                            ExerciseMode.bike => t('exercise.bike'),
-                          }, style: TextStyle(fontSize: 12.5, fontWeight: _mode == m ? FontWeight.w600 : FontWeight.w500)),
-                        ]),
+                        margin: EdgeInsets.only(right: m != ExerciseMode.bike ? 10 : 0),
+                        height: 92,
+                        clipBehavior: Clip.antiAlias,
+                        decoration: BoxDecoration(
+                          borderRadius: _mode == m ? BorderRadius.circular(20) : BorderRadius.circular(16),
+                          border: Border.all(
+                            width: _mode == m ? 2.5 : 1.5,
+                            color: _mode == m ? cs.primary : cs.onSurface.withValues(alpha: 0.12),
+                          ),
+                        ),
+                        child: Stack(
+                          fit: StackFit.expand,
+                          alignment: Alignment.bottomLeft,
+                          children: [
+                            if (m == ExerciseMode.walk) Image.memory(photoWalkBytes, fit: BoxFit.cover, gaplessPlayback: true),
+                            if (m == ExerciseMode.run) Image.memory(photoRunBytes, fit: BoxFit.cover, gaplessPlayback: true),
+                            if (m == ExerciseMode.bike) ...[
+                              ColoredBox(color: cs.primary.withValues(alpha: 0.10)),
+                              Icon(Icons.directions_bike, size: 34, color: cs.primary),
+                            ],
+                            Align(
+                              alignment: Alignment.bottomLeft,
+                              child: Padding(
+                                padding: const EdgeInsets.all(6),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xCC17181C),
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Text(
+                                    switch (m) {
+                                      ExerciseMode.walk => t('exercise.walk'),
+                                      ExerciseMode.run => t('exercise.run'),
+                                      ExerciseMode.bike => t('exercise.bike'),
+                                    },
+                                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.white),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
                 ),
-            ]),
+            ],
           ),
           // The safety watch for the session, moved here from the home screen:
           // pick how long the session may take; if it goes past that without

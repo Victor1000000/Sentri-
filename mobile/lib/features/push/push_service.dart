@@ -51,15 +51,16 @@ const _healthNoteId = 7202;
 /// * [off] - the person has not chosen a pace (or chose "off").
 /// * [ok] - the reminder really is scheduled and the phone allows notifications.
 /// * [noPermission] - the phone blocks Sentri's notifications entirely.
-/// * [notScheduled] - notifications are allowed but the recurring alarm did not stick
-///   (purged by a battery saver / reboot) or the phone has not excused Sentri from
-///   battery saving, so the reminder may silently die.
+/// * [notScheduled] - notifications are allowed but the recurring alarm could not
+///   be placed on the phone's alarm system at all.
 enum WaterStatus { off, ok, noPermission, notScheduled }
 
 /// Checks what actually became of the reminder on this phone instead of assuming it
-/// works: is the notification permission granted, is the recurring alarm still among
-/// the phone's pending scheduled notifications, and has the phone excused Sentri from
-/// battery saving (without which many phones quietly drop scheduled alarms).
+/// works: is the notification permission granted, and is the recurring alarm still
+/// among the phone's pending scheduled notifications. The battery-exemption question
+/// is asked when the pace is picked, but it does not report the reminder as broken:
+/// the alarm-clock schedule the app uses is one phone makers promise not to swallow,
+/// and re-arming on every open keeps a purged schedule alive anyway.
 Future<WaterStatus> waterReminderStatus(int minutes) async {
   if (minutes <= 0) return WaterStatus.off;
   try {
@@ -75,11 +76,7 @@ Future<WaterStatus> waterReminderStatus(int minutes) async {
       final pending = await _local.pendingNotificationRequests();
       scheduled = pending.any((p) => p.id == '$_waterId');
     } catch (_) {}
-    var batteryOk = true;
-    try {
-      batteryOk = await Permission.ignoreBatteryOptimizations.isGranted;
-    } catch (_) {}
-    if (!scheduled || !batteryOk) return WaterStatus.notScheduled;
+    if (!scheduled) return WaterStatus.notScheduled;
     return WaterStatus.ok;
   } catch (_) {
     // If even the check fails, say the reminder is not verified rather than pretend.

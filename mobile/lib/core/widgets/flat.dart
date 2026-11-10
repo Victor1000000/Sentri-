@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../theme.dart';
 import 'brand.dart';
 import 'glass.dart';
 
@@ -7,8 +8,8 @@ import 'glass.dart';
 class Flat {
   static const live = Color(0xFF1FA85B);
   static const danger = Color(0xFFD92D20);
-  static Color bg(BuildContext c) => Theme.of(c).brightness == Brightness.dark ? const Color(0xFF141519) : const Color(0xFFF2F2F7);
-  static Color card(BuildContext c) => Theme.of(c).brightness == Brightness.dark ? const Color(0xFF1B1D23) : Colors.white;
+  static Color bg(BuildContext c) => Theme.of(c).brightness == Brightness.dark ? SentriColors.surfaceDark : SentriColors.surfaceLight;
+  static Color card(BuildContext c) => Theme.of(c).brightness == Brightness.dark ? SentriColors.cardDark : Colors.white;
   static Color muted(BuildContext c) => Theme.of(c).colorScheme.onSurface.withValues(alpha: 0.55);
   static Color hairline(BuildContext c) => Theme.of(c).colorScheme.onSurface.withValues(alpha: 0.1);
   static bool still(BuildContext c) => MediaQuery.of(c).disableAnimations;

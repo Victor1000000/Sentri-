@@ -21,6 +21,7 @@ import '../onboarding/permissions_panel.dart';
 import '../sos/pin_pad.dart';
 import '../sos/contact_people.dart';
 import '../sos/sos_controller.dart';
+import '../photos/photo_home.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, required this.sos, required this.settings, required this.i18n, required this.bridge, required this.api, required this.inbox, required this.share, required this.checkin, required this.police, required this.people});
@@ -114,11 +115,28 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   ),
                   const SizedBox(height: 18),
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 26),
-                    child: Text(
-                      t('home.hero'),
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(fontSize: 17.5, height: 1.35, fontWeight: FontWeight.w800, letterSpacing: -0.2),
+                    padding: const EdgeInsets.symmetric(horizontal: 22),
+                    child: Row(
+                      children: [
+                        // The greeting is a real face now: a warm portrait beside the
+                        // hero line, the way the reference boards put a person first.
+                        Container(
+                          width: 76,
+                          height: 76,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.12), width: 2),
+                          ),
+                          child: ClipOval(child: Image.memory(photoHomeBytes, fit: BoxFit.cover, gaplessPlayback: true)),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Text(
+                            t('home.hero'),
+                            style: const TextStyle(fontSize: 17.5, height: 1.35, fontWeight: FontWeight.w800, letterSpacing: -0.2),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                   const SizedBox(height: 14),

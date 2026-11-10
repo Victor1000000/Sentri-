@@ -83,7 +83,15 @@ class ExerciseController extends ChangeNotifier {
   static const _historyKey = 'exercise.history.v1';
   static const _maxHistory = 60;
   static const _maxPathPoints = 300;
+
+  /// How often the DISTANCE is recomputed from a fresh GPS fix (the clock below
+  /// keeps the visible seconds moving on their own).
   static const _tick = Duration(seconds: 5);
+
+  /// The session clock must tick every single second - "tick tock" - instead of
+  /// jumping in fives with the GPS cadence. A separate one-second timer only
+  /// updates the seconds shown; distance and steps come from the sensors.
+  static const _clockTick = Duration(seconds: 1);
 
   ExerciseMode mode = ExerciseMode.walk;
   bool active = false;
@@ -93,6 +101,10 @@ class ExerciseController extends ChangeNotifier {
   int steps = 0;
   List<LatLng> path = const [];
 
+  /// The most recent fix of the running session (rough ones included): the
+  /// workout screen puts the camera on it at once, before the route line exists.
+  GeoFix? lastFix;
+
   List<WorkoutRecord> history = const [];
   int get sessions => history.length;
   double get totalKm => history.fold(0.0, (a, r) => a + r.km);
@@ -101,6 +113,7 @@ class ExerciseController extends ChangeNotifier {
 
   DateTime? _startedAt;
   Timer? _tickTimer;
+  Timer? _clockTimer;
   StreamSubscription<StepCount>? _stepSub;
   int _stepBaseline = -1;
   double? _lastFixLat;
@@ -157,6 +170,7 @@ class ExerciseController extends ChangeNotifier {
     km = 0;
     steps = 0;
     path = const [];
+    lastFix = null;
     _startedAt = DateTime.now();
     _stepBaseline = -1;
     _lastFixLat = null;
@@ -164,9 +178,23 @@ class ExerciseController extends ChangeNotifier {
     notifyListeners();
     _listenSteps(m);
     _tickTimer?.cancel();
+    _clockTimer?.cancel();
     _tickTimer = Timer.periodic(_tick, (_) => unawaited(_onTick()));
+    _clockTimer = Timer.periodic(_clockTick, (_) => _updateSeconds());
     unawaited(_onTick()); // the first fix right away
     return true;
+  }
+
+  /// Re-reads the clock from the start time each second, so the big digits move
+  /// tick, tock - even while a GPS fix is slow.
+  void _updateSeconds() {
+    final base = _startedAt;
+    if (!active || base == null) return;
+    final s = DateTime.now().difference(base).inSeconds;
+    if (s != seconds) {
+      seconds = s;
+      notifyListeners();
+    }
   }
 
   /// Steps come from the phone's hardware step counter. The stream reports the
@@ -199,24 +227,19 @@ class ExerciseController extends ChangeNotifier {
     }
   }
 
-  /// One tick: five more seconds on the clock, one fresh fix, fused in honestly.
+  /// One tick: one fresh GPS fix fused in honestly. (The seconds read from the
+  /// clock each second in [_updateSeconds]; this tick is about the distance.)
   Future<void> _onTick() async {
     if (!active || _busy) return;
     _busy = true;
     try {
-      final base = _startedAt;
-      if (base != null) {
-        final s = DateTime.now().difference(base).inSeconds;
-        if (s != seconds) {
-          seconds = s;
-          notifyListeners();
-        }
-      }
       GeoFix? f;
       try {
         f = await _location.fix(highAccuracy: true, timeout: const Duration(seconds: 5));
       } catch (_) {}
       if (f == null) return;
+      // The camera target is the freshest fix, whatever its quality.
+      lastFix = f;
       // Only real GPS-grade positions are trusted for distance: a tower/Wi-Fi
       // guess can sit hundreds of metres off and would corrupt the count.
       if (!usableForDistance(f, limitM: 35)) return;
@@ -269,6 +292,8 @@ class ExerciseController extends ChangeNotifier {
   Future<List<AwardKind>> stop({required bool keepRecord}) async {
     _tickTimer?.cancel();
     _tickTimer = null;
+    _clockTimer?.cancel();
+    _clockTimer = null;
     unawaited(_stepSub?.cancel());
     _stepSub = null;
     final wasActive = active;

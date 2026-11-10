@@ -2,6 +2,8 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
+import '../theme.dart';
+
 /// Frosted glass: a blurred, translucent panel with a thin light edge. Used only where it earns its place
 /// (things that float over other content: the message bar, the tab bar, sheets, the police card, the
 /// live-sharing card). Everything else stays flat. With "high contrast" or reduced transparency on, it
@@ -54,7 +56,7 @@ class GlassBackdrop extends StatelessWidget {
     final dark = Theme.of(context).brightness == Brightness.dark;
     // Flat and calm in both modes; the glass panels blur this single calm colour.
     return Stack(children: [
-      Positioned.fill(child: ColoredBox(color: dark ? const Color(0xFF141519) : const Color(0xFFF7F8FA))),
+      Positioned.fill(child: ColoredBox(color: dark ? SentriColors.surfaceDark : SentriColors.surfaceLight)),
       Positioned.fill(child: child),
     ]);
   }

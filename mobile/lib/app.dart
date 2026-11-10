@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
 
 import 'core/theme.dart';
-import 'core/widgets/brand.dart';
 import 'core/widgets/glass.dart';
 import 'package:flutter/services.dart' show rootBundle;
 
@@ -180,17 +179,22 @@ class _TabsState extends State<_Tabs> {
        blur: 24,
        child: NavigationBar(
         height: 68,
-        indicatorColor: Brand.indigo,
+        // The chosen tab sits on a soft disc now, its icon in the ink of the mode,
+        // instead of the old heavy solid block.
+        indicatorColor: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF26282F) : const Color(0xFFE9E7FC),
         backgroundColor: Colors.transparent,
         elevation: 0,
         selectedIndex: _tab,
         onDestinationSelected: (i) => setState(() => _tab = i),
-        destinations: [
-          NavigationDestination(icon: const Icon(Icons.home_outlined), selectedIcon: const Icon(Icons.home, color: Colors.white), label: t('tabs.home')),
-          NavigationDestination(icon: const Icon(Icons.map_outlined), selectedIcon: const Icon(Icons.map, color: Colors.white), label: t('tabs.map')),
-          NavigationDestination(icon: const Icon(Icons.monitor_heart_outlined), selectedIcon: const Icon(Icons.monitor_heart, color: Colors.white), label: t('tabs.health')),
-          NavigationDestination(icon: const Icon(Icons.local_police_outlined), selectedIcon: const Icon(Icons.local_police, color: Colors.white), label: t('tabs.police')),
-        ],
+        destinations: () {
+          final onDisc = Theme.of(context).brightness == Brightness.dark ? Colors.white : Colors.black87;
+          return [
+            NavigationDestination(icon: const Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home, color: onDisc), label: t('tabs.home')),
+            NavigationDestination(icon: const Icon(Icons.map_outlined), selectedIcon: Icon(Icons.map, color: onDisc), label: t('tabs.map')),
+            NavigationDestination(icon: const Icon(Icons.monitor_heart_outlined), selectedIcon: Icon(Icons.monitor_heart, color: onDisc), label: t('tabs.health')),
+            NavigationDestination(icon: const Icon(Icons.local_police_outlined), selectedIcon: Icon(Icons.local_police, color: onDisc), label: t('tabs.police')),
+          ];
+        }(),
       )),
     );
   }
