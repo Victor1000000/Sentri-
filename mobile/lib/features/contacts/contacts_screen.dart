@@ -56,10 +56,12 @@ class _ContactsScreenState extends State<ContactsScreen> {
       return;
     }
     if (saved == null || !mounted) return;
+    // A plain final local copy: the builder closure below must not receive the nullable.
+    final List<ContactStatus> fresh = saved;
     await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
-      builder: (context) => _AddSheet(api: widget.api, saved: saved, appLocale: widget.i18n.code, i18n: widget.i18n),
+      builder: (context) => _AddSheet(api: widget.api, saved: fresh, appLocale: widget.i18n.code, i18n: widget.i18n),
     );
     _reload();
   }
