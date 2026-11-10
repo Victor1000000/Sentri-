@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show TextInputFormatter;
@@ -334,7 +333,7 @@ class PillField extends StatelessWidget {
     final border = OutlineInputBorder(borderRadius: BorderRadius.circular(30), borderSide: BorderSide(color: ink, width: 2.5));
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       if (label != null) Padding(padding: const EdgeInsets.only(left: 6, bottom: 6), child: Text(label!, style: const TextStyle(fontSize: 14))),
-      ClipRRect(borderRadius: BorderRadius.circular(30), child: BackdropFilter(filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14), child: TextField(
+      TextField(
         controller: controller,
         focusNode: focusNode,
         keyboardType: keyboardType,
@@ -355,7 +354,7 @@ class PillField extends StatelessWidget {
           enabledBorder: border,
           focusedBorder: border.copyWith(borderSide: BorderSide(color: Brand.indigoHi, width: 3)),
         ),
-      ))),
+      ),
     ]);
   }
 }

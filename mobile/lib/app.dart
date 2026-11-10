@@ -5,7 +5,6 @@ import 'package:latlong2/latlong.dart';
 
 import 'core/theme.dart';
 import 'core/widgets/brand.dart'; // SplashView lives here
-import 'core/widgets/glass.dart';
 import 'package:flutter/services.dart' show rootBundle;
 
 import 'features/home/home_screen.dart';
@@ -155,7 +154,7 @@ class _TabsState extends State<_Tabs> {
     final body = IndexedStack(
       index: _tab,
       children: [
-        HomeScreen(sos: s.sos, settings: s.settings, i18n: s.i18n, bridge: s.bridge, api: s.api, inbox: s.inbox, share: s.share, checkin: s.checkin, police: s.police, people: s.people),
+        HomeScreen(sos: s.sos, settings: s.settings, i18n: s.i18n, bridge: s.bridge, api: s.api, inbox: s.inbox, share: s.share, checkin: s.checkin, police: s.police, people: s.people, profile: s.profile),
         MapScreen(key: _mapKey, location: s.location, api: s.api, i18n: s.i18n, placeLookup: const DevicePlaceLookup(), onPlace: (p) => _state = p?.state, police: _directoryFuture),
         HealthScreen(
           health: s.health,
@@ -175,28 +174,72 @@ class _TabsState extends State<_Tabs> {
     );
     return Scaffold(
       body: body,
-      bottomNavigationBar: Glass(
-       radius: 0,
-       blur: 24,
-       child: NavigationBar(
-        height: 68,
-        // The chosen tab sits on a soft disc now, its icon in the ink of the mode,
-        // instead of the old heavy solid block.
-        indicatorColor: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF26282F) : const Color(0xFFE9E7FC),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        selectedIndex: _tab,
-        onDestinationSelected: (i) => setState(() => _tab = i),
-        destinations: () {
-          final onDisc = Theme.of(context).brightness == Brightness.dark ? Colors.white : Colors.black87;
-          return [
-            NavigationDestination(icon: const Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home, color: onDisc), label: t('tabs.home')),
-            NavigationDestination(icon: const Icon(Icons.map_outlined), selectedIcon: Icon(Icons.map, color: onDisc), label: t('tabs.map')),
-            NavigationDestination(icon: const Icon(Icons.monitor_heart_outlined), selectedIcon: Icon(Icons.monitor_heart, color: onDisc), label: t('tabs.health')),
-            NavigationDestination(icon: const Icon(Icons.local_police_outlined), selectedIcon: Icon(Icons.local_police, color: onDisc), label: t('tabs.police')),
-          ];
-        }(),
-      )),
+      bottomNavigationBar: _PillNav(
+        labels: [t('tabs.home'), t('tabs.map'), t('tabs.health'), t('tabs.police')],
+        icons: const [Icons.home_outlined, Icons.map_outlined, Icons.monitor_heart_outlined, Icons.local_police_outlined],
+        selected: const [Icons.home, Icons.map, Icons.monitor_heart, Icons.local_police],
+        index: _tab,
+        onTap: (i) => setState(() => _tab = i),
+      ),
+    );
+  }
+}
+
+/// The floating flat pill tab bar: one solid rounded panel, the chosen tab filled with
+/// the mode's ink chip (near-black on light, white on dark). No translucency, no blur,
+/// no heavy NavigationBar block.
+class _PillNav extends StatelessWidget {
+  const _PillNav({required this.labels, required this.icons, required this.selected, required this.index, required this.onTap});
+  final List<String> labels;
+  final List<IconData> icons;
+  final List<IconData> selected;
+  final int index;
+  final ValueChanged<int> onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final bar = dark ? const Color(0xFF17181D) : Colors.white;
+    final chip = dark ? Colors.white : SentriColors.inkDark;
+    final chipInk = dark ? SentriColors.inkDark : Colors.white;
+    final idle = Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.62);
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 4, 18, 10),
+        child: Container(
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            color: bar,
+            borderRadius: BorderRadius.circular(999),
+            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: dark ? 0.4 : 0.08), blurRadius: 16, offset: const Offset(0, 6))],
+          ),
+          child: Row(
+            children: [
+              for (var i = 0; i < labels.length; i++)
+                Expanded(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => onTap(i),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      decoration: BoxDecoration(
+                        color: i == index ? chip : Colors.transparent,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Column(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(i == index ? selected[i] : icons[i], size: 21, color: i == index ? chipInk : idle),
+                        const SizedBox(height: 2),
+                        Text(labels[i], maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 10.5, fontWeight: i == index ? FontWeight.w700 : FontWeight.w500, color: i == index ? chipInk : idle)),
+                      ]),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

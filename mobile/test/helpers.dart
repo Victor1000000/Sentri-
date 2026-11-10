@@ -227,6 +227,13 @@ class FakeApi implements SentriApi {
     _check();
     return sharesNow;
   }
+
+  List<ShareRecord> shareHistoryNow = const [];
+  @override
+  Future<List<ShareRecord>> shareHistory() async {
+    _check();
+    return shareHistoryNow;
+  }
 }
 
 class FakeLocation implements LocationSource {

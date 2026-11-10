@@ -9,6 +9,7 @@ import 'core/config.dart';
 import 'core/i18n/i18n.dart';
 import 'core/net/api.dart';
 import 'core/platform/native_bridge.dart';
+import 'core/profile.dart';
 import 'core/settings.dart';
 import 'core/theme.dart';
 import 'core/storage/key_value_store.dart';
@@ -51,6 +52,7 @@ class AppServices {
     required this.inbox,
     required this.share,
     required this.checkin,
+    required this.profile,
     required this.waking,
   });
 
@@ -84,6 +86,9 @@ class AppServices {
 
   /// The "Check on me" watch: a timed safety check that raises a full alert when missed.
   final CheckInController checkin;
+
+  /// The person's own name and photo, kept on this phone (the name also goes to the server).
+  final Profile profile;
 
   /// True while the app waits for a sleeping server to wake up.
   final ValueListenable<bool> waking;
@@ -133,6 +138,9 @@ class AppServices {
     final share = ShareController(api: api, location: location, battery: battery, timers: timers, store: store, dataSaver: () => settings.dataSaver);
 
     final checkin = CheckInController(sos: sos, timers: timers, store: store);
+
+    final profile = Profile(store);
+    await profile.load();
 
     final lowBattery = LowBatteryAlerter(
       api: api,
@@ -187,6 +195,7 @@ class AppServices {
       inbox: inbox,
       share: share,
       checkin: checkin,
+      profile: profile,
       waking: httpApi.waking,
     );
     // Start waking a sleeping server now, so it is ready by the time the person taps anything.

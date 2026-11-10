@@ -33,6 +33,13 @@ export class MemoryShares implements ShareStore {
   async due(now: number) {
     return [...this.rows.values()].filter((s) => s.endedAt === undefined && s.expiresAt <= now).map((s) => structuredClone(s));
   }
+  async history(userId: string, limit: number) {
+    return [...this.rows.values()]
+      .filter((s) => s.userId === userId && s.endedAt !== undefined)
+      .sort((a, b) => b.startedAt - a.startedAt)
+      .slice(0, Math.max(1, limit))
+      .map((s) => structuredClone(s));
+  }
   async purge(now: number) {
     let n = 0;
     for (const [id, s] of this.rows) if (s.purgeAfter < now) { this.rows.delete(id); n++; }

@@ -2,18 +2,22 @@ import { describe, expect, it } from 'vitest';
 import { PEPPER, GEO, harness, tokenOf } from './helpers.js';
 
 describe('repeat / acknowledge loop', () => {
-  it('waits out the 5 s cancel window, alerts everyone, then repeats every 25 s', async () => {
+  it('alerts everyone the instant the SOS starts, then repeats every 25 s', async () => {
     const h = await harness();
     const v = await h.engine.start('u1', 'shake', GEO);
     expect(v.state).toBe('countdown');
+    // no waiting for the window: the alert leaves in the same breath as the trigger
+    expect(h.notifier.messages).toHaveLength(3);
+    expect(h.notifier.messages.every((m) => m.repeat === 0)).toBe(true);
+    expect(h.dispatcher.calls).toHaveLength(0); // police only if no cancel in the window
 
     await h.sched.advance(4999);
-    expect(h.notifier.messages).toHaveLength(0);
+    expect(h.notifier.messages).toHaveLength(3);
 
     await h.sched.advance(1); // t = 5 s: window ends
-    expect(h.notifier.messages).toHaveLength(3);
     expect(h.dispatcher.calls).toHaveLength(1);
     expect(h.dispatcher.calls[0]).toMatchObject({ duress: false, update: false, userPhone: '+2348000000000' });
+    expect(h.notifier.messages).toHaveLength(3); // the window never sends a duplicate
 
     await h.sched.advance(25000); // repeat 1
     expect(h.notifier.messages).toHaveLength(6);
@@ -99,14 +103,18 @@ describe('repeat / acknowledge loop', () => {
 });
 
 describe('PIN handling in the SOS flow', () => {
-  it('cancel PIN during the window: nothing is ever sent', async () => {
+  it('cancel PIN during the window: the alert already left, so contacts get a stand-down', async () => {
     const h = await harness();
     const { sosId } = await h.engine.start('u1', 'shake', GEO);
+    expect(h.notifier.messages).toHaveLength(3); // the first round left at once
     await h.sched.advance(2000);
     expect(await h.engine.submitPin('u1', sosId, '1234')).toEqual({ result: 'cancelled', keepTracking: false });
+    // the repeat loop and the pending activation are dead
+    expect(h.sched.pending()).toEqual([]);
     await h.sched.advance(120000);
-    expect(h.notifier.messages).toHaveLength(0);
+    expect(h.notifier.messages).toHaveLength(3); // no second round
     expect(h.dispatcher.calls).toHaveLength(0);
+    expect(h.notifier.overCalls).toEqual([{ sosId, reason: 'cancelled' }]);
     expect((await h.store.getEvent(sosId))!.state).toBe('cancelled');
   });
 
@@ -118,17 +126,20 @@ describe('PIN handling in the SOS flow', () => {
     await h.engine.submitPin('u1', sosId, '1234');
     await h.sched.advance(120000);
     expect(h.notifier.messages).toHaveLength(sent);
+    expect(h.notifier.overCalls).toEqual([{ sosId, reason: 'cancelled' }]);
   });
 
-  it('duress PIN in the window: looks cancelled, but the alert goes out marked duress', async () => {
+  it('duress PIN in the window: the sos round already left, the next one is marked duress', async () => {
     const h = await harness();
     const { sosId } = await h.engine.start('u1', 'shake', GEO);
+    expect(h.notifier.ofKind('sos')).toHaveLength(3); // first round went out as a normal sos
     await h.sched.advance(2000);
     expect(await h.engine.submitPin('u1', sosId, '4321')).toEqual({ result: 'cancelled', keepTracking: true });
-    await h.sched.advance(3000);
-    expect(h.notifier.messages).toHaveLength(3);
-    expect(h.notifier.messages.every((m) => m.kind === 'duress')).toBe(true);
+    await h.sched.advance(3000); // window ends under duress
     expect(h.dispatcher.calls[0]).toMatchObject({ duress: true });
+    await h.sched.advance(20000); // t = 25 s: the next repeat round
+    expect(h.notifier.ofKind('duress')).toHaveLength(3);
+    expect(h.notifier.ofKind('duress')[0]).toMatchObject({ repeat: 1 });
   });
 
   it('duress PIN while active: switches repeats to duress, updates police, hides the ack from the user', async () => {

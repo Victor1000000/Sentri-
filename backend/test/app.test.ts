@@ -57,7 +57,7 @@ describe('HTTP API', () => {
     expect(r.json()).toEqual({ result: 'cancelled', keepTracking: false });
     expect((await h.store.getEvent(sosId))!.state).toBe('cancelled');
     await h.sched.advance(60_000);
-    expect(h.notifier.messages).toHaveLength(0);
+    expect(h.notifier.messages).toHaveLength(3); // the first round left at once; the repeat loop never ran
   });
 
   it('the old public link pages are gone, and every response is uncached and unframeable', async () => {

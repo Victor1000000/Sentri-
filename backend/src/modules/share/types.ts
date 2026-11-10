@@ -30,5 +30,7 @@ export interface ShareStore {
   extend(userId: string, id: string, expiresAt: number, now: number): Promise<boolean>;
   /** Shares that passed their limit without being stopped. */
   due(now: number): Promise<LocationShare[]>;
+  /** Ended shares, newest first, for the share history list. */
+  history(userId: string, limit: number): Promise<LocationShare[]>;
   purge(now: number): Promise<number>;
 }

@@ -57,11 +57,15 @@ export class FakeScheduler implements Scheduler {
 export class RecordingNotifier implements Notifier {
   messages: ContactMessage[] = [];
   userNotices: { userId: string; sosId: string }[] = [];
+  overCalls: { sosId: string; reason: 'responded' | 'cancelled' }[] = [];
   async sendToContact(m: ContactMessage): Promise<void> {
     this.messages.push(m);
   }
   async notifyUser(userId: string, n: { kind: 'acknowledged'; sosId: string }): Promise<void> {
     this.userNotices.push({ userId, sosId: n.sosId });
+  }
+  async alertOver(sosId: string, reason: 'responded' | 'cancelled'): Promise<void> {
+    this.overCalls.push({ sosId, reason });
   }
   ofKind(kind: string): ContactMessage[] {
     return this.messages.filter((m) => m.kind === kind);

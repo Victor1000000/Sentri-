@@ -18,6 +18,14 @@ export interface ShareView {
   contactIds: string[];
 }
 
+/** One row of the share history list: when a past share ran and how many contacts saw it. */
+export interface ShareHistoryView {
+  id: string;
+  startedAt: number;
+  endedAt: number;
+  recipients: number;
+}
+
 /**
  * Live location sharing with chosen emergency contacts. It runs until the person stops it or the safety
  * limit passes. Each chosen contact is told when it starts and when it stops, inside the app only.
@@ -160,5 +168,17 @@ export class ShareService {
       out.push({ id: s.id, startedAt: s.startedAt, expiresAt: s.expiresAt, contactIds });
     }
     return out;
+  }
+
+  /** Past shares, newest first. Shares that were never stopped show their safety limit as the end. */
+  async history(userId: string, limit = 20): Promise<ShareHistoryView[]> {
+    const n = Math.min(Math.max(limit, 1), 50);
+    const rows = await this.shares.history(userId, n);
+    return rows.map((s) => ({
+      id: s.id,
+      startedAt: s.startedAt,
+      endedAt: s.endedAt ?? s.expiresAt,
+      recipients: s.recipientIds.length,
+    }));
   }
 }

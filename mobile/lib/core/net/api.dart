@@ -174,6 +174,9 @@ abstract class SentriApi {
   Future<void> stopShare(String id);
   Future<DateTime> extendShare(String id, double hours);
   Future<List<ShareInfo>> activeShares();
+
+  /// Ended shares, newest first, for the share history list on the share screen.
+  Future<List<ShareRecord>> shareHistory();
 }
 
 /// Tokens, persisted in secure storage.
@@ -589,4 +592,26 @@ class HttpSentriApi implements SentriApi {
     final j = _json(await _call('GET', '/v1/shares'));
     return [for (final s in (j['shares'] as List? ?? const [])) if (s is Map<String, dynamic>) ShareInfo.fromJson(s)];
   }
+
+  @override
+  Future<List<ShareRecord>> shareHistory() async {
+    final j = _json(await _call('GET', '/v1/shares/history'));
+    return [for (final s in (j['history'] as List? ?? const [])) if (s is Map<String, dynamic>) ShareRecord.fromJson(s)];
+  }
+}
+
+/// One row of the share history list: a past share and how many contacts saw it.
+class ShareRecord {
+  const ShareRecord({required this.id, required this.startedAt, required this.endedAt, required this.recipients});
+  final String id;
+  final DateTime startedAt;
+  final DateTime endedAt;
+  final int recipients;
+
+  factory ShareRecord.fromJson(Map<String, dynamic> j) => ShareRecord(
+        id: switch (j['id']) { String v => v, _ => '' },
+        startedAt: DateTime.fromMillisecondsSinceEpoch((j['startedAt'] as num? ?? 0).toInt()),
+        endedAt: DateTime.fromMillisecondsSinceEpoch((j['endedAt'] as num? ?? 0).toInt()),
+        recipients: (j['recipients'] as num? ?? 0).toInt(),
+      );
 }

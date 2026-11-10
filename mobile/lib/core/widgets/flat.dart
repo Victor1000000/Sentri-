@@ -16,8 +16,10 @@ class Flat {
 }
 
 /// A page with a back chevron and a large left-aligned title, on the flat grey background.
+/// [physics] may loosen the scroll (bouncy pull), and [onScroll] reports the offset so
+/// pages with a photo banner can slide it (parallax).
 class FlatPage extends StatelessWidget {
-  const FlatPage({super.key, required this.title, required this.children, this.footer, this.onRefresh, this.subtitle});
+  const FlatPage({super.key, required this.title, required this.children, this.footer, this.onRefresh, this.subtitle, this.physics, this.onScroll});
   final String title;
   final String? subtitle;
   final List<Widget> children;
@@ -26,20 +28,34 @@ class FlatPage extends StatelessWidget {
   final Widget? footer;
   final Future<void> Function()? onRefresh;
 
+  /// Scroll physics override; the default keeps ordinary pages always scrollable.
+  final ScrollPhysics? physics;
+
+  /// Called with the list's scroll offset whenever it changes.
+  final void Function(double offset)? onScroll;
+
   @override
   Widget build(BuildContext context) {
-    final list = ListView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
-      children: [
-        Text(title, style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w700, letterSpacing: -0.5, height: 1.1)),
-        if (subtitle != null) ...[
-          const SizedBox(height: 8),
-          Text(subtitle!, style: TextStyle(fontSize: 15, height: 1.4, color: Flat.muted(context))),
+    final list = NotificationListener<ScrollNotification>(
+      onNotification: (n) {
+        if (onScroll != null && n.metrics.axis == Axis.vertical) {
+          onScroll!(n.metrics.pixels);
+        }
+        return false;
+      },
+      child: ListView(
+        physics: physics ?? const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
+        children: [
+          Text(title, style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w700, letterSpacing: -0.5, height: 1.1)),
+          if (subtitle != null) ...[
+            const SizedBox(height: 8),
+            Text(subtitle!, style: TextStyle(fontSize: 15, height: 1.4, color: Flat.muted(context))),
+          ],
+          const SizedBox(height: 22),
+          ...children,
         ],
-        const SizedBox(height: 22),
-        ...children,
-      ],
+      ),
     );
     return Scaffold(
       backgroundColor: Colors.transparent,

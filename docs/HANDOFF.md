@@ -185,3 +185,34 @@ JSON still satisfies `police_numbers_test.dart` and the data assertions in `poli
 Zod-validate body, query and params. Bound SQL parameters only (guard test). Constant-time compare for secrets/signatures.
 Verify webhook signatures on the raw body. No secrets or phone numbers in logs. Errors return `{error: code}` only.
 Rate limit anything that costs money or sends messages. Keep `bodyLimit` small. Escape any HTML (the only HTML is the static admin page).
+
+## 10. Version 26 (this patch) — engineer's notes
+Style rule for the whole app: FLAT. No frosted glass, no translucency. `core/widgets/glass.dart` kept its class names
+(`Glass`, `GlassBackdrop`) but paints a solid panel now; do not reintroduce blur.
+- Immediate SOS: `modules/sos/engine.ts` sends the first round of alerts the moment SOS starts
+  (`tick()` runs right after ACTIVATE is scheduled; first round itself `repeatCount: 0`). The countdown on the phone is
+  only the CANCEL window — contacts are already alerted. `ackEvent` accepts `countdown`; cancel PIN works from
+  `countdown`, `active` and `acknowledged`. First-round repeats stay `[3,3,3]`; duress-window repeat shows `repeat: 1`.
+- The phone starts the SOS faster too: `sos_controller.dart` `_startServer` uses `_tryStart` with the last-known GPS,
+  then refines the fix and sends location again.
+- Every contact push vibrates like an alarm (channel `vibrationPattern` set once at channel creation, including the
+  live-share channel). Water reminder: re-arms only when the same pace is not already pending, and exact-alarm permission
+  is requested best-effort. Water status bug fixed (`_waterId` int compare).
+- Share history: new `GET /v1/shares/history` (registered BEFORE the `:id` routes — order matters). Store→service→route
+  pattern like the rest of `modules/share`; `ShareStore.history(userId, limit)` clamps 1..50. The share screen shows it
+  under the picker (header reuses the old `exercise.history` strings — dead keys were repurposed, NO new i18n keys exist).
+  Old strings given new jobs in the SAME keys: `police.reported/unverified/to_confirm/unconfirmed` are now the four
+  time-of-day greetings used by `home_screen.dart` `_greetKey()`; `health.allow` is the profile "name" label;
+  `health.heart_perm` is the profile photo note; `pins.must_differ` is the empty share-history note;
+  `sos.countdown` now says the alert is ALREADY out. Key parity is still exactly 287 keys × 5 locales.
+- Profile: `core/profile.dart` (name + avatar kept in SecureKeyValueStore keys `profile.name.v1`/`profile.avatar.v1`;
+  the photo NEVER leaves the phone; `setName` mirrors the name to the server best-effort and offline saves stick).
+  `image_picker: ^1.1.2` picked the photo; the circle crop happens at display time. New Dart class added to `SentriApi`
+  (`shareHistory()`, `saveProfile`) means `mobile/test/helpers.dart` FakeApi must implement them — rule 6 again.
+- Home is a flat mood face (CustomPaint `_MoodFacePainter`, green→red while the SOS hold runs), greeting + avatar +
+  `_ProfileSheet`; the old unwired `CheckInCard` was deleted from that file. Bottom nav is a custom floating flat pill
+  (`_PillNav` in `app.dart`, still an IndexedStack). Police screen got real one-tap call buttons (`url_launcher tel:`,
+  numbers made dialable via `_dialable`). `FlatPage` gained `physics:`/`onScroll:` for the bouncy scroll + parallax
+  banner (share + police screens). Photos in banners feature Black models (standing rule).
+- Lesson learned this version: a closure capture defeats null promotion — assign to a `final` local first. Also: CJK or
+  odd identifiers must NEVER leak into code files (a "大部" byte slipped into a draft once; caught and removed).

@@ -7,6 +7,7 @@ import '../../core/i18n/i18n.dart';
 import '../../core/net/api.dart';
 import '../../core/widgets/brand.dart';
 import '../../core/widgets/flat.dart';
+import '../photos/photo_share.dart';
 import '../sos/contact_people.dart';
 import '../sos/guardian_badges.dart';
 import 'share_controller.dart';
@@ -25,6 +26,8 @@ String clockTime(DateTime d) {
 }
 
 /// Share location. Before sharing: pick people and how long. While sharing: one calm status and one Stop.
+/// Both states open on a photo of real people, and under the picker sits the share history:
+/// every past share, when it ran and how many contacts saw it.
 class ShareScreen extends StatefulWidget {
   const ShareScreen({super.key, required this.share, required this.api, required this.i18n, required this.people});
   final ShareController share;
@@ -38,10 +41,13 @@ class ShareScreen extends StatefulWidget {
 
 class _ShareScreenState extends State<ShareScreen> {
   late Future<List<ContactStatus>> _contacts = widget.api.listContacts();
+  late Future<List<ShareRecord>> _history = widget.api.shareHistory();
   final Set<String> _picked = {};
   double _hours = 8;
   bool _busy = false;
   String? _error;
+  double _scrollOffset = 0;
+  bool _entered = false;
   // The same names and guardian characters the Emergency-contacts screen manages:
   // one store, so every change made there shows up here too.
   Map<String, Person> _people = const {};
@@ -50,6 +56,12 @@ class _ShareScreenState extends State<ShareScreen> {
   void initState() {
     super.initState();
     unawaited(_loadPeople());
+    // Read the history once; a share started from this screen adds itself on its own refresh.
+    unawaited(_history.then((h) {
+      if (mounted) setState(() => _entered = true);
+    }).catchError((_) {
+      if (mounted) setState(() => _entered = true);
+    }));
   }
 
   Future<void> _loadPeople() async {
@@ -75,6 +87,12 @@ class _ShareScreenState extends State<ShareScreen> {
         ShareStartOutcome.failed => t('share.failed'),
       };
     });
+    if (r == ShareStartOutcome.started) {
+      unawaited(_history = widget.api.shareHistory().then((v) {
+        if (mounted) setState(() {});
+        return v;
+      }));
+    }
   }
 
   @override
@@ -87,8 +105,44 @@ class _ShareScreenState extends State<ShareScreen> {
 
   // ---------------------------------------------------------------- before
 
+  Widget _banner(BuildContext context) {
+    // The photo gently slides as the page scrolls (parallax), and rises softly the
+    // first time the screen opens.
+    final shift = (-_scrollOffset * 0.35).clamp(-60.0, 60.0);
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(24),
+      child: SizedBox(
+        height: 150,
+        width: double.infinity,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Transform.translate(
+              offset: Offset(0, shift),
+              child: Image.memory(photoShareBytes, fit: BoxFit.cover, gaplessPlayback: true),
+            ),
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.bottomCenter,
+                    end: Alignment.topCenter,
+                    colors: [Color(0x66000000), Color(0x00000000)],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _picker(BuildContext context) {
     return FlatPage(
+      physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+      onScroll: (p) => setState(() => _scrollOffset = p),
       title: t('share.title'),
       subtitle: t('share.help'),
       footer: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -97,6 +151,16 @@ class _ShareScreenState extends State<ShareScreen> {
         PillButton(label: t('share.start'), onPressed: _picked.isEmpty || _busy ? null : () => unawaited(_start())),
       ]),
       children: [
+        AnimatedSlide(
+          duration: const Duration(milliseconds: 350),
+          curve: Curves.easeOutCubic,
+          offset: _entered ? Offset.zero : const Offset(0, 0.12),
+          child: Opacity(
+            opacity: _entered ? 1 : 0,
+            child: _banner(context),
+          ),
+        ),
+        const SizedBox(height: 8),
         FutureBuilder<List<ContactStatus>>(
           future: _contacts,
           builder: (context, snap) {
@@ -121,7 +185,63 @@ class _ShareScreenState extends State<ShareScreen> {
             ]);
           },
         ),
+        const SizedBox(height: 24),
+        _historySection(context),
       ],
+    );
+  }
+
+  Widget _historySection(BuildContext context) {
+    return FutureBuilder<List<ShareRecord>>(
+      future: _history,
+      builder: (context, snap) {
+        if (snap.connectionState != ConnectionState.done) {
+          return Padding(padding: const EdgeInsets.only(top: 4, bottom: 20), child: Center(child: SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4))));
+        }
+        if (snap.hasError) return const SizedBox.shrink();
+        final items = snap.data ?? const <ShareRecord>[];
+        if (items.isEmpty) {
+          return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(t('exercise.history'), style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Flat.muted(context))),
+            const SizedBox(height: 8),
+            FlatGroup(children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                child: Text(t('pins.must_differ'), style: TextStyle(fontSize: 13.5, height: 1.4, color: Flat.muted(context))),
+              ),
+            ]),
+          ]);
+        }
+        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(t('exercise.history'), style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Flat.muted(context))),
+          const SizedBox(height: 8),
+          FlatGroup(header: null, children: [
+            for (final r in items.take(15))
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+                child: Row(children: [
+                  Container(
+                    width: 34,
+                    height: 34,
+                    decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0x1A1FA85B)),
+                    child: const Icon(Icons.location_on_outlined, size: 17, color: Flat.live),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('${clockTime(r.startedAt)} – ${clockTime(r.endedAt)}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
+                      Text(
+                        t('share.people', {'n': r.recipients.toString()}),
+                        style: TextStyle(fontSize: 12.5, color: Flat.muted(context)),
+                      ),
+                    ]),
+                  ),
+                  Icon(Icons.check_circle_outline, size: 18, color: Flat.muted(context)),
+                ]),
+              ),
+          ]),
+        ]);
+      },
     );
   }
 
@@ -200,6 +320,8 @@ class _ShareScreenState extends State<ShareScreen> {
 
   Widget _sharing(BuildContext context, ShareInfo s) {
     return FlatPage(
+      physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+      onScroll: (p) => setState(() => _scrollOffset = p),
       title: t('share.title'),
       footer: Column(mainAxisSize: MainAxisSize.min, children: [
         FlatButton(label: t('share.extend'), quiet: true, onPressed: () => unawaited(widget.share.extend())),
@@ -207,6 +329,15 @@ class _ShareScreenState extends State<ShareScreen> {
         FlatButton(label: t('share.stop'), danger: true, onPressed: () => unawaited(widget.share.stop())),
       ]),
       children: [
+        AnimatedSlide(
+          duration: const Duration(milliseconds: 350),
+          curve: Curves.easeOutCubic,
+          offset: _entered ? Offset.zero : const Offset(0, 0.12),
+          child: Opacity(
+            opacity: _entered ? 1 : 0,
+            child: _banner(context),
+          ),
+        ),
         const SizedBox(height: 28),
         Center(
           child: Column(children: [

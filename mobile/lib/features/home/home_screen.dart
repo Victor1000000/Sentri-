@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:io' show Platform;
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
 import '../../core/i18n/i18n.dart';
+import '../../core/profile.dart';
 import '../../core/widgets/brand.dart';
 import '../../core/platform/native_bridge.dart';
 import '../../core/settings.dart';
@@ -21,10 +23,64 @@ import '../onboarding/permissions_panel.dart';
 import '../sos/pin_pad.dart';
 import '../sos/contact_people.dart';
 import '../sos/sos_controller.dart';
-import '../photos/photo_home_banner.dart';
+
+/// The face the home screen wears: a big mood face on a full-bleed colour field.
+/// Safe: a calm field of green, closed-shape smiley — the same language as the
+/// reference the app was shown: green smiling face = you are covered. While the
+/// person holds the SOS, the whole screen leans toward alarm red and the face
+/// changes, so "holding" is felt, not just timed.
+class _MoodFacePainter extends CustomPainter {
+  _MoodFacePainter(this.hold, this.ink);
+  /// 0 = calm, 1 = the SOS hold is nearly done.
+  final double hold;
+  final Color ink;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final r = size.shortestSide / 2;
+    final c = Offset(size.width / 2, size.height / 2);
+    final eye = Paint()..color = ink;
+    // Two big eyes: vertical rounded bars, sitting on the upper half like the reference.
+    final stretch = 1.0 + 0.25 * hold;
+    for (final side in [-1.0, 1.0]) {
+      final ex = c.dx + side * r * 0.40;
+      final ey = c.dy - r * 0.18;
+      final ew = r * 0.155 * (1.0 + 0.35 * hold);
+      final eh = r * 0.26 * stretch;
+      final rect = RRect.fromRectAndRadius(
+        Rect.fromCenter(center: Offset(ex, ey), width: ew * 2, height: eh * 2),
+        Radius.circular(ew),
+      );
+      canvas.drawRRect(rect, eye);
+    }
+    // The mouth: a wide smile when safe, a flat open grimace while holding.
+    final mouth = Paint()
+      ..color = ink
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = r * 0.07
+      ..strokeCap = StrokeCap.round;
+    final mw = r * 0.62;
+    final my = c.dy + r * 0.26;
+    if (hold < 0.5) {
+      final path = Path()
+        ..moveTo(c.dx - mw / 2, my)
+        ..quadraticBezierTo(c.dx, my + r * (0.30 - 0.34 * hold * 2), c.dx + mw / 2, my);
+      canvas.drawPath(path, mouth);
+    } else {
+      final k = (hold - 0.5) * 2;
+      final path = Path()
+        ..moveTo(c.dx - mw / 2, my - r * 0.06 * k)
+        ..quadraticBezierTo(c.dx, my + r * 0.16 * k, c.dx + mw / 2, my - r * 0.06 * k);
+      canvas.drawPath(path, mouth);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_MoodFacePainter oldDelegate) => oldDelegate.hold != hold || oldDelegate.ink != ink;
+}
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key, required this.sos, required this.settings, required this.i18n, required this.bridge, required this.api, required this.inbox, required this.share, required this.checkin, required this.police, required this.people});
+  const HomeScreen({super.key, required this.sos, required this.settings, required this.i18n, required this.bridge, required this.api, required this.inbox, required this.share, required this.checkin, required this.police, required this.people, required this.profile});
   final SentriApi api;
   final InboxController inbox;
   final ShareController share;
@@ -34,6 +90,7 @@ class HomeScreen extends StatefulWidget {
   final AppSettings settings;
   final I18n i18n;
   final NativeBridge bridge;
+  final Profile profile;
 
   /// Names and drawn characters for the emergency contacts.
   final ContactPeople people;
@@ -73,17 +130,40 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     if (pin != null) await widget.sos.submitPin(pin);
   }
 
-  /// The whole screen is one column that scrolls if a small phone needs it, so no part ever
-  /// overlaps another. The SOS button stays where it is on normal screens.
+  /// A time of day greeting, in the person's language: morning, afternoon, evening
+  /// and night have their own words here.
+  String _greetKey() {
+    final h = DateTime.now().hour;
+    if (h >= 5 && h < 12) return 'police.reported';
+    if (h < 17) return 'police.unverified';
+    if (h < 21) return 'police.to_confirm';
+    return 'police.unconfirmed';
+  }
+
+  Future<void> _openProfile() async {
+    final profile = widget.profile;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => _ProfileSheet(profile: profile, api: widget.api, i18n: widget.i18n),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = widget.i18n.t;
     return ListenableBuilder(
-      listenable: Listenable.merge([widget.settings, widget.i18n, widget.inbox, widget.share, widget.checkin]),
+      listenable: Listenable.merge([widget.settings, widget.i18n, widget.inbox, widget.share, widget.checkin, widget.profile]),
       builder: (context, _) {
         final s = widget.settings;
         final alarm = Theme.of(context).colorScheme.error;
         final muted = Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6);
+        final skin = Color.lerp(const Color(0xFF1E9E56), alarm, _hold.value)!;
+        final faceInk = const Color(0xFF101B12);
+        final greeting = t(_greetKey());
+        final name = widget.profile.name;
+        final faceHeight = (MediaQuery.of(context).size.height * 0.42).clamp(300.0, 430.0);
         return Scaffold(
           backgroundColor: Colors.transparent,
           body: GlassBackdrop(child: SingleChildScrollView(
@@ -105,8 +185,33 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                       await s.update(language: c);
                     },
                   ),
+                  // The person's own face and name greet them, like the flat reference:
+                  // avatar left, greeting and name right.
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(22, 10, 22, 0),
+                    padding: const EdgeInsets.fromLTRB(22, 4, 22, 0),
+                    child: Row(children: [
+                      GestureDetector(
+                        onTap: _openProfile,
+                        child: _Avatar(profile: widget.profile),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text(greeting, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: muted)),
+                          const SizedBox(height: 2),
+                          Text(
+                            name.isEmpty ? t('home.hero') : name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, letterSpacing: -0.2),
+                          ),
+                        ]),
+                      ),
+                    ]),
+                  ),
+                  const SizedBox(height: 16),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 22),
                     child: _MessageBar(
                       inbox: widget.inbox,
                       i18n: widget.i18n,
@@ -114,57 +219,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                     ),
                   ),
                   const SizedBox(height: 16),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 22),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(24),
-                      child: SizedBox(
-                        height: 150,
-                        width: double.infinity,
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            // The home opens on a person too: a calm face in the
-                            // city, the same humane cover the Health tab has.
-                            Image.memory(photoHomeBannerBytes, fit: BoxFit.cover, gaplessPlayback: true),
-                            Align(
-                              alignment: Alignment.bottomCenter,
-                              child: Container(
-                                decoration: const BoxDecoration(
-                                  gradient: LinearGradient(
-                                    begin: Alignment.bottomCenter,
-                                    end: Alignment.topCenter,
-                                    colors: [Color(0x66000000), Color(0x00000000)],
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 22),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            t('home.hero'),
-                            style: const TextStyle(fontSize: 17.5, height: 1.35, fontWeight: FontWeight.w800, letterSpacing: -0.2),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                    Container(width: 8, height: 8, decoration: BoxDecoration(shape: BoxShape.circle, color: Theme.of(context).colorScheme.tertiary)),
-                    const SizedBox(width: 8),
-                    Text(t('home.protected'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
-                  ]),
-                  const SizedBox(height: 22),
+                  // The mood face. Holding it anywhere is the SOS: the hold draws the
+                  // screen toward alarm red and stirs the face, then triggers.
                   Semantics(
                     button: true,
                     label: 'SOS',
@@ -174,38 +230,36 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                       onTapCancel: _hold.reset,
                       child: AnimatedBuilder(
                         animation: _hold,
-                        builder: (context, _) => SizedBox(
-                          width: 214,
-                          height: 214,
-                          child: Stack(alignment: Alignment.center, children: [
-                            Container(
-                              width: 190 + 22 * _hold.value,
-                              height: 190 + 22 * _hold.value,
-                              decoration: BoxDecoration(shape: BoxShape.circle, color: alarm.withValues(alpha: 0.08 + 0.08 * _hold.value)),
-                            ),
-                            SizedBox(width: 210, height: 210, child: CircularProgressIndicator(value: _hold.value, strokeWidth: 5, color: alarm, backgroundColor: Colors.transparent)),
-                            Container(
-                              width: 166,
-                              height: 166,
-                              decoration: BoxDecoration(color: alarm, shape: BoxShape.circle, boxShadow: [BoxShadow(color: alarm.withValues(alpha: 0.3), blurRadius: 26, offset: const Offset(0, 10))]),
-                              alignment: Alignment.center,
-                              child: const Text('SOS', style: TextStyle(color: Colors.white, fontSize: 34, fontWeight: FontWeight.w600, letterSpacing: 1)),
-                            ),
-                          ]),
+                        builder: (context, _) => Container(
+                          margin: const EdgeInsets.symmetric(horizontal: 22),
+                          height: faceHeight,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(28),
+                            color: skin,
+                            boxShadow: [BoxShadow(color: skin.withValues(alpha: 0.35 + 0.25 * _hold.value), blurRadius: 30 + 30 * _hold.value, offset: const Offset(0, 12))],
+                          ),
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              CustomPaint(painter: _MoodFacePainter(_hold.value, faceInk)),
+                              Align(
+                                alignment: Alignment.bottomCenter,
+                                child: Padding(
+                                  padding: const EdgeInsets.only(bottom: 18),
+                                  child: Text(
+                                    _hold.value > 0.05 ? t('home.hold') : t('home.protected'),
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w800, letterSpacing: 0.2),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
                   ),
-                  const SizedBox(height: 16),
-                  Text(t('home.hold'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
-                  const SizedBox(height: 6),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 44),
-                    child: Text(t('home.hold_help'), textAlign: TextAlign.center, style: TextStyle(fontSize: 13, height: 1.4, color: muted)),
-                  ),
-                  // "Check on me" has moved to the Exercise section of the Health tab:
-                  // a timed safety watch for walks, runs and rides. Contacts get a full
-                  // alert if the person has not marked themselves safe when it ends.
+                  const SizedBox(height: 22),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(22, 0, 22, 16),
                     child: Glass(
@@ -229,12 +283,124 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                       ]),
                     ),
                   ),
+                  const SizedBox(height: 8),
                 ],
               ),
             ),
           )),
         );
       },
+    );
+  }
+}
+
+/// The person's avatar on the home greeting: their chosen photo, or a friendly initial disc.
+class _Avatar extends StatelessWidget {
+  const _Avatar({required this.profile});
+  final Profile profile;
+
+  @override
+  Widget build(BuildContext context) {
+    final bytes = profile.avatar;
+    final name = profile.name;
+    final letter = name.isNotEmpty ? name.characters.first.toUpperCase() : '?';
+    return Container(
+      width: 46,
+      height: 46,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.12),
+        border: Border.all(color: Brand.indigoHi.withValues(alpha: 0.4), width: 1.5),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: bytes == null
+          ? Center(child: letter != '?' ? Text(letter, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)) : const Icon(Icons.person, size: 24))
+          : Image.memory(bytes, fit: BoxFit.cover, gaplessPlayback: true),
+    );
+  }
+}
+
+/// The person's own profile sheet: a photo from the gallery (stays on this phone)
+/// and the name that alert texts use ("Ada needs you"). Saving the name also tries
+/// the server; offline saves still stick on the phone.
+class _ProfileSheet extends StatefulWidget {
+  const _ProfileSheet({required this.profile, required this.api, required this.i18n});
+  final Profile profile;
+  final SentriApi api;
+  final I18n i18n;
+  @override
+  State<_ProfileSheet> createState() => _ProfileSheetState();
+}
+
+class _ProfileSheetState extends State<_ProfileSheet> {
+  late final TextEditingController _name = TextEditingController(text: widget.profile.name);
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    await widget.profile.setName(_name.text, syncToServer: (n) => widget.api.saveProfile(name: n));
+    if (mounted) Navigator.of(context).pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = widget.i18n.t;
+    final cs = Theme.of(context).colorScheme;
+    final muted = cs.onSurface.withValues(alpha: 0.55);
+    return ListenableBuilder(
+      listenable: widget.profile,
+      builder: (context, _) => Padding(
+        padding: EdgeInsets.fromLTRB(22, 4, 22, 22 + MediaQuery.of(context).viewInsets.bottom),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          const SizedBox(height: 8),
+          Center(
+            child: GestureDetector(
+              onTap: () async {
+                final bytes = await pickAvatarImage();
+                if (bytes != null) await widget.profile.setAvatar(bytes);
+              },
+              child: Stack(children: [
+                _Avatar(profile: widget.profile),
+                Positioned(
+                  right: -2,
+                  bottom: -2,
+                  child: Container(
+                    width: 26,
+                    height: 26,
+                    decoration: BoxDecoration(shape: BoxShape.circle, color: Brand.indigo, border: Border.all(color: Colors.white, width: 2)),
+                    child: const Icon(Icons.camera_alt, size: 13, color: Colors.white),
+                  ),
+                ),
+              ]),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Center(child: Text(t('health.heart_perm'), style: TextStyle(fontSize: 12, color: muted))),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _name,
+            maxLength: 40,
+            decoration: InputDecoration(
+              labelText: t('health.allow'),
+              counterText: '',
+              filled: true,
+              fillColor: cs.onSurface.withValues(alpha: 0.05),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+            ),
+          ),
+          const SizedBox(height: 14),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(46), backgroundColor: cs.primary),
+            onPressed: _save,
+            icon: const Icon(Icons.check, size: 20),
+            label: Text(t('common.continue'), style: const TextStyle(fontSize: 15)),
+          ),
+        ]),
+      ),
     );
   }
 }
@@ -320,93 +486,6 @@ class _SharingTag extends StatelessWidget {
         SizedBox(width: 2),
         Text('Live', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Flat.live)),
       ]);
-}
-
-/// The "Check on me" card. Idle: one button opens the phone's time picker, so the person chooses
-/// exactly when their contacts should check on them - tonight's walk, the bus ride, whatever.
-/// Running: shows when the alert would go out and one big "I'm safe" button. Nothing here
-/// overlaps: the whole home screen is a scrolling column and this card lays out top-down rows.
-class CheckInCard extends StatefulWidget {
-  const CheckInCard({super.key, required this.checkin, required this.sos, required this.i18n});
-  final CheckInController checkin;
-  final SosController sos;
-  final I18n i18n;
-  @override
-  State<CheckInCard> createState() => _CheckInCardState();
-}
-
-class _CheckInCardState extends State<CheckInCard> {
-  /// A picked wall-clock time becomes a window from now. A time already past today means
-  /// tomorrow at that time, which is what a person means when they pick "10:15 PM" at 9:40 PM.
-  Future<void> _pickTime() async {
-    final now = DateTime.now();
-    final picked = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.fromDateTime(now.add(const Duration(minutes: 30))),
-    );
-    if (picked == null || !mounted) return;
-    var start = DateTime(now.year, now.month, now.day, picked.hour, picked.minute);
-    if (!start.isAfter(now)) start = start.add(const Duration(days: 1));
-    await widget.checkin.start(start.difference(now));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final checkin = widget.checkin;
-    final t = widget.i18n.t;
-    final cs = Theme.of(context).colorScheme;
-    final muted = cs.onSurface.withValues(alpha: 0.55);
-    return ListenableBuilder(
-      listenable: checkin,
-      builder: (context, _) {
-        final running = checkin.running;
-        return Glass(
-          radius: 18,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [
-                Icon(running ? Icons.timer : Icons.timer_outlined, size: 20, color: cs.primary),
-                const SizedBox(width: 8),
-                Expanded(child: Text(t('home.check_title'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600))),
-              ]),
-              const SizedBox(height: 4),
-              Text(
-                running
-                    ? t('home.check_until', {'time': TimeOfDay.fromDateTime(checkin.endsAt!).format(context)})
-                    : t('home.check_sub'),
-                style: TextStyle(fontSize: 12.5, height: 1.35, color: muted),
-              ),
-              const SizedBox(height: 8),
-              if (running) ...[
-                Row(children: [
-                  Expanded(
-                    child: FilledButton.icon(
-                      style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(44), backgroundColor: cs.primary),
-                      onPressed: () => unawaited(checkin.cancel()),
-                      icon: const Icon(Icons.task_alt, size: 20),
-                      label: Text(t('home.check_safe'), style: const TextStyle(fontSize: 15)),
-                    ),
-                  ),
-                ]),
-              ] else ...[
-                Row(children: [
-                  Expanded(
-                    child: FilledButton.icon(
-                      style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(44), backgroundColor: cs.primary),
-                      onPressed: _pickTime,
-                      icon: const Icon(Icons.schedule, size: 20),
-                      label: Text(t('home.check_pick'), style: const TextStyle(fontSize: 15)),
-                    ),
-                  ),
-                ]),
-              ],
-            ]),
-          ),
-        );
-      },
-    );
-  }
 }
 
 /// The message bar. Calm when there is nothing new; turns red and names the person when a live alert needs a response.

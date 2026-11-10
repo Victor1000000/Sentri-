@@ -54,6 +54,13 @@ export class PgShares implements ShareStore {
     const r = await this.pool.query('SELECT * FROM location_shares WHERE ended_at IS NULL AND expires_at <= $1', [now]);
     return r.rows.map(toShare);
   }
+  async history(userId: string, limit: number) {
+    const r = await this.pool.query(
+      'SELECT * FROM location_shares WHERE user_id = $1 AND ended_at IS NOT NULL ORDER BY started_at DESC LIMIT $2',
+      [userId, Math.max(1, limit)],
+    );
+    return r.rows.map(toShare);
+  }
   async purge(now: number) {
     return (await this.pool.query('DELETE FROM location_shares WHERE purge_after < $1', [now])).rowCount ?? 0;
   }

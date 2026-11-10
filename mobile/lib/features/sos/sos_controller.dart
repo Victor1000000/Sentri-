@@ -146,11 +146,25 @@ class SosController extends ChangeNotifier {
     await _startFuture;
   }
 
-  Future<void> _startServer(int epoch) async {
-    final geo = await location.fix(highAccuracy: true, timeout: config.firstFixTimeout) ?? await location.lastKnown();
-    if (epoch != _epoch) return;
-    if (geo != null) _lastGeo = geo;
+   Future<void> _startServer(int epoch) async {
+    // The alert is told to the server with whatever position the phone already
+    // has (cached fix), so no time is spent waiting on GPS first - and a better
+    // fix follows right after, so contacts see the exact place moments later.
+    _lastGeo ??= await location.lastKnown();
     await _tryStart(epoch);
+    if (epoch != _epoch) return;
+    final geo = await location.fix(highAccuracy: true, timeout: config.firstFixTimeout);
+    if (epoch != _epoch || geo == null || _lastGeo == geo) return;
+    _lastGeo = geo;
+    if (_s == SosPhase.idle) return;
+    final id = _sosIds[epoch];
+    if (id != null) {
+      try {
+        await api.sendLocation(id, geo);
+      } catch (_) {
+        // The next tracking tick sends it again; nothing to do here.
+      }
+    }
   }
 
   Future<void> _tryStart(int epoch) async {

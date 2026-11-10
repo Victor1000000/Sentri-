@@ -95,6 +95,8 @@ const view = (e: SosEvent): SosView => ({
  *       |                              |
  *       +------ cancel PIN ------------+--> cancelled        active --(cap reached)--> expired
  *
+ * Contacts are alerted the moment the alert starts — not after the window. The window is only
+ * the first seconds in which the person can still cancel (contacts then get a stand-down push).
  * Every state change is a compare-and-set on the store, so a late tick, a late ack
  * and a PIN entry can race without double-sending or resurrecting a stopped alert.
  */
@@ -137,6 +139,15 @@ export class SosEngine {
       this.log.error({ err: err instanceof Error ? err.message : 'unknown' }, 'activation scheduling failed');
       await this.activate(event.id);
     }
+    // The alert reaches contacts NOW, not after the window. The window is still honoured for
+    // what it is good at: a cancel PIN in the first seconds sends every contact's phone a
+    // "stand down" notice (same collapse key, so it replaces the alert they just got).
+    try {
+      await this.tick(event.id);
+    } catch (err) {
+      // If the very first round failed, activation still retries when the window ends.
+      this.log.error({ err: err instanceof Error ? err.message : 'unknown' }, 'first alert round failed');
+    }
     return view(event);
   }
 
@@ -153,16 +164,24 @@ export class SosEngine {
       await store.saveLink({ hash: hashToken(token), kind: 'ack', subject: id, contactId: c.id, expiresAt });
     }
     await this.record('system', 'sos.active', id);
-    await Promise.allSettled([this.dispatchPolice(ev, false), this.tick(id)]);
+    // The first alert already went out in [start]. Only fall back to alerting here
+    // when that round never ran, so the window can never send a duplicate.
+    if (ev.repeatCount === 0) {
+      await Promise.allSettled([this.dispatchPolice(ev, false), this.tick(id)]);
+    } else {
+      await Promise.allSettled([this.dispatchPolice(ev, false)]);
+    }
   }
 
   // ----------------------------------------------------------------- loop
 
-  /** One round of the repeat loop. Reschedules itself every `repeatMs` until the alert ends. */
+  /** One round of the repeat loop. Rounds run while the alert is in the cancel
+   *  window too — the very first alert goes out at [start] — and reschedule
+   *  themselves every `repeatMs` until the alert ends. */
   async tick(id: string): Promise<void> {
     const { store, clock, cfg } = this.d;
     const ev = await store.getEvent(id);
-    if (!ev || ev.state !== 'active') return;
+    if (!ev || (ev.state !== 'active' && ev.state !== 'countdown')) return;
 
     if (ev.repeatCount >= cfg.maxRepeats) {
       await store.transition(id, ['active'], { state: 'expired', endedAt: clock() });
@@ -202,8 +221,8 @@ export class SosEngine {
 
     await Promise.all(sends);
 
-    // Bump the counter only if the alert is still active (ack/cancel may have landed meanwhile).
-    const next = await store.transition(id, ['active'], { repeatCount: ev.repeatCount + 1 });
+    // Bump the counter only if the alert is still live (ack/cancel may have landed meanwhile).
+    const next = await store.transition(id, ['countdown', 'active'], { repeatCount: ev.repeatCount + 1 });
     if (!next) return;
     // If this throws, the job fails and the queue retries it (a duplicate alert beats a silent stop).
     await this.d.scheduler.schedule(REPEAT_KEY(id), cfg.repeatMs, () => this.tick(id));
@@ -258,7 +277,7 @@ export class SosEngine {
     const ev = await store.getEvent(sosId);
     if (!ev) return 'invalid';
 
-    const updated = await store.transition(ev.id, ['active'], {
+    const updated = await store.transition(ev.id, ['countdown', 'active'], {
       state: 'acknowledged',
       ackedAt: clock(),
       ackedBy: contactId,
@@ -266,6 +285,9 @@ export class SosEngine {
     if (!updated) return ev.state === 'acknowledged' ? 'already_acknowledged' : 'ended';
 
     await this.d.scheduler.cancel(REPEAT_KEY(ev.id));
+    // Immediate alerting means a contact can respond before the window ends;
+    // the pending activation must not resurrect the loop after it stops.
+    await this.d.scheduler.cancel(ACTIVATE_KEY(ev.id));
     await this.record('contact', 'sos.ack', ev.id);
     // Under duress the user's phone may be watched, so tell them nothing.
     if (!updated.duress) await this.d.notifier.notifyUser(ev.userId, { kind: 'acknowledged', sosId: ev.id });

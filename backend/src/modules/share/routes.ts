@@ -27,6 +27,12 @@ export function registerShareRoutes(app: FastifyInstance, d: ShareRouteDeps): vo
     return reply.send({ shares: await d.service.active(uid) });
   });
 
+  app.get('/v1/shares/history', async (req, reply) => {
+    const uid = await gate(req);
+    if (!uid) return reply.code(401).send({ error: 'unauthorized' });
+    return reply.send({ history: await d.service.history(uid) });
+  });
+
   app.post('/v1/shares', async (req, reply) => {
     const uid = await gate(req);
     if (!uid) return reply.code(401).send({ error: 'unauthorized' });

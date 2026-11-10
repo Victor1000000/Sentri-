@@ -128,6 +128,56 @@ describe('live location sharing', () => {
     expect(await r.shares.purge(r.clock.now)).toBe(1);
   });
 
+  it('history lists ended shares, newest first, with who saw them', async () => {
+    const r = await rig();
+    const s1 = (await r.svc.start('u1', ['c1', 'c2'])) as { id: string };
+    r.clock.now += 3_600_000;
+    expect(await r.svc.stop('u1', s1.id)).toBe(true);
+    const s2 = (await r.svc.start('u1', ['c1'])) as { id: string };
+    r.clock.now += 30 * 60_000;
+    await r.svc.stop('u1', s2.id as string);
+    const past = await r.svc.history('u1');
+    expect(past.map((s) => s.id)).toEqual([s2.id, s1.id]);
+    expect(past[1]).toMatchObject({ startedAt: r.clock.now - 30 * 60_000 - 3_600_000, recipients: 2 });
+    expect(past[1]!.endedAt).toBeGreaterThan(past[1]!.startedAt);
+    expect(past.every((s) => s.recipients > 0)).toBe(true);
+    // a live share is not history yet; another user has none
+    const s3 = (await r.svc.start('u1', ['c1'])) as { id: string };
+    expect((await r.svc.history('u1')).some((s) => s.id === s3.id)).toBe(false);
+    expect(await r.svc.history('uc1')).toEqual([]);
+  });
+
+  it('history counts a forgotten share as ended at its safety limit', async () => {
+    const r = await rig();
+    await r.svc.start('u1', ['c1']);
+    r.clock.now += 9 * 3_600_000;
+    expect(await r.svc.expireDue()).toBe(1);
+    const past = await r.svc.history('u1');
+    expect(past).toHaveLength(1);
+    expect(past[0]!.endedAt).toBe(past[0]!.startedAt + 9 * 3_600_000);
+  });
+
+  it('the history route returns each past share once', async () => {
+    const r = await rig();
+    const a = Fastify();
+    registerShareRoutes(a, {
+      service: r.svc,
+      authenticate: async (req) => (req.headers['x-user'] as string | undefined) ?? null,
+      limiter: new FixedWindowLimiter(100, 60_000),
+      updateLimiter: new FixedWindowLimiter(100, 60_000),
+      clock: r.clock.fn,
+    });
+    const h = { 'x-user': 'u1' };
+    const s = (await a.inject({ method: 'POST', url: '/v1/shares', headers: h, payload: { contactIds: ['c1'], hours: 0.25 } })).json() as { id: string };
+    await a.inject({ method: 'DELETE', url: `/v1/shares/${s.id}`, headers: h });
+    const res = await a.inject({ method: 'GET', url: '/v1/shares/history', headers: h });
+    expect(res.statusCode).toBe(200);
+    const list = res.json().history as { id: string; endedAt: number; recipients: number }[];
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ id: s.id, recipients: 1 });
+    expect((await a.inject({ method: 'GET', url: '/v1/shares/history' })).statusCode).toBe(401);
+  });
+
   it('texts exist in every language without links', () => {
     for (const l of ['en', 'pcm', 'ha', 'yo', 'ig'] as const) for (const k of ['share_start', 'share_stop'] as const) {
       const t = alertText(k, l, 'Ada');
