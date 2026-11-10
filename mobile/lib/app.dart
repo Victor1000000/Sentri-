@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
 
 import 'core/theme.dart';
+import 'core/widgets/brand.dart'; // SplashView lives here
 import 'core/widgets/glass.dart';
 import 'package:flutter/services.dart' show rootBundle;
 
