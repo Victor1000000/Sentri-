@@ -60,7 +60,6 @@ class SosConfig {
 }
 
 bool _no() => false;
-bool _yes() => true;
 
 /// The phone-side alert state machine.
 ///

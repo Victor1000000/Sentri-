@@ -352,7 +352,7 @@ class PillField extends StatelessWidget {
           contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
           border: border,
           enabledBorder: border,
-          focusedBorder: border.copyWith(borderSide: BorderSide(color: Brand.indigoHi, width: 3)),
+          focusedBorder: border.copyWith(borderSide: const BorderSide(color: Brand.indigoHi, width: 3)),
         ),
       ),
     ]);

@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io' show Platform;
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
@@ -160,7 +159,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         final alarm = Theme.of(context).colorScheme.error;
         final muted = Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6);
         final skin = Color.lerp(const Color(0xFF1E9E56), alarm, _hold.value)!;
-        final faceInk = const Color(0xFF101B12);
+        const faceInk = Color(0xFF101B12);
         final greeting = t(_greetKey());
         final name = widget.profile.name;
         final faceHeight = (MediaQuery.of(context).size.height * 0.42).clamp(300.0, 430.0);

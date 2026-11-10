@@ -196,7 +196,7 @@ class _ShareScreenState extends State<ShareScreen> {
       future: _history,
       builder: (context, snap) {
         if (snap.connectionState != ConnectionState.done) {
-          return Padding(padding: const EdgeInsets.only(top: 4, bottom: 20), child: Center(child: SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4))));
+          return const Padding(padding: EdgeInsets.only(top: 4, bottom: 20), child: Center(child: SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4))));
         }
         if (snap.hasError) return const SizedBox.shrink();
         final items = snap.data ?? const <ShareRecord>[];
