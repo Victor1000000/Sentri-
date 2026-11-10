@@ -21,7 +21,7 @@ onboarding endpoints, BullMQ scheduler, encrypted phone numbers at rest, hash-ch
     POST /v1/auth/otp/request   {phone}
     POST /v1/auth/otp/verify    {phone, code, platform, publicKey, boxPublicKey}  -> accessToken, refreshToken, deviceId
     POST /v1/auth/refresh       {deviceId, refreshToken}
-    PUT  /v1/me/contacts        {contacts:[{phone, locale?} x3..5]}
+    PUT  /v1/me/contacts        {contacts:[{phone, locale?} x2..6]}
     PUT  /v1/me/pins            {cancelPin, duressPin}
     PUT  /v1/me/profile         {locale?, dataSaver?}
     PUT  /v1/me/push-token      {token}

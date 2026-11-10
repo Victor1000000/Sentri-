@@ -21,8 +21,8 @@ export function normalizePhone(input: string, defaultCountryCode = '234'): strin
 
 export const LocaleSchema = z.enum(['en', 'ha', 'yo', 'ig', 'pcm']);
 
-export const MIN_CONTACTS = 3;
-export const MAX_CONTACTS = 5;
+export const MIN_CONTACTS = 2;
+export const MAX_CONTACTS = 6;
 
 export class ContactError extends Error {}
 
@@ -33,7 +33,8 @@ export class LiveSosError extends Error {
   }
 }
 
-/** Validates the onboarding contact list: 3-5 distinct, valid numbers, none of them the user's own. */
+/** Validates the contact list: 2-6 distinct, valid numbers, none of them the user's own.
+ *  Two are enough at sign-up; the user can add the rest from the app later. */
 export function validateContacts(
   input: { phone: string; locale?: Locale }[],
   ownPhone: string,

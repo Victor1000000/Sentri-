@@ -1,17 +1,20 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../core/i18n/i18n.dart';
 import '../../core/net/api.dart';
+import '../../core/phone.dart';
+import '../photos/photo_contacts.dart';
 import '../sos/contact_people.dart';
 import '../sos/guardian_badges.dart';
 
 /// Shows the people who get your alerts, and whether each one agreed to it. Each
 /// contact can be given a friendly name and one of twenty drawn "security team"
-/// characters (saved on this phone only). Changing the list is done in onboarding;
-/// it is locked while an alert is running.
+/// characters (saved on this phone only). Two people come from sign-up; the rest,
+/// up to six in total, are added right here with the Add contact button.
 class ContactsScreen extends StatefulWidget {
   const ContactsScreen({super.key, required this.api, required this.people, required this.i18n});
   final SentriApi api;
@@ -38,6 +41,28 @@ class _ContactsScreenState extends State<ContactsScreen> {
   }
 
   void _reload() => setState(() => _future = widget.api.listContacts());
+
+  /// Opens the add-contact sheet. It reads a fresh list from the server first,
+  /// because saving a contact sends the whole set again: people already on the
+  /// list keep their answers, and only the new number gets an invite.
+  Future<void> _addContact() async {
+    List<ContactStatus>? saved;
+    try {
+      saved = await widget.api.listContacts();
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(widget.i18n.t('contacts.load_failed'))));
+      }
+      return;
+    }
+    if (saved == null || !mounted) return;
+    await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => _AddSheet(api: widget.api, saved: saved, appLocale: widget.i18n.code, i18n: widget.i18n),
+    );
+    _reload();
+  }
 
   /// 0803 123 4567 style, so numbers are easy to recognise at a glance.
   static String pretty(String e164) {
@@ -87,6 +112,35 @@ class _ContactsScreenState extends State<ContactsScreen> {
           return ListView(
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
             children: [
+              // The tab opens on the kind of moment this section is about: friends
+              // huddled together over one phone. Standing a little taller than the
+              // other covers so the faces and the phone both stay fully in frame.
+              ClipRRect(
+                borderRadius: BorderRadius.circular(24),
+                child: SizedBox(
+                  height: 200,
+                  width: double.infinity,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Image.memory(photoContactsBytes, fit: BoxFit.cover, gaplessPlayback: true),
+                      Align(
+                        alignment: Alignment.bottomCenter,
+                        child: Container(
+                          decoration: const BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.bottomCenter,
+                              end: Alignment.topCenter,
+                              colors: [Color(0x66000000), Color(0x00000000)],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
               Text(t('contacts.help'), style: Theme.of(context).textTheme.bodyMedium),
               const SizedBox(height: 16),
               Card(
@@ -125,6 +179,17 @@ class _ContactsScreenState extends State<ContactsScreen> {
                   ],
                 ),
               ),
+              // Sign-up asked for two; the last slots stay open. The button disappears
+              // at the six cap, so there is no dead end to explain.
+              if (list.length < 6) ...[
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(46)),
+                  onPressed: () => unawaited(_addContact()),
+                  icon: const Icon(Icons.person_add_alt_1, size: 20),
+                  label: Text(t('contacts.add')),
+                ),
+              ],
               const SizedBox(height: 12),
               Text(
                 t('contacts.characters'),
@@ -246,6 +311,114 @@ class _PersonSheetState extends State<_PersonSheet> {
                     if (context.mounted) Navigator.of(context).pop(true);
                   },
                   child: Text(t('contacts.save')),
+                ),
+              ],
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+/// The sheet for adding one more person: type a number, save, and the server
+/// re-saves the whole list with that number appended (existing answers kept).
+class _AddSheet extends StatefulWidget {
+  const _AddSheet({required this.api, required this.saved, required this.appLocale, required this.i18n});
+  final SentriApi api;
+  final List<ContactStatus> saved;
+  final String appLocale;
+  final I18n i18n;
+
+  @override
+  State<_AddSheet> createState() => _AddSheetState();
+}
+
+class _AddSheetState extends State<_AddSheet> {
+  final _phone = TextEditingController();
+  String? _error;
+  bool _busy = false;
+
+  String t(String k, [Map<String, String> a = const {}]) => widget.i18n.t(k, a);
+
+  @override
+  void dispose() {
+    _phone.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final p = normalizePhone(_phone.text);
+    // One message covers every "no": not a number, already on the list, or the
+    // person's own number (the server checks that one for us).
+    if (p == null || widget.saved.any((c) => c.phone == p)) {
+      setState(() => _error = t('contacts.invalid'));
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await widget.api.saveContacts([
+        for (final c in widget.saved) (phone: c.phone, locale: c.locale),
+        (phone: p, locale: widget.appLocale),
+      ]);
+      if (context.mounted) Navigator.of(context).pop(true);
+    } on ApiHttpError catch (e) {
+      setState(() {
+        _busy = false;
+        // 400 means the server said no to the number(s); anything else is connection.
+        _error = t(e.status == 400 ? 'contacts.invalid' : 'common.error');
+      });
+    } catch (_) {
+      setState(() {
+        _busy = false;
+        _error = t('common.error');
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final pad = MediaQuery.of(context).viewInsets.bottom;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(0, 12, 0, pad),
+      child: SizedBox(
+        height: 330,
+        child: Column(children: [
+          Container(width: 44, height: 4, decoration: BoxDecoration(color: cs.onSurface.withValues(alpha: 0.25), borderRadius: BorderRadius.circular(2))),
+          const SizedBox(height: 14),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+              children: [
+                Text(t('contacts.add'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: _phone,
+                  keyboardType: TextInputType.phone,
+                  autofillHints: const [AutofillHints.telephoneNumber],
+                  decoration: InputDecoration(hintText: t('contacts.phone_hint'), isDense: true, counterText: ''),
+                  maxLength: 20,
+                  autofocus: true,
+                  onChanged: (_) {
+                    if (_error != null) setState(() => _error = null);
+                  },
+                  onSubmitted: (_) => unawaited(_save()),
+                ),
+                if (_error != null) ...[
+                  const SizedBox(height: 8),
+                  Text(_error!, style: TextStyle(fontSize: 13, height: 1.3, color: cs.error)),
+                ],
+                const SizedBox(height: 16),
+                FilledButton(
+                  style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(46)),
+                  onPressed: _busy ? null : () => unawaited(_save()),
+                  child: _busy
+                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                      : Text(t('contacts.save')),
                 ),
               ],
             ),

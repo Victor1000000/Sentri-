@@ -265,7 +265,7 @@ class _ContactsStepState extends State<_ContactsStep> {
   @override
   void initState() {
     super.initState();
-    for (var i = 0; i < 3; i++) {
+    for (var i = 0; i < 2; i++) {
       _addBox();
     }
     // Autofill can set the boxes at different moments with no event we can rely on, so check on a short timer too.
@@ -318,7 +318,9 @@ class _ContactsStepState extends State<_ContactsStep> {
               padding: const EdgeInsets.only(bottom: 10),
               child: PillField(key: ObjectKey(_ctls[i]), controller: _ctls[i], focusNode: _focus[i], noAutofill: true, keyboardType: TextInputType.phone, inputFormatters: _phoneFormatters, hint: widget.i18n.t('contacts.phone_hint')),
             ),
-          if (_ctls.length < 5)
+          // Only two numbers are needed at sign-up; the remaining slots (up to six in
+          // total) can stay empty now and be added later in the contacts tab.
+          if (_ctls.length < 6)
             OutlinePill(
               onPressed: () => setState(_addBox),
               label: '+ ${widget.i18n.t('contacts.add')}',

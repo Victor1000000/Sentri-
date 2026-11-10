@@ -137,7 +137,8 @@ JSON still satisfies `police_numbers_test.dart` and the data assertions in `poli
 - Free Render service sleeps after 15 min and wipes memory on restart. That caused "connection error after a while" and
   vanishing accounts. The app's old 8 s timeout made the first request after sleep always fail.
 - `apply-patch.yml` cannot push workflow files; uploaded `.txt` copies are ignored by GitHub until renamed to `.yml`.
-- Contact rule is 3 to 5 contacts (`MIN_CONTACTS`/`MAX_CONTACTS` in `backend/src/modules/auth/phone.ts`). A "10 contacts" Pro tier needs
+- Contact rule is 2 to 6 contacts (`MIN_CONTACTS`/`MAX_CONTACTS` in `backend/src/modules/auth/phone.ts`). Two are needed at sign-up;
+  the remaining four are added inside the app (up to the six cap). A "10 contacts" Pro tier needs
   that changed and the app's contact screens too.
 - Production mode (`NODE_ENV=production`) refuses `SMS_PROVIDER=mock` and `OTP_DEV_ECHO`; both blueprints use `development`.
   Postgres storage works in either mode.

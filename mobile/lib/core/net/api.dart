@@ -80,13 +80,17 @@ class Place {
 
 /// One emergency contact as the owner sees it. [consent] is pending, accepted or declined.
 class ContactStatus {
-  const ContactStatus({this.id = '', required this.phone, required this.consent, this.reachable = false});
+  const ContactStatus({this.id = '', required this.phone, required this.consent, this.reachable = false, this.locale = 'en'});
   final String id;
   final String phone;
   final String consent;
 
   /// This person has Sentri installed, so an alert can actually reach them.
   final bool reachable;
+
+  /// The language this person's alert texts are written in. Kept as-is when the
+  /// list is re-saved from the contacts tab, so nobody's language is disturbed.
+  final String locale;
 
   static List<ContactStatus> listFromJson(Object? j) {
     if (j is! List) return const [];
@@ -98,6 +102,7 @@ class ContactStatus {
             reachable: c['reachable'] == true,
             phone: c['phone'] as String,
             consent: const {'pending', 'accepted', 'declined'}.contains(c['consent']) ? c['consent'] as String : 'pending',
+            locale: c['locale'] is String ? c['locale'] as String : 'en',
           ),
     ];
   }

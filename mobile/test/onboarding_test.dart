@@ -208,11 +208,19 @@ void main() {
       expect(r.c.step, OnboardingStep.permissions);
     });
 
-    test('two contacts are refused: at least three are needed', () async {
+    test('a single contact is refused: at least two are needed', () async {
       final r = _rig();
-      await r.c.submitContacts(['08031111111', '08032222222']);
+      await r.c.submitContacts(['08031111111']);
       expect(r.c.errorKey, 'contacts.need_more');
       expect(r.api.contactsSaved, isEmpty);
+    });
+
+    test('two numbers are enough now and are saved straight away', () async {
+      final r = _rig();
+      await r.c.submitContacts(['0803 111 1111', '08032222222']);
+      expect(r.c.errorKey, isNull);
+      expect(r.api.contactsSaved.single, ['+2348031111111', '+2348032222222']);
+      expect(r.c.step, OnboardingStep.pins);
     });
 
     test('a contact number that is not a number is refused', () async {
