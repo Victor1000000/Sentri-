@@ -21,7 +21,6 @@ import '../onboarding/permissions_panel.dart';
 import '../sos/pin_pad.dart';
 import '../sos/contact_people.dart';
 import '../sos/sos_controller.dart';
-import '../photos/photo_home.dart';
 import '../photos/photo_home_banner.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -150,18 +149,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                     padding: const EdgeInsets.symmetric(horizontal: 22),
                     child: Row(
                       children: [
-                        // The greeting is a real face now: a warm portrait beside the
-                        // hero line, the way the reference boards put a person first.
-                        Container(
-                          width: 76,
-                          height: 76,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.12), width: 2),
-                          ),
-                          child: ClipOval(child: Image.memory(photoHomeBytes, fit: BoxFit.cover, gaplessPlayback: true)),
-                        ),
-                        const SizedBox(width: 14),
                         Expanded(
                           child: Text(
                             t('home.hero'),
