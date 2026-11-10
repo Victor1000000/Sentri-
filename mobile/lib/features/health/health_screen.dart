@@ -109,17 +109,26 @@ class _HealthScreenState extends State<HealthScreen> {
                     Align(
                       alignment: Alignment.bottomLeft,
                       child: Container(
+                        // A whisper of shading, not a dark banner: just enough
+                        // under the words to keep them readable, and the words
+                        // also carry their own soft shadow.
                         decoration: const BoxDecoration(
                           gradient: LinearGradient(
                             begin: Alignment.bottomCenter,
                             end: Alignment.topCenter,
-                            colors: [Color(0xB2000000), Color(0x00000000)],
+                            colors: [Color(0x40000000), Color(0x00000000)],
                           ),
                         ),
                         padding: const EdgeInsets.fromLTRB(16, 30, 16, 14),
                         child: Text(
                           t('tabs.health'),
-                          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: Colors.white, letterSpacing: -0.4),
+                          style: const TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
+                            letterSpacing: -0.4,
+                            shadows: [Shadow(color: Color(0x99000000), blurRadius: 10, offset: Offset(0, 1))],
+                          ),
                         ),
                       ),
                     ),

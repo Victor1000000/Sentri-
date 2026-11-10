@@ -125,6 +125,9 @@ class MapScreenState extends State<MapScreen> {
   int _nextStep = 0;
   StreamSubscription<Position>? _posSub;
 
+  // -- live refinement of the own-position dot and its accuracy ring --
+  StreamSubscription<GeoFix>? _refineSub;
+
   // -- what is around --
   List<NearbyPlace> _near = const <NearbyPlace>[];
   bool _nearBusy = false;
@@ -135,12 +138,35 @@ class MapScreenState extends State<MapScreen> {
     super.initState();
     unawaited(_update());
     _timer = Timer.periodic(widget.refresh, (_) => unawaited(_update()));
+    _startRefinement();
+  }
+
+  /// The map's ring is only as honest as its newest reading. A live stream of
+  /// fresh positions keeps tightening the dot and the ring within seconds of
+  /// opening the tab - the pinpoint look - and follows real movement too. The
+  /// camera only jumps when the reading is genuinely better or the person has
+  /// walked on, so it never stutters.
+  void _startRefinement() {
+    try {
+      _refineSub = widget.location.positions(distanceFilterM: 2).listen((f) {
+        final cur = _fix;
+        if (!mounted) return;
+        final better = cur == null || ((f.accuracyM ?? 1e9) < ((cur.accuracyM ?? 1e9) - 1.0));
+        final movedFar = cur != null && const Distance()(LatLng(cur.lat, cur.lon), LatLng(f.lat, f.lon)) > 25;
+        if (better || movedFar) _apply(f);
+      }, onError: (Object _) {});
+    } on UnsupportedError {
+      _refineSub = null;
+    } catch (_) {
+      _refineSub = null;
+    }
   }
 
   @override
   void dispose() {
     _timer?.cancel();
     unawaited(_posSub?.cancel());
+    unawaited(_refineSub?.cancel());
     unawaited(_voice.stop());
     _map.dispose();
     super.dispose();

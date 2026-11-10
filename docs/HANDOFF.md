@@ -245,3 +245,26 @@ not anger + a blink every 2 s), and the SOS screen now in the flat family. No i1
   "I'm safe", everything in `pin_pad.dart` (new leaf; `PinPad`/`PinPadState` API unchanged: `clear()`, `enabled`,
   4-digit auto-submit) as flat card keys with hairline edges and alarm-red dots. PoliceCallCard untouched.
 
+## 12. Version 28 (this patch) — engineer's notes
+Vic's polish list: circled home functions, a visible profile with the app's own picture icons, pinpoint map
+accuracy, and a lighter Health banner shading. No i18n changes: still 287 keys × 5.
+- Home menu: the three grey rows became `_CircleTile`s in a Row — a 64 px card disc (hairline edge) with the icon
+  in brand indigo and the existing `share.title`/`contacts.title`/`triggers.title` label UNDERNEATH, two lines
+  capped. The share circle carries a LiveDot badge while a share runs (`widget.share.active != null`); the old
+  `_MenuRow`/`_SharingTag` were deleted.
+- Profile is visible: `_Avatar` grew a pencil badge (`showEdit: true` on the greeting) and the sheet is a bigger,
+  bouncy, 0.78-height scrollable with the 50-icon grid. Gallery still works (photo_library badge on the big
+  preview; `setAvatar` wins). The 50 faces live in `core/widgets/avatar_icons.dart` (NEW LEAF): SentriAvatar /
+  SentriAvatarPainter — 5 skin tones × 10 hairstyles (5 female: long, afro puff, braids, bun+swep, hijab;
+  5 male: crop, waves, afro, bald+beard, locs) × 10 pastel grounds, drawn in code so nothing ships as an image.
+  `Profile` persists `profile.avatar.icon.v1` (index) + `profile.avatar.icon.on.v1` (last-choice flag:
+  `setIcon` turns it on, `setAvatar` turns it off — the LAST choice wins, and the photo is never deleted).
+- Map pinpoint: `_MapScreenState._startRefinement()` listens to `LocationSource.positions(distanceFilterM: 2)`
+  and applies a fix when it is ≥1 m more accurate or the person moved 25 m — the ±100 m ring tightens within
+  seconds of opening the tab. Fakes return an empty stream (already in test_helpers); dispose cancels `_refineSub`.
+- Health banner: gradient cut from 70 % black to 25 % and the title got its own soft text shadow — the words
+  stay readable on any photo without the dark wash.
+- Lesson re-confirmed: arrow-`=>` builders cannot become brace bodies by half (stray `),` / `);` broke
+  home_screen in v27's first CI round); and `SizedBox` has no `alignment` (pin_pad needed `Container`).
+
+

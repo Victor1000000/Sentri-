@@ -13,13 +13,23 @@ class Profile extends ChangeNotifier {
   final KeyValueStore _store;
   static const _nameKey = 'profile.name.v1';
   static const _avatarKey = 'profile.avatar.v1';
+  static const _iconKey = 'profile.avatar.icon.v1';
+  static const _iconOnKey = 'profile.avatar.icon.on.v1';
 
   String _name = '';
   Uint8List? _avatar;
+  int? _icon;
+  bool _iconOn = false;
   bool _loaded = false;
 
   String get name => _name;
   Uint8List? get avatar => _avatar;
+
+  /// Which of the app's 50 drawn Sentri faces is the person's pick (null = none).
+  int? get avatarIcon => _icon;
+
+  /// True when the app icon (not a gallery photo) is what the person chose last.
+  bool get useIcon => _iconOn;
   bool get loaded => _loaded;
 
   Future<void> load() async {
@@ -35,6 +45,9 @@ class Profile extends ChangeNotifier {
         _avatar = null;
       }
     }
+    final i = int.tryParse(await _store.read(_iconKey) ?? '');
+    if (i != null && i >= 0 && i < 50) _icon = i;
+    _iconOn = (await _store.read(_iconOnKey)) == '1' && _icon != null;
     notifyListeners();
   }
 
@@ -62,6 +75,24 @@ class Profile extends ChangeNotifier {
       await _store.delete(_avatarKey);
     } else {
       await _store.write(_avatarKey, base64Encode(bytes));
+    }
+    // A gallery photo is the person's latest choice: it wins over the icon.
+    _iconOn = false;
+    await _store.write(_iconOnKey, '0');
+    notifyListeners();
+  }
+
+  /// Picks one of the app's 50 drawn Sentri faces. Null clears the pick; the
+  /// gallery photo (if any) shows again.
+  Future<void> setIcon(int? i) async {
+    _icon = (i == null || i < 0 || i >= 50) ? null : i;
+    _iconOn = _icon != null;
+    if (_icon == null) {
+      await _store.delete(_iconKey);
+      await _store.write(_iconOnKey, '0');
+    } else {
+      await _store.write(_iconKey, '$_icon');
+      await _store.write(_iconOnKey, '1');
     }
     notifyListeners();
   }

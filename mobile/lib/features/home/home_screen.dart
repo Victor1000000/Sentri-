@@ -17,6 +17,7 @@ import '../inbox/inbox_screen.dart';
 import '../share/share_controller.dart';
 import '../share/share_screen.dart';
 import '../../core/widgets/flat.dart';
+import '../../core/widgets/avatar_icons.dart';
 import '../../core/widgets/glass.dart';
 import '../checkin/checkin_controller.dart';
 import '../onboarding/permissions_panel.dart';
@@ -174,7 +175,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     child: Row(children: [
                       GestureDetector(
                         onTap: _openProfile,
-                        child: _Avatar(profile: widget.profile),
+                        child: _Avatar(profile: widget.profile, showEdit: true),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
@@ -249,28 +250,30 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   ),
                   ),
                   const SizedBox(height: 22),
+                  // The home functions as circles, the way the flat reference
+                  // boards draw them: icon in a card circle, its name right
+                  // underneath. A green LiveDot rides the share circle while a
+                  // share is running.
                   Padding(
                     padding: const EdgeInsets.fromLTRB(22, 0, 22, 16),
-                    child: Glass(
-                      radius: 18,
-                      child: Column(children: [
-                        _MenuRow(
-                          label: t('share.title'),
-                          trailing: widget.share.active != null ? const _SharingTag() : null,
-                          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ShareScreen(share: widget.share, api: widget.api, i18n: widget.i18n, people: widget.people))),
-                        ),
-                        const Divider(height: 0.5, thickness: 0.5, indent: 16),
-                        _MenuRow(
-                          label: t('contacts.title'),
-                          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ContactsScreen(api: widget.api, people: widget.people, i18n: widget.i18n))),
-                        ),
-                        const Divider(height: 0.5, thickness: 0.5, indent: 16),
-                        _MenuRow(
-                          label: t('triggers.title'),
-                          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => _ShortcutsPage(home: this))),
-                        ),
-                      ]),
-                    ),
+                    child: Row(children: [
+                      _CircleTile(
+                        label: t('share.title'),
+                        icon: Icons.share_location_rounded,
+                        live: widget.share.active != null,
+                        onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ShareScreen(share: widget.share, api: widget.api, i18n: widget.i18n, people: widget.people))),
+                      ),
+                      _CircleTile(
+                        label: t('contacts.title'),
+                        icon: Icons.people_alt_rounded,
+                        onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ContactsScreen(api: widget.api, people: widget.people, i18n: widget.i18n))),
+                      ),
+                      _CircleTile(
+                        label: t('triggers.title'),
+                        icon: Icons.campaign_rounded,
+                        onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => _ShortcutsPage(home: this))),
+                      ),
+                    ]),
                   ),
                   const SizedBox(height: 8),
                 ],
@@ -283,28 +286,58 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 }
 
-/// The person's avatar on the home greeting: their chosen photo, or a friendly initial disc.
+/// The person's avatar on the home greeting: their chosen photo (or one of the
+/// app's 50 drawn Sentri faces), with a pencil badge so it reads as editable —
+/// the profile is one visible tap, not something hidden away.
 class _Avatar extends StatelessWidget {
-  const _Avatar({required this.profile});
+  const _Avatar({required this.profile, this.showEdit = false});
   final Profile profile;
+  final bool showEdit;
 
   @override
   Widget build(BuildContext context) {
-    final bytes = profile.avatar;
+    // Whoever was chosen LAST wins: a picked icon beats an old photo and vice
+    // versa (setAvatar/setIcon keep that flag right).
+    final useIcon = profile.useIcon && profile.avatarIcon != null;
+    final bytes = useIcon ? null : profile.avatar;
+    final iconIdx = profile.avatarIcon;
     final name = profile.name;
     final letter = name.isNotEmpty ? name.characters.first.toUpperCase() : '?';
-    return Container(
+    Widget inner;
+    if (bytes != null) {
+      inner = Image.memory(bytes, fit: BoxFit.cover, gaplessPlayback: true);
+    } else if (iconIdx != null) {
+      inner = SentriAvatar(index: iconIdx, size: 46);
+    } else {
+      inner = Center(child: letter != '?' ? Text(letter, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)) : const Icon(Icons.person, size: 24));
+    }
+    return SizedBox(
       width: 46,
       height: 46,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.12),
-        border: Border.all(color: Brand.indigoHi.withValues(alpha: 0.4), width: 1.5),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: bytes == null
-          ? Center(child: letter != '?' ? Text(letter, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)) : const Icon(Icons.person, size: 24))
-          : Image.memory(bytes, fit: BoxFit.cover, gaplessPlayback: true),
+      child: Stack(clipBehavior: Clip.none, children: [
+        Container(
+          width: 46,
+          height: 46,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.12),
+            border: Border.all(color: Brand.indigoHi.withValues(alpha: 0.4), width: 1.5),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: inner,
+        ),
+        if (showEdit)
+          Positioned(
+            right: -3,
+            bottom: -3,
+            child: Container(
+              width: 19,
+              height: 19,
+              decoration: BoxDecoration(shape: BoxShape.circle, color: Brand.indigo, border: Border.all(color: Colors.white, width: 2)),
+              child: const Icon(Icons.edit, size: 9, color: Colors.white),
+            ),
+          ),
+      ]),
     );
   }
 }
@@ -340,55 +373,97 @@ class _ProfileSheetState extends State<_ProfileSheet> {
     final t = widget.i18n.t;
     final cs = Theme.of(context).colorScheme;
     final muted = cs.onSurface.withValues(alpha: 0.55);
+    final mq = MediaQuery.of(context);
     return ListenableBuilder(
       listenable: widget.profile,
       builder: (context, _) => Padding(
-        padding: EdgeInsets.fromLTRB(22, 4, 22, 22 + MediaQuery.of(context).viewInsets.bottom),
-        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          const SizedBox(height: 8),
-          Center(
-            child: GestureDetector(
-              onTap: () async {
-                final bytes = await pickAvatarImage();
-                if (bytes != null) await widget.profile.setAvatar(bytes);
-              },
-              child: Stack(children: [
-                _Avatar(profile: widget.profile),
-                Positioned(
-                  right: -2,
-                  bottom: -2,
-                  child: Container(
-                    width: 26,
-                    height: 26,
-                    decoration: BoxDecoration(shape: BoxShape.circle, color: Brand.indigo, border: Border.all(color: Colors.white, width: 2)),
-                    child: const Icon(Icons.camera_alt, size: 13, color: Colors.white),
+        padding: EdgeInsets.fromLTRB(22, 4, 22, 22 + mq.viewInsets.bottom),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: mq.size.height * 0.78),
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              const SizedBox(height: 8),
+              // The pick, shown big: tap it for a gallery photo; the pencil
+              // badge says this is where editing happens.
+              Center(
+                child: GestureDetector(
+                  onTap: () async {
+                    final bytes = await pickAvatarImage();
+                    if (bytes != null) await widget.profile.setAvatar(bytes);
+                  },
+                  child: SizedBox(
+                    width: 74,
+                    height: 74,
+                    child: Stack(clipBehavior: Clip.none, children: [
+                      Center(
+                        child: Transform.scale(
+                          scale: 74 / 46,
+                          child: _Avatar(profile: widget.profile),
+                        ),
+                      ),
+                      Positioned(
+                        right: -2,
+                        bottom: -2,
+                        child: Container(
+                          width: 30,
+                          height: 30,
+                          decoration: BoxDecoration(shape: BoxShape.circle, color: Brand.indigo, border: Border.all(color: Colors.white, width: 2)),
+                          child: const Icon(Icons.photo_library_outlined, size: 15, color: Colors.white),
+                        ),
+                      ),
+                    ]),
                   ),
                 ),
-              ]),
-            ),
+              ),
+              const SizedBox(height: 6),
+              Center(child: Text(t('health.heart_perm'), style: TextStyle(fontSize: 12, color: muted))),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _name,
+                maxLength: 40,
+                decoration: InputDecoration(
+                  labelText: t('health.allow'),
+                  counterText: '',
+                  filled: true,
+                  fillColor: cs.onSurface.withValues(alpha: 0.05),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+                ),
+              ),
+              const SizedBox(height: 18),
+              // The app's own 50 Sentri faces: a tap swaps the photo for one of
+              // them. The chosen one wears a ring.
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                padding: EdgeInsets.zero,
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 6, crossAxisSpacing: 10, mainAxisSpacing: 10),
+                itemCount: SentriAvatarPainter.count,
+                itemBuilder: (c, i) {
+                  final selected = widget.profile.useIcon && widget.profile.avatarIcon == i;
+                  return GestureDetector(
+                    onTap: () => unawaited(widget.profile.setIcon(i)),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(color: selected ? Brand.indigo : Colors.transparent, width: 2.5),
+                      ),
+                      padding: const EdgeInsets.all(2.5),
+                      child: LayoutBuilder(builder: (c, box) => SentriAvatar(index: i, size: box.biggest.shortestSide)),
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 18),
+              FilledButton.icon(
+                style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(46), backgroundColor: cs.primary),
+                onPressed: _save,
+                icon: const Icon(Icons.check, size: 20),
+                label: Text(t('common.continue'), style: const TextStyle(fontSize: 15)),
+              ),
+            ]),
           ),
-          const SizedBox(height: 6),
-          Center(child: Text(t('health.heart_perm'), style: TextStyle(fontSize: 12, color: muted))),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _name,
-            maxLength: 40,
-            decoration: InputDecoration(
-              labelText: t('health.allow'),
-              counterText: '',
-              filled: true,
-              fillColor: cs.onSurface.withValues(alpha: 0.05),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-            ),
-          ),
-          const SizedBox(height: 14),
-          FilledButton.icon(
-            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(46), backgroundColor: cs.primary),
-            onPressed: _save,
-            icon: const Icon(Icons.check, size: 20),
-            label: Text(t('common.continue'), style: const TextStyle(fontSize: 15)),
-          ),
-        ]),
+        ),
       ),
     );
   }
@@ -448,34 +523,59 @@ class _ShortcutsPage extends StatelessWidget {
   }
 }
 
-class _MenuRow extends StatelessWidget {
-  const _MenuRow({required this.label, required this.onTap, this.trailing});
+/// One home function as a circle with its name underneath: a solid card disc
+/// with a hairline edge (the flat card language), the icon in brand indigo,
+/// and a LiveDot badge top-right when something is running.
+class _CircleTile extends StatelessWidget {
+  const _CircleTile({required this.label, required this.icon, required this.onTap, this.live = false});
   final String label;
-  final Widget? trailing;
+  final IconData icon;
   final VoidCallback onTap;
-  @override
-  Widget build(BuildContext context) => InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
-          child: Row(children: [
-            Expanded(child: Text(label, style: const TextStyle(fontSize: 16))),
-            if (trailing != null) ...[trailing!, const SizedBox(width: 6)],
-            Icon(Icons.chevron_right, size: 20, color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.4)),
-          ]),
-        ),
-      );
-}
+  final bool live;
 
-/// "Live" tag on the Share location row while a share is running.
-class _SharingTag extends StatelessWidget {
-  const _SharingTag();
   @override
-  Widget build(BuildContext context) => const Row(mainAxisSize: MainAxisSize.min, children: [
-        SizedBox(width: 22, height: 22, child: LiveDot(size: 7)),
-        SizedBox(width: 2),
-        Text('Live', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Flat.live)),
-      ]);
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(20),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Stack(clipBehavior: Clip.none, children: [
+            Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Flat.card(context),
+                border: Border.all(color: Flat.hairline(context)),
+              ),
+              child: Icon(icon, size: 28, color: Brand.indigoHi),
+            ),
+            if (live)
+              Positioned(
+                right: 1,
+                top: 1,
+                child: Container(
+                  width: 16,
+                  height: 16,
+                  decoration: BoxDecoration(shape: BoxShape.circle, color: Flat.card(context)),
+                  child: const LiveDot(size: 7),
+                ),
+              ),
+          ]),
+          const SizedBox(height: 8),
+          Text(
+            label,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 12.5, height: 1.25, fontWeight: FontWeight.w600, color: Flat.muted(context)),
+          ),
+        ]),
+      ),
+    );
+  }
 }
 
 /// The message bar. Calm when there is nothing new; turns red and names the person when a live alert needs a response.
