@@ -133,7 +133,7 @@ class GeolocatorSource implements LocationSource {
   Stream<GeoFix> positions({double distanceFilterM = 5}) {
     try {
       return Geolocator.getPositionStream(
-        locationSettings: LocationSettings(accuracy: LocationAccuracy.bestForNavigation, distanceFilter: distanceFilterM),
+        locationSettings: LocationSettings(accuracy: LocationAccuracy.bestForNavigation, distanceFilter: distanceFilterM.round()),
       ).map(_toFix);
     } catch (_) {
       return const Stream.empty();

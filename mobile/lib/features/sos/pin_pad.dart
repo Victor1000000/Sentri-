@@ -47,7 +47,7 @@ class PinPadState extends State<PinPad> {
           child: InkWell(
             borderRadius: radius,
             onTap: widget.enabled ? onTap : null,
-            child: SizedBox(
+            child: Container(
               height: 62,
               alignment: Alignment.center,
               child: icon != null

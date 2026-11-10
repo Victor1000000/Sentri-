@@ -303,13 +303,13 @@ class ExerciseController extends ChangeNotifier {
     if (last == null || lastAt == null) {
       // First trusted reading of the session: the zero point for distance.
       _lastAccepted = here;
-      _lastAcceptedAt = f.at ?? DateTime.now();
+      _lastAcceptedAt = f.at;
       _lastAcceptedAcc = acc;
       notifyListeners();
       return;
     }
     final movedM = _dist.as(LengthUnit.Meter, last, here);
-    final dt = (f.at ?? DateTime.now()).difference(lastAt).inMilliseconds / 1000.0;
+    final dt = f.at.difference(lastAt).inMilliseconds / 1000.0;
     // Two consecutive errors scatter around the true spot: their average is the
     // size of the circle the readings can wander in while standing still.
     // Movement smaller than that is noise, not walking - it is ignored.
@@ -324,7 +324,7 @@ class ExerciseController extends ChangeNotifier {
       return;
     }
     _lastAccepted = here;
-    _lastAcceptedAt = f.at ?? DateTime.now();
+    _lastAcceptedAt = f.at;
     _lastAcceptedAcc = acc;
     if (movedM >= noiseM && movedM >= 0.5) {
       km += movedM / 1000;
