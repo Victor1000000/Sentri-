@@ -137,7 +137,7 @@ class InboxScreen extends StatelessWidget {
                         child: Row(mainAxisSize: MainAxisSize.min, children: [
                           const LiveDot(size: 7),
                           const SizedBox(width: 5),
-                          Text(t('inbox.live'), style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Flat.live)),
+                          Text(i18n.t('inbox.live'), style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Flat.live)),
                         ]),
                       ),
                       const SizedBox(width: 6),
