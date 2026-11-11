@@ -287,4 +287,21 @@ app scroll like the reference reel with icons that react when tapped. No i18n ch
   already bounced and keeps its own physics line.
 - i18n untouched; no new persistence keys (the 50-icon pick from v28 is unchanged).
 
+## 14. Version 30 (this patch) — engineer's notes
+Vic's ask: the History section becomes one visible tap that opens the WHOLE exercise story - every walk/run/ride
+session, its route like the Strava reference, and the awards. Sleek. No i18n changes: still 287 keys × 5.
+- Health tab: the History card's whole header is now a `TapBounce` target with a chevron (total-km text stays);
+  it pushes the new `ExerciseHistoryScreen`. Entries in the preview now open the session page directly (the old
+  bottom sheet `_showSession` is gone).
+- `ExerciseHistoryScreen` (same leaf): `FlatPage` titled `exercise.history` with the total-km line as subtitle,
+  the shared award shelf card on top, then one card listing EVERY session (mode disc icon, `Walk · on d/m`,
+  km · min · steps, chevron) → each opens the detail page.
+- `_SessionDetailScreen`: Strava-style stat strip (three columns - distance big, time as mm:ss tabular, steps or
+  `—` for bike; labels reuse `exercise.distance/time/steps`), then the route nearly full-bleed (280 px,
+  rounded 24) via `FlutterMapSheetMap(path, ends: true)` - new start/end pins (green start, indigo end, white
+  edge) over the existing indigo polyline; then the award shelf again. All existing keys, nothing new.
+- `_AwardShelfCard` extracted from the tab's `_awardsCard` (identical look) so the shelf is shared three ways;
+  the tab's card now just delegates.
+- i18n untouched; no new persisted keys; `WorkoutRecord`/`AwardStore` APIs unchanged.
+
 
