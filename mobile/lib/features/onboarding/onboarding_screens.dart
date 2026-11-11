@@ -240,6 +240,10 @@ class _FloatingFieldState extends State<_FloatingField> with SingleTickerProvide
     );
   }
 }
+
+/// Three-item bands for the sign-up steps, mirroring the welcome field's cast.
+
+class _OtpStep extends StatefulWidget {
   const _OtpStep({required this.c, required this.i18n});
   final OnboardingController c;
   final I18n i18n;
