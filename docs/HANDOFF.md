@@ -390,4 +390,13 @@ Emoji 3D, MIT license, downloaded 2026-11-11.
 - Pipeline notes: faces3d.dart and permissions_panel.dart joined the leaf table; check-apk20 gained a unique
   base64 fragment needle for faces 0 and 25 of faces3d.dart (taken at b64 chars 160..216, past the shared PNG
   header). APK grows ~3 MB (the 50 faces); patch ~3.4 MB.
+- v33 hotfix (same patch round, second build): the home mood face rendered BLANK. Root cause: the blink
+  AnimatedBuilder rebuilds every animation frame, and `f3faceOpenBytes`/`f3faceClosedBytes` were GETTERS that
+  ran base64Decode on every access — each frame handed Image.memory a fresh Uint8List, so the provider was
+  recreated and re-decoded every frame and never painted (classic Image churn; the message-bar bell only
+  rendered because that widget rarely rebuilds, and the welcome floats had gaplessPlayback:true). Fix: all
+  f3d*/f3face* declarations in floating3d.dart and faces3d.dart are now top-level lazy FINALS (decode once,
+  stable byte identity — also removes a hidden per-frame 3 MB/s decode cost in the bands), and the mood-face
+  images got explicit 240×240 size + gaplessPlayback:true. Verify: in the APK the bell renders AND face25/
+  face49 fragments present; look at the home screen in person for the blinking face.
 

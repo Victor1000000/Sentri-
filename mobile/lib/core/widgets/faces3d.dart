@@ -524,7 +524,7 @@ const String _face00B64 =
     '0OsP5Vea365OmlSEMaGgvkuBfGdZ8s6Cim0q1QZFNJsYw5uGesPrMDa5kV550iQGMpCBDGQgAxnIQAYykIEMZCADGchABjKQgQxk'
     'IAMZyEAGMpCBDGQgAxnIQAYykIEMZCADGchABjKQgQxkIAMZyEAGMpCBDGQgAxnIQAYykIEMZCADGchABjLn8v8DeUQ3FE0SS+YA'
     'AAAASUVORK5CYII=';
-Uint8List get f3face00Bytes => base64Decode(_face00B64);
+final Uint8List f3face00Bytes = base64Decode(_face00B64);
 
 // character 1.
 const String _face01B64 =
@@ -1049,7 +1049,7 @@ const String _face01B64 =
     'mFnbpc5a5Tmsr7leqXT0MkUGy5XGH1ePXC0YNfY66zA9KqZ+bSKOek7zpAL2pIoO7FJEsVMNvW1XfLGJmbZ0R6otmBq9C+PTm+nV'
     'J05jKEMZylCGMpShDGUoQxnKUIYylKEMZShDGcpQhjKUoQxlKEMZylCGMpShDGUoQxnKUIYylKEMZShDGcpQhjKUoQxlKEMZylCG'
     'MpShDGUoQxnKUIYylKEMZSiLLv8/0sdTsWrHUagAAAAASUVORK5CYII=';
-Uint8List get f3face01Bytes => base64Decode(_face01B64);
+final Uint8List f3face01Bytes = base64Decode(_face01B64);
 
 // character 2.
 const String _face02B64 =
@@ -1584,7 +1584,7 @@ const String _face02B64 =
     'AniMBH7XLbMYD3YOx6OzBk27Y8y8S82Qn9Jyu1XJ5k1Ka9isJP68kvBzrH/l0hjo5kP5WvL71UkrijCWFcQXlUQ/3LZ8uKHmgCr1'
     'sCKaRxgzjwzGM/dhfmUPveniFUzDNEzDNEzDNEzDNEzDNEzDNEzDNEzDNEzDNEzDNEzDNEzDNEzDNEzDNEzDNEzDNEzDNEzDNEzD'
     'NEzDNEzDNEzDNEzDNEzDNEzDNEzDNEzDNEzDNEzDNEzDNEzDNEzDNEzDhof/Fy3ieJoytHHdAAAAAElFTkSuQmCC';
-Uint8List get f3face02Bytes => base64Decode(_face02B64);
+final Uint8List f3face02Bytes = base64Decode(_face02B64);
 
 // character 3.
 const String _face03B64 =
@@ -2093,7 +2093,7 @@ const String _face03B64 =
     'lOYH61ocrKjaJ0vtkESzS6C/qzfuP4SFlZ30+qeuYBZmYRZmYRZmYRZmYRZmYRZmYRZmYRZmYRZmYRZmYRZmYRZmYRZmYRZmYRZm'
     'YRZmYRZmYRZmYRZmYRZmYRZmYRZmYRZmYRZmYRZmYRZmYRZmYRZmYRZmYRZmYRZmYRZmYRbWPPz/N7s8f7XhCGkAAAAASUVORK5C'
     'YII=';
-Uint8List get f3face03Bytes => base64Decode(_face03B64);
+final Uint8List f3face03Bytes = base64Decode(_face03B64);
 
 // character 4.
 const String _face04B64 =
@@ -2644,7 +2644,7 @@ const String _face04B64 =
     '8OBtdz5SPpzxSJcpATxChN954yzGg23D8eiUQdMeO2Y+To2QH99yu0UZ4xuV1bBJafx5pdnnWH/l0qht83UMrfn9+mfLijCWFMQX'
     'lDbf37a8v6Fmj0r1gCKanYyZnYPxzD2YX95Bbzx3GVOZylSmMpWpTGUqU5nKVKYylalMZSpTmcpUpjKVqUxlKlOZylSmMpWpTGUq'
     'U5nKVKYylalMZSpTmcpUpjKVqUxlKlOZylSmMpWpTGUqU5nKVKYylalMZSpTWXf5/wGHoFIouMaA6wAAAABJRU5ErkJggg==';
-Uint8List get f3face04Bytes => base64Decode(_face04B64);
+final Uint8List f3face04Bytes = base64Decode(_face04B64);
 
 // character 5.
 const String _face05B64 =
@@ -3216,7 +3216,7 @@ const String _face05B64 =
     '1UkrhjCWDcQPGWl+sG35YEPN/SbX3YZo7mUs3DuaLtyGzSv30OvPX8E8zMM8zMM8zMM8zMM8zMM8zMM8zMM8zMM8zMM8zMM8zMM8'
     'zMM8zMM8zMM8zMM8zMM8zMM8zMM8zMM8zMM8zMM8zMM8zMM8zMM8zMM8zMM8zMM8zMM8zMM8zMM8zMM8zMM8bHj4/wG8JjHzoyY1'
     'RwAAAABJRU5ErkJggg==';
-Uint8List get f3face05Bytes => base64Decode(_face05B64);
+final Uint8List f3face05Bytes = base64Decode(_face05B64);
 
 // character 6.
 const String _face06B64 =
@@ -3839,7 +3839,7 @@ const String _face06B64 =
     'n5cSfa6uxVxBxR6Zapskmh0CvR3dqrcJU/3t9Ooz+xiHcRiHcRiHcRiHcRiHcRiHcRiHcRiHcRiHcRiHcRiHcRiHcRiHcRiHcRiH'
     'cRiHcRiHcRiHcRiHcRiHcRiHcRiHcRiHcRiHcRiHcRiHcRiHcRiHcRiHcRiHcRiHcRiHcRiHFQ//P4ALHlYzak/VAAAAAElFTkSu'
     'QmCC';
-Uint8List get f3face06Bytes => base64Decode(_face06B64);
+final Uint8List f3face06Bytes = base64Decode(_face06B64);
 
 // character 7.
 const String _face07B64 =
@@ -4409,7 +4409,7 @@ const String _face07B64 =
     'HVDuxgMVVfcrvtjJ1eQ+xuC+/mRwJxZWdtEvnLeCWZiFWZiFWZiFWZiFWZiFWZiFWZiFWZiFWZiFWZiFWZiFWZiFWZiFWZiFWZiF'
     'WZiFWZiFWZiFWZiFWZiFWZiFWZiFWZiFWZiFWZiFWZiFWZiFWZiFWZiFWZiFWZiFWZiFWVjz8P8DY+4asZSC6VsAAAAASUVORK5C'
     'YII=';
-Uint8List get f3face07Bytes => base64Decode(_face07B64);
+final Uint8List f3face07Bytes = base64Decode(_face07B64);
 
 // character 8.
 const String _face08B64 =
@@ -4965,7 +4965,7 @@ const String _face08B64 =
     'sDvEhzPu6DImgDuI8AsumcTRww39Dh/R4866IfMG9XAPrrlerYz2lQr3q5QvYJq4mmLiSTvdjjtVZcbxhjXxUAF5TlkRs2o7o4bp'
     'dikq2VUxtqtUmzoa8HW1BcOJGzA9t5leePIcxjKWsYxlLGMZy1jGMpaxjGUsYxnLWMYylrGMZSxjGctYxjKWsYxlLGMZy1jGMpax'
     'jGUsYxnLWMYylrGMZSxjGctYxjKWsYxlLGMZy1jGMpaxjGUsYxnLWMay7PL/AWedQ0n8KHapAAAAAElFTkSuQmCC';
-Uint8List get f3face08Bytes => base64Decode(_face08B64);
+final Uint8List f3face08Bytes = base64Decode(_face08B64);
 
 // character 9.
 const String _face09B64 =
@@ -5551,7 +5551,7 @@ const String _face09B64 =
     'PpzxXJceATxHRBBEn1itwDdn1+Gp8WWdGlYIrK7EeHsJWq0hzjCMGgZYNesXUO7LO0Jtd1BRQ3XEVl7hHaHjG7ydz7MWnwWvzKBP'
     'LEuqk1ne2YNWfS9OWb4PL61tF2fsFQBvoCc96UlPetKTnvSkJz3pSU960pOe9KQnPelJT3rSk570pCc96UlPetKTnvSkJz3pSU96'
     '0pOe9KQnPelJT3rSk570pCc96UlPetKTnvSkJz3pSU960pOe9KQniy7/P+jtrKy8nBR5AAAAAElFTkSuQmCC';
-Uint8List get f3face09Bytes => base64Decode(_face09B64);
+final Uint8List f3face09Bytes = base64Decode(_face09B64);
 
 // character 10.
 const String _face10B64 =
@@ -6156,7 +6156,7 @@ const String _face10B64 =
     'qiFKKePnRb+ao56YgWhMoyO3pc1DRVXuQa+9F2ev3I+rWtvlFXslwOcxDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMw'
     'DMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDMMwDIse/n/L9Nsc3z0O'
     'eQAAAABJRU5ErkJggg==';
-Uint8List get f3face10Bytes => base64Decode(_face10B64);
+final Uint8List f3face10Bytes = base64Decode(_face10B64);
 
 // character 11.
 const String _face11B64 =
@@ -6760,7 +6760,7 @@ const String _face11B64 =
     'DMAg7p9ch8cOnJh3dqzFwcmVqOTLpaiuxOTsoGKGflnFIlSzHtFAj2zkyrWQ+kPImemRZD4dnOWoiRm1PKn2GRdNjKJaHUNPNizr'
     'zb1oioNY3rk3m23uwNplu/Hynq3qvAfb0fnnp7QJ4HkqjjBYtM8W66ntj7elLW1pS1va0pa2tKUtbWlLW9rSlra0pS1taUtb2tKW'
     'trSlLW1pS1va0pa2tKUtbWlLW9rSlra0pS1taUtb2tKWtrSlLW1pS1va0pa2HC/y/we2NIt4E5nDdwAAAABJRU5ErkJggg==';
-Uint8List get f3face11Bytes => base64Decode(_face11B64);
+final Uint8List f3face11Bytes = base64Decode(_face11B64);
 
 // character 12.
 const String _face12B64 =
@@ -7353,7 +7353,7 @@ const String _face12B64 =
     'x/aqeuNYqSP0CPmRtarXadm8WpsQa7TEX6U997PKfOXSGuf2vVp9MvHspCVNGIsa6vMa5PvqWu2rqNqtc92niWaHQn9Hb9y/E6uW'
     'ttNbTl/CNEzDNEzDNEzDNEzDNEzDNEzDNEzDNEzDNEzDNEzDNEzDNEzDNEzDNEzDNEzDNEzDNEzDNEzDNEzDNEzDNEzDNEzDNEzD'
     'NEzDNEzDNEzDNEzDNEzDNEzDNEzDNEzDNEzDNBzw8P8DoM+mYeT36CUAAAAASUVORK5CYII=';
-Uint8List get f3face12Bytes => base64Decode(_face12B64);
+final Uint8List f3face12Bytes = base64Decode(_face12B64);
 
 // character 13.
 const String _face13B64 =
@@ -7889,7 +7889,7 @@ const String _face13B64 =
     'VepouSNeVnDfpzwM+xRX7FGa/A5upncxRncNp5NbsdTuolecu4q5zGUuc5nLXOYyl7nMZS5zmctc5jKXucxlLnOZy1zmMpe5zGUu'
     'c5nLXOYyl7nMZS5zmctc5jKXucxlLnOZy1zmMpe5zGUuc5nLXOYyl7nMZS5zmctc5jKXuWy6/H8eSo/CjBx/1wAAAABJRU5ErkJg'
     'gg==';
-Uint8List get f3face13Bytes => base64Decode(_face13B64);
+final Uint8List f3face13Bytes = base64Decode(_face13B64);
 
 // character 14.
 const String _face14B64 =
@@ -8513,7 +8513,7 @@ const String _face14B64 =
     'bJcz5Dsa0WySsnlWagsbpMSflhJ+SqgP3enBuShNZnKrk5YkYSxKiM9LiX60acTRgorDMtVeSTT7Bfr7e3X/QUwv7aO3XLiEdbfu'
     '1t26W3frbt2tu3W37tbdult3627drbt1t+7W3bpbd+tu3a27dbfu1t26W3frbt2tu3W37tbdult3627drbt1t+7W3bpbd+tu3a27'
     'dbfu1t26W3frbt2tu3W37tbdult3627drbt1t+ru/wdT9Cj/DaDFJgAAAABJRU5ErkJggg==';
-Uint8List get f3face14Bytes => base64Decode(_face14B64);
+final Uint8List f3face14Bytes = base64Decode(_face14B64);
 
 // character 15.
 const String _face15B64 =
@@ -9217,7 +9217,7 @@ const String _face15B64 =
     'Qj5ZUTUsxfigVA1D0uP3Sw/fR3oifDSTKOiHkdsiYUUSxrI08UXpzReqihYEiuPyrhlJNEcJWkeLsvUq9K/M4kcuWYGEhISEhISE'
     'hISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhISEhNOOHwORp+0kqc1iNAAAAABJ'
     'RU5ErkJggg==';
-Uint8List get f3face15Bytes => base64Decode(_face15B64);
+final Uint8List f3face15Bytes = base64Decode(_face15B64);
 
 // character 16.
 const String _face16B64 =
@@ -9825,7 +9825,7 @@ const String _face16B64 =
     'TW/LeMTbTOMe13K70YzCrzO4X29U/lkD3hlDFNNeR+deY70J7Nc/M0BeMlrEotnOG0m+31DJ/oaxx6S6q0cG8G2zE+OpWzG7dDf9'
     'zAOXsBbWwlpYC2thLayFtbAW1sJaWAtrYS2shbWwFtbCWlgLa2EtrIW1sBbWwlpYC2thLayFtbAW1sJaWAtrYS2shbWwFtbCWlgL'
     'a2EtrIW1sBbWwlpYC2thLayFtbAW1sJaWAtrYS2shbWwFlY9/P8BcrYGgh3BvSAAAAAASUVORK5CYII=';
-Uint8List get f3face16Bytes => base64Decode(_face16B64);
+final Uint8List f3face16Bytes = base64Decode(_face16B64);
 
 // character 17.
 const String _face17B64 =
@@ -10337,7 +10337,7 @@ const String _face17B64 =
     'DBoxTRWpT17tkp6GXRVV2yVf3Cuq5j6Bifv6zcRGLJ3ZTK89ZQZjGctYxjKWsYxlLGMZy1jGMpaxjGUsYxnLWMYylrGMZSxjGctY'
     'xjKWsYxlLGMZy1jGMpaxjGUsYxnLWMYylrGMZSxjGctYxjKWsYxlLGMZy1jGMpaxjGUsY1lw+f8BExqAMYr8z6UAAAAASUVORK5C'
     'YII=';
-Uint8List get f3face17Bytes => base64Decode(_face17B64);
+final Uint8List f3face17Bytes = base64Decode(_face17B64);
 
 // character 18.
 const String _face18B64 =
@@ -10858,7 +10858,7 @@ const String _face18B64 =
     'hofLhzMe7jIigIeJiPffPIaqu6ZfTR3ZLcrVlRCHyBHytbUYrChQLpVWg7QexITU7ONS0Y8VWm0L9e1r1HoNdD3+OINKTFNB6pNX'
     'u6WnYXdBxQ7JF5tEUW0R6G3pVr37MDGzmV538gxGMpKRjGQkIxnJSEYykpGMZCQjGclIRjKSkYxkJCMZyUhGMpKRjGQkIxnJSEYy'
     'kpGMZCQjGclIRjKSkYxkJCMZyUhGMpKRjGQkIxnJSEYykpGMZCQjGclIRrLg8v8BAl7jBCr04J8AAAAASUVORK5CYII=';
-Uint8List get f3face18Bytes => base64Decode(_face18B64);
+final Uint8List f3face18Bytes = base64Decode(_face18B64);
 
 // character 19.
 const String _face19B64 =
@@ -11313,7 +11313,7 @@ const String _face19B64 =
     'GR5sHjMf5h7u4TXXhzqjfb3D/QZn8q8lrtYw8Zx/tW5QVe1igXFNPHZAnndWxE633+40+TZHJdsqxh0u102DBvB1dSvGs9di7fzN'
     '9IKT5jGVqUxlKlOZylSmMpWpTGUqU5nKVKYylalMZSpTmcpUpjKVqUxlKlOZylSmMpWpTGUqU5nKVKYylalMZSpTmcpUpjKVqUxl'
     'KlOZylSmMpWpTGUqU5nKVKYylRWX/x85AmYFJTwMeQAAAABJRU5ErkJggg==';
-Uint8List get f3face19Bytes => base64Decode(_face19B64);
+final Uint8List f3face19Bytes = base64Decode(_face19B64);
 
 // character 20.
 const String _face20B64 =
@@ -11971,7 +11971,7 @@ const String _face20B64 =
     'knpQAJYgwcyDgyfu95aqztdzxPmkSry1VaiuESHCuxXiZT3iEz9y8QMCryBoETKEc28QVhaG/0Rcxy1gd23fvNnOMpf/+rn/wXI9'
     'O38pgwKwjBgd5Wyy+LCVuayDG5AVy3um9oFXcQizyh738j3N12YH8Aw9BEEQBEEQBEEQBEEQBEEQBEEQBEEQBEGQ1PEaTgv0o7dW'
     'fiIAAAAASUVORK5CYII=';
-Uint8List get f3face20Bytes => base64Decode(_face20B64);
+final Uint8List f3face20Bytes = base64Decode(_face20B64);
 
 // character 21.
 const String _face21B64 =
@@ -12598,7 +12598,7 @@ const String _face21B64 =
     'LGv324osE8DtRLQLgQ9vmpjbvvmAkfbIvmUx2Fv1JOyt1PI6ZSmsVIhcqVKpBWPKJhgl/REDMt/GVrvJTX2sPyZGM6pR7KwK7FSM'
     'MFm0WpsVf2xqFe1N4LnrMbr+Grxg76llE35ZlmVZlmVZlmVZlmVZlmVZlmVZlmVZlmVZlmVZlmVZlmVZlmVZlmVZlmVZlmVZlmVZ'
     'lmVZlmVZlmVZlmVZlmVZlmVZlmVZlmVZlmVZlmVZlmVZlmVZlmVZlmVZlmVZluWWkf8POssyiACU4vwAAAAASUVORK5CYII=';
-Uint8List get f3face21Bytes => base64Decode(_face21B64);
+final Uint8List f3face21Bytes = base64Decode(_face21B64);
 
 // character 22.
 const String _face22B64 =
@@ -13140,7 +13140,7 @@ const String _face22B64 =
     'ii6mSoivqbhV5fFbobY50HV8sBk0+xTJ3MfNdPcAC7uVv+JOLLf30888fg3zMA/zMA/zMA/zMA/zMA/zMA/zMA/zMA/zMA/zMA/z'
     'MA/zMA/zMA/zMA/zMA/zMA/zMA/zMA/zMA/zMA/zMA/zMA/zMA/zMA/zMA/zMA/zMA/zMA/zMA/zMA/zMA/zMA/zsOnh/weINQOR'
     'iT9XkwAAAABJRU5ErkJggg==';
-Uint8List get f3face22Bytes => base64Decode(_face22B64);
+final Uint8List f3face22Bytes = base64Decode(_face22B64);
 
 // character 23.
 const String _face23B64 =
@@ -13661,7 +13661,7 @@ const String _face23B64 =
     'Y4oYRovKVudWZTxU7zyrVidNoM/jCujbFc63lSVtU065zYoy1nLRX88YWd/pj9yFeRPr6DVHT2AoQxnKUIYylKEMZShDGcpQhjKU'
     'oQxlKEMZylCGMpShDGUoQxnKUIYylKEMZShDGcpQhjKUoQxlKEMZylCGMpShDGUoQxnKUIYylKEMZShDGcpQhjKUoQxlKHMu/x8S'
     'X8Ev/S3dBQAAAABJRU5ErkJggg==';
-Uint8List get f3face23Bytes => base64Decode(_face23B64);
+final Uint8List f3face23Bytes = base64Decode(_face23B64);
 
 // character 24.
 const String _face24B64 =
@@ -14165,7 +14165,7 @@ const String _face24B64 =
     'XImS1pSid5gEh+WS+ZdKGFgq5fFCaT5I7aFYIosvpoIWyrxxqd63SYKGmT5EPQkVZUFCMixtl2MO26WCv0XmbZfldhJaW9Aqt4iK'
     'NkmP/I3A9I3oLb4TIzu34dVHTQ8l+pCGNKQhDWlIQxrSkIY0pCENaUhDGtKQhjSkIQ1pSEMa0pCGNKQhDWlIQxrSkIY0pCENaUhD'
     'GtKQhjSkIQ1pSEMa0pCGNKQhDWlIQxrSkIY0pCENaUhDGtLg6P8DDzn4EYqvyhsAAAAASUVORK5CYII=';
-Uint8List get f3face24Bytes => base64Decode(_face24B64);
+final Uint8List f3face24Bytes = base64Decode(_face24B64);
 
 // character 25.
 const String _face25B64 =
@@ -14745,7 +14745,7 @@ const String _face25B64 =
     '6xTu1yuzYA1xNc/Ec/Y9Wq6ryozpTRriiQLystIiltR2QUnyPYpK9lSMnSrX1loDvqm2YTK4D2uWH6ZfPnMZszALszALszALszAL'
     'szALszALszALszALszALszALszALszALszALszALszALszALszALszALszALszALszALszALszALszALszALszALszALszALszAL'
     'szALszALszALs7Dq4f8HsQN3Qsrx8rUAAAAASUVORK5CYII=';
-Uint8List get f3face25Bytes => base64Decode(_face25B64);
+final Uint8List f3face25Bytes = base64Decode(_face25B64);
 
 // character 26.
 const String _face26B64 =
@@ -15329,7 +15329,7 @@ const String _face26B64 =
     'asakUf2PCsjLijyW1H6vkuR7FJXsqRg7Var7aw34ptqGyeAuLCw/QL985jJmYRZmYRZmYRZmYRZmYRZmYRZmYRZmYRZmYRZmYRZm'
     'YRZmYRZmYRZmYRZmYRZmYRZmYRZmYRZmYRZmYRZmYRZmYRZmYRZmYRZmYRZmYRZmYRZmYRZmYRZmYRZmYRZmYRZmYc3D/w9hREkC'
     'OZcbKAAAAABJRU5ErkJggg==';
-Uint8List get f3face26Bytes => base64Decode(_face26B64);
+final Uint8List f3face26Bytes = base64Decode(_face26B64);
 
 // character 27.
 const String _face27B64 =
@@ -15919,7 +15919,7 @@ const String _face27B64 =
     'QrtcgUrsJ9/u/pI9LEUhFklcWCxzTUgFHof6wL0gO2eWtvLGzyDqSnYxI9dTMt8Oea0d0npvlUG5DSiVwhf3ourcBdHdSK88pouR'
     'jGQkIxnJSEYykpGMZCQjGclIRjKSkYxkJCMZyUhGMpKRjGQkIxnJSEYykpGMZCQjGclIRjKSkYxkJCMZyUhGMpKRjGQkIxnJSEYy'
     'kpGMZCQjGclIRjKSkSy4/P/DYwvyKdR7PgAAAABJRU5ErkJggg==';
-Uint8List get f3face27Bytes => base64Decode(_face27B64);
+final Uint8List f3face27Bytes = base64Decode(_face27B64);
 
 // character 28.
 const String _face28B64 =
@@ -16524,7 +16524,7 @@ const String _face28B64 =
     '0/3vp4Pbjr2HYzIH/+fCBPc8Fd3603qz/njbbi416K2JiX3OAWSod5MVuhl5jlrw30XU3tw3zfW2Sb1v2o2u23nwVZ/DdtpO22k7'
     'bafttJ2203baTttpO22n7bSdttN22k7baTttp+20nbbTdtpO22k7bafttJ2203baTttpOz3U6f8HFzHuIPFIrFkAAAAASUVORK5C'
     'YII=';
-Uint8List get f3face28Bytes => base64Decode(_face28B64);
+final Uint8List f3face28Bytes = base64Decode(_face28B64);
 
 // character 29.
 const String _face29B64 =
@@ -17098,7 +17098,7 @@ const String _face29B64 =
     '7lbycq5ohZ8lcD9bmPxDjGeDnPEB3d2O51mmIvxFyXghgDwhrIhxsR4VvvyIoJKRjGOTyLUml4Avs/UoWisxNLGWvfHQCfSlL33p'
     'S1/60pe+9KUvfelLX/rSl770pS996Utf+tKXvvSlL33pS1/60pe+9KUvfelLX/rSl770pS996Utf+tKXvvSlL33pS1/60pe+9KUv'
     'felLX/rSl770Zcbl/wdfnZJy6HqngQAAAABJRU5ErkJggg==';
-Uint8List get f3face29Bytes => base64Decode(_face29B64);
+final Uint8List f3face29Bytes = base64Decode(_face29B64);
 
 // character 30.
 const String _face30B64 =
@@ -17588,7 +17588,7 @@ const String _face30B64 =
     'gSeMZh83in6sqNU2dypDoazfZa6nLE6hzzupoOonr7abCMP2goothi82cNHfxBjdNNIfvQsTUxvpDcdNYShDGcpQhjKUoQxlKEMZ'
     'ylCGMpShDGUoQxnKUIYylKEMZShDGcpQhjKUoQxlKEMZylCGMpShDGUoQxnKUIYylKEMZShDGcpQhjKUoQxlKEMZylCGMpShDGUo'
     '8y7/P2Zdi1Zdqoi3AAAAAElFTkSuQmCC';
-Uint8List get f3face30Bytes => base64Decode(_face30B64);
+final Uint8List f3face30Bytes = base64Decode(_face30B64);
 
 // character 31.
 const String _face31B64 =
@@ -18117,7 +18117,7 @@ const String _face31B64 =
     'cAja5Ur0xWr5dtdI62EZCrFE8sIE1CdvSH1BVaivXbhxtPCdEohmpHUxLdeTMt9Oea2dUnvfI4Nym1BKwKPYin5nA8TMZnrN8TMY'
     'ylCGMpShDGUoQxnKUIYylKEMZShDGcpQhjKUoQxlKEMZylCGMpShDGUoQxnKUIYylKEMZShDGcpQhjKUoQxlKEMZylCGMpShDGUo'
     'QxnKUIYylKEMZShDGcq8y/8fF4dd9oH2JtgAAAAASUVORK5CYII=';
-Uint8List get f3face31Bytes => base64Decode(_face31B64);
+final Uint8List f3face31Bytes = base64Decode(_face31B64);
 
 // character 32.
 const String _face32B64 =
@@ -18638,7 +18638,7 @@ const String _face32B64 =
     'XVkUurNAvyLRl0CellbElFxPSE2+XVLJ9kJgi8x1X6kAXxUb0R9Zh0XT99PrjprGUIYylKEMZShDGcpQhjKUoQxlKEMZylCGMpSh'
     'DGUoQxnKUIYylKEMZShDGcpQhjKUoQxlKEMZylCGMpShDGUoQxnKUIYylKEMZShDGcpQhjKUoQxlKEMZylDmXP5/+5dy4Bnkwo4A'
     'AAAASUVORK5CYII=';
-Uint8List get f3face32Bytes => base64Decode(_face32B64);
+final Uint8List f3face32Bytes = base64Decode(_face32B64);
 
 // character 33.
 const String _face33B64 =
@@ -19237,7 +19237,7 @@ const String _face33B64 =
     'kgSOQLfciEpslm93i9Qe1qEQc5IX1shUMxLAA6ivXApy62jhJyUQLUvtYkmeF2S6eZnXvJTeu6RR7k6UCvDFDlS9WyCW76JfPWUZ'
     'Uzd1Uzd1Uzd1Uzd1Uzd1Uzd1Uzd1Uzd1Uzd1Uzd1Uzd1Uzd1Uzd1Uzd1Uzd1Uzd1Uzd1Uzd1Uzd1Uzd1Uzd1Uzd1Uzd1Uzd1Uzd1'
     'Uzd1Uzd1Uzd1Uzd1Uzd1Uzd1Uzd1U7fq7v8HdNX8M14QICgAAAAASUVORK5CYII=';
-Uint8List get f3face33Bytes => base64Decode(_face33B64);
+final Uint8List f3face33Bytes = base64Decode(_face33B64);
 
 // character 34.
 const String _face34B64 =
@@ -19828,7 +19828,7 @@ const String _face34B64 =
     '0xSq7vphtXB8tyjXVUJskD3kR9VitLpAuUKSwUpJBjNSsk9LNX+q0Pq6/v41av3lVD0goS/TLEqIq09ezUlPw1xBxW7JF1tFUW0X'
     '6G3vVr3NmOlvozec0cckTMIkTMIkTMIkTMIkTMIkTMIkTMIkTMIkTMIkTMIkTMIkTMIkTMIkTMIkTMIkTMIkTMIkTMIkTMIkTMIk'
     'TMIkTMIkTMIkTMIkTMIkTMIkTMIkTMIkTMIkTMIkTMIkTMIkLHv4/5k7uiX57G9IAAAAAElFTkSuQmCC';
-Uint8List get f3face34Bytes => base64Decode(_face34B64);
+final Uint8List f3face34Bytes = base64Decode(_face34B64);
 
 // character 35.
 const String _face35B64 =
@@ -20425,7 +20425,7 @@ const String _face35B64 =
     'lwB2Y5H9ETDnrr6xzcnsNGGzqxU2TeB8Spbl0wRgpwhS6BFEUFfOOdOqXLRSaLZgTPZdbginoiEU/ZA4tCllbFCcv1kcWyvM/LXY'
     'e8Fgt5ttV7rSla50pStd6UpXutKVrnSlK13pSle60pWudKUrXelKV7rSla50pStd6UpXutKVrnSlK13pSle60pWudKUrXelKV7rS'
     'la50pStd6UpXutKVrnSlK13pyo6V/w+1J9meHHeuogAAAABJRU5ErkJggg==';
-Uint8List get f3face35Bytes => base64Decode(_face35B64);
+final Uint8List f3face35Bytes = base64Decode(_face35B64);
 
 // character 36.
 const String _face36B64 =
@@ -20942,7 +20942,7 @@ const String _face36B64 =
     'p9xXG2p2O+nY5XT9nROiO8ZNcwda+hpOHH0Nzzpn9d78Dv08zMM8zMM8zMM8zMM8zMM8zMM8zMM8zMM8zMM8zMM8zMM8zMM8zMM8'
     'zMM8zMM8zMM8zMM8zMM8zMM8zMM8zMM8zMM8zMM8zMM8zMM8zMM8zMM8zMM8zMM8zMM8zMM8zMOhDP8/v3tPzLMniyoAAAAASUVO'
     'RK5CYII=';
-Uint8List get f3face36Bytes => base64Decode(_face36B64);
+final Uint8List f3face36Bytes = base64Decode(_face36B64);
 
 // character 37.
 const String _face37B64 =
@@ -21467,7 +21467,7 @@ const String _face37B64 =
     'BsPvsWHVw7vKhzN2dekRwC4i/JL7+lA057eL4b2aWT6v4HyB6CHfreSd2RnyGcJqENYDHxCavV8o+r5MqW35LSxhSKg50FX/4ygK'
     'PsIyJj95NSQiDEMZyzYKvljNs2ItR2tts2itxMDoGvaug0fRk570pCc96UlPetKTnvSkJz3pSU960pOe9KQnPelJT3rSk570pCc9'
     '6UlPetKTnvSkJz3pSU960pOe9KQnPelJT3rSk570pCc96UlPetKTnvSkJz3pSU960pNJl/8fqmadK/pDZhwAAAAASUVORK5CYII=';
-Uint8List get f3face37Bytes => base64Decode(_face37B64);
+final Uint8List f3face37Bytes = base64Decode(_face37B64);
 
 // character 38.
 const String _face38B64 =
@@ -22098,7 +22098,7 @@ const String _face38B64 =
     'C3CZ6upY2/JSNaiOKKVjP1fNwQHmDip/xV4s1gfoXZesq/99FmZhFmZhFmZhFmZhFmZhFmZhFmZhFmZhFmZhFmZhFmZhFmZhFmZh'
     'FmZhFmZhFmZhFmZhFmZhFmZhFmZhFmZhFmZhFmZhFmZhFmZhFmZhFmZhFmZhFmZhFmZhFmZhFmZhFsrh/wXSOyINBCR9vAAAAABJ'
     'RU5ErkJggg==';
-Uint8List get f3face38Bytes => base64Decode(_face38B64);
+final Uint8List f3face38Bytes = base64Decode(_face38B64);
 
 // character 39.
 const String _face39B64 =
@@ -22650,7 +22650,7 @@ const String _face39B64 =
     '3FJHquvM0wriuxQmdirPwk6lxbcpoG/qdGlzr662jE2M3wKe3UwvPWG//9Wbkqx/Ea9Qo7JHD+ZwD/Xw6+oKswoFm8fGcSM24+b1'
     'H/v5BvxIRjKSkYxkJCMZyUhGMpKRjGQkIxnJSEYykpGMZCQjGclIRjKSkYxkJCMZyUhGMpKRjGQkIxnJSEYykpGMZCQjGclIRjKS'
     'kYxkJCMZyUhGMpKRjGQkI9n/5f8Hmnrk4Pu9NUoAAAAASUVORK5CYII=';
-Uint8List get f3face39Bytes => base64Decode(_face39B64);
+final Uint8List f3face39Bytes = base64Decode(_face39B64);
 
 // character 40.
 const String _face40B64 =
@@ -23339,7 +23339,7 @@ const String _face40B64 =
     'hbxtNctokcXsEHc63iaWzsRQm+H5iinoj6bxuve3YRVC0HzppntOY43uuSzrTsaYTXIJaPDHq2VigC5y7wRwhkXx6wnE+xsbzjyA'
     'mzalEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQELBK8D8ifd7F'
     'fQiaEgAAAABJRU5ErkJggg==';
-Uint8List get f3face40Bytes => base64Decode(_face40B64);
+final Uint8List f3face40Bytes = base64Decode(_face40B64);
 
 // character 41.
 const String _face41B64 =
@@ -23896,7 +23896,7 @@ const String _face41B64 =
     'w6//NNHc99qenLanGQv8/jpWoP8OmgPfhwMOeg/96n2ux0T2qkwIYCKdor+IhLVPOxXDW5+I4Y5HgneegdG21Wg1GeguwtBuyVr9'
     'QHx12PXtGw16/Xnu1YoHVquhh5kvo3/AJzG15qP0/Pv9FBO5w2RCABNZsvCG701jTXOyIoH7ghbuiXZ4DDA6Cjxcp/oQq+3YHbSy'
     'V+yg30DqKYdC/1oF+KvQm/mBiv4ebjnl8slHOvcd+f8BKySDPCthx+oAAAAASUVORK5CYII=';
-Uint8List get f3face41Bytes => base64Decode(_face41B64);
+final Uint8List f3face41Bytes = base64Decode(_face41B64);
 
 // character 42.
 const String _face42B64 =
@@ -24508,7 +24508,7 @@ const String _face42B64 =
     'VeueQ5swPVRgtEO6Z40smO4M0YQoRkfrzrSoh2imM0Sl+q7UzFBVUbdTVqVsoiP9FZ6iFh3VLlkXVQ/dulsINd1HjbquRNGp0Jup'
     'h4aGTRNdpQYy9EvUVPY6otNVg/prNdVN1ZWWgPpmtUR7d0T+MmpCe8kw5RaUdDemR6+l1a+cwoIsyIIsyIIsyIIsyIIsyIIsyIIs'
     'yIIsyIIsyIIsyIIsyIIsyIIsyIIsyIIsSLv8f90kgnqxPJs4AAAAAElFTkSuQmCC';
-Uint8List get f3face42Bytes => base64Decode(_face42B64);
+final Uint8List f3face42Bytes = base64Decode(_face42B64);
 
 // character 43.
 const String _face43B64 =
@@ -25031,7 +25031,7 @@ const String _face43B64 =
     'Hygfznigy4AAHiAiPnjjCHpDyzq98QOGqtbSnhDL5Qj5XrXoLqrQmi+tBmk9iDGp4Ueloh+ptNoW6guYqPU70PX44yR6YoIqUp+8'
     '2iIjDVsqqjZKvlgjqt46geF1Q73huzE2uZZec9QkBjKQgQxkIAMZyEAGMpCBDGQgAxnIQAYykIEMZCADGchABjKQgQxkIAMZyEAG'
     'MpCBDGQgAxnIQAYykIEMZCADGchABjKQgQxkIAMZyEAGMpCBDGQgAxnIQAYy5/L/AaDFjVCfu9XfAAAAAElFTkSuQmCC';
-Uint8List get f3face43Bytes => base64Decode(_face43B64);
+final Uint8List f3face43Bytes = base64Decode(_face43B64);
 
 // character 44.
 const String _face44B64 =
@@ -25526,7 +25526,7 @@ const String _face44B64 =
     '+KzLJjHo7TM32HZwr+isGTCvNTPk+5bcX1Wgs8IQxV4GvcuoU0wZYpgsaludO7XxUL/zrF63PIMBTxugbzU431KWtMU45e40lLGe'
     'i8FtjInbeoOJG7FsZgO94ugZjGUsYxnLWMYylrGMZSxjGctYxjKWsYxlLGMZy1jGMpaxjGUsYxnLWMYylrGMZSxjGctYxjKWsYxl'
     'LGMZy1jGMpaxjGUsYxnLWMYylrGMZSxjGctYxjKWsYxlyeX/A3jQ7oO3JAKMAAAAAElFTkSuQmCC';
-Uint8List get f3face44Bytes => base64Decode(_face44B64);
+final Uint8List f3face44Bytes = base64Decode(_face44B64);
 
 // character 45.
 const String _face45B64 =
@@ -25988,7 +25988,7 @@ const String _face45B64 =
     'NW6341nTg7pbg2y7tcgOyMc6q+Jodz7cjeUPdVRyqGHc2cW6edYDvm1uw3LzBuw/dgu97OHHsJa1rGUta1nLWtaylrWsZS1rWcta'
     '1rKWtaxlLWtZy1rWspa1rGUta1nLWtaylrWsZS1rWcta1rKWtaxlLWtZy1rWspa1rGUta1nLWtaylrWsZS1rWcta1rKWPZf/H2wA'
     'tMrbaWxnAAAAAElFTkSuQmCC';
-Uint8List get f3face45Bytes => base64Decode(_face45B64);
+final Uint8List f3face45Bytes = base64Decode(_face45B64);
 
 // character 46.
 const String _face46B64 =
@@ -26469,7 +26469,7 @@ const String _face46B64 =
     'EuoUk4ZAJoraVudObTzUX0Gt1y1Po89TBujbDc63lSVtM065Ow1lbOSiv5kxvnmsP34LlkxvolcdO42RjGQkIxnJSEYykpGMZCQj'
     'GclIRjKSkYxkJCMZyUhGMpKRjGQkIxnJSEYykpGMZCQjGclIRjKSkYxkJCMZyUhGMpKRjGQkIxnJSEYykpGMZCQjGclIRjKSkSy6'
     '/P9RmsccR1Jq7QAAAABJRU5ErkJggg==';
-Uint8List get f3face46Bytes => base64Decode(_face46B64);
+final Uint8List f3face46Bytes = base64Decode(_face46B64);
 
 // character 47.
 const String _face47B64 =
@@ -27052,7 +27052,7 @@ const String _face47B64 =
     'SRhzEuozEuTTdS2mCyp2y1RbJdFsF+ht71a9LZia30a/eeo8xmEcxmEcxmEcxmEcxmEcxmEcxmEcxmEcxmEcxmEcxmEcxmEcxmEc'
     'xmEcxmEcxmEcxmEcxmEcxmEcxmEcxmEcxmEcxmEcxmEcxmEcxmEcxmEcxmEcxmEcxmEcxmEcxmEcxmHJw/8PihWFrg0Z7wAAAAAA'
     'SUVORK5CYII=';
-Uint8List get f3face47Bytes => base64Decode(_face47B64);
+final Uint8List f3face47Bytes = base64Decode(_face47B64);
 
 // character 48.
 const String _face48B64 =
@@ -27577,7 +27577,7 @@ const String _face48B64 =
     'a2WvS7vIl7trTfUyqbQvlny/RDoQJiTzjkugGDM6OrUq5TIkM1VRMvK01CKm5HGLlOSbJZRsrggbZK7bWkIyfF2tQ290DSambxev'
     'PWQaQxrSkIY0pCENaUhDGtKQhjSkIQ1pSEMa0pCGNKQhDWlIQxrSkIY0pCENaUhDGtKQhjSkIQ1pSEMa0pCGNKQhDWlIQxrSkIY0'
     'pCENaUhDGtKQhjSkIQ1pSENacPr/iqeQkNXNnEwAAAAASUVORK5CYII=';
-Uint8List get f3face48Bytes => base64Decode(_face48B64);
+final Uint8List f3face48Bytes = base64Decode(_face48B64);
 
 // character 49.
 const String _face49B64 =
@@ -28086,7 +28086,7 @@ const String _face49B64 =
     'uazUtmjog8kuSJiQhDEuIT4qtfmWshRbCio2ylz3S6JZLzC0vtUdugtzJ9bRmw6ewEAGMpCBDGQgAxnIQAYykIEMZCADGchABjKQ'
     'gQxkIAMZyEAGMpCBDGQgAxnIQAYykIEMZCADGchABjKQgQxkIAMZyEAGMpCBDGQgAxnIQAYykIEMZCADGchAZl3+P4ABMmofgQ3X'
     'AAAAAElFTkSuQmCC';
-Uint8List get f3face49Bytes => base64Decode(_face49B64);
+final Uint8List f3face49Bytes = base64Decode(_face49B64);
 
 // Every character, in pick order.
 final List<Uint8List> faces3dAll = [
@@ -28145,5 +28145,5 @@ final List<Uint8List> faces3dAll = [
 // The two faces of the blinking SOS mood face: eyes open (the calm grin)
 // and eyes closed (the happy squint), so the blink is a crossfade between
 // two 3D renders.
-Uint8List get f3faceOpenBytes => f3face00Bytes;
-Uint8List get f3faceClosedBytes => f3face13Bytes;
+final Uint8List f3faceOpenBytes = f3face00Bytes;
+final Uint8List f3faceClosedBytes = f3face13Bytes;

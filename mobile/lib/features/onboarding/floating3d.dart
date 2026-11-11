@@ -372,7 +372,7 @@ const String _f3dsirenB64 =
     'a2/4fr1rbkT6G3utCPJQguYGrrXvAJuzzV94p7im5XPuWGuNk0a9s9acXTluUBr/P5a3DYduULLnO5sLXGi7gzBURLbqUms8YmNU'
     'fjdUkKa4ho/ZetWZBo5PO/jzOz4Nj0OVKlWqVKlSpUqVKlWqVKlSpUqVKlWqVKlSpUqVKlWqVKlSpUqVKlWqVKlSpUqVKlWqVKlS'
     'pUqVKlWqVKlSpUqVKlWqVKlSpcotIP8X+Vbc/eEXOcQAAAAASUVORK5CYII=';
-Uint8List get f3dsirenBytes => base64Decode(_f3dsirenB64);
+final Uint8List f3dsirenBytes = base64Decode(_f3dsirenB64);
 
 // the alert bell.
 const String _f3dbellB64 =
@@ -721,7 +721,7 @@ const String _f3dbellB64 =
     'AW4kEEG/XLgDfnfCG5s98C81i63/hza2/j3ziT849cEP/mfe3m5plrWTmQCOici737316TuWj9uj5WM3uH0UNfLQhvkho/aXO3mx'
     '+ZfSNLc3G1sfvf50+2F+4Qv3aJZZZplllllmmWWWWWaZZZZZZplllllmmWWWWWaZZZZZZplllllmmWWWWWaZZZZZZplllllmmWWW'
     'WWaZZZZZZplllllmmWWWWWaZZZZZZplllisu/z/E0EertidBowAAAABJRU5ErkJggg==';
-Uint8List get f3dbellBytes => base64Decode(_f3dbellB64);
+final Uint8List f3dbellBytes = base64Decode(_f3dbellB64);
 
 // the protection shield.
 const String _f3dshieldB64 =
@@ -1126,7 +1126,7 @@ const String _f3dshieldB64 =
     'nP5TvjX5xx2/cuo+6GjDUQcAHXH6+FU/3hxHkxNHk9FRFBC2IeIiddmldBtjQlaLItoZxcmDvWH/zvt/vOvOK9999hQ66qijjjrq'
     'qKOOOuqoo4466qijjjrqqKOOOuqoo4466qijjjrqqKOOOuqoo4466qijjjrqqKOOOuqoo4466qijjjrqqKOOOuqoo4466qijjjo6'
     '4PT/Azi4u69sAMkoAAAAAElFTkSuQmCC';
-Uint8List get f3dshieldBytes => base64Decode(_f3dshieldB64);
+final Uint8List f3dshieldBytes = base64Decode(_f3dshieldB64);
 
 // the location pin.
 const String _f3dpinB64 =
@@ -1371,7 +1371,7 @@ const String _f3dpinB64 =
     'jqMrB5cOn68U/2eV7L9a5QIPqYz/SNQVVUJJw6h+ZDwaXy2w/sALDr3wi+e+CbehYO5RBGDBcPTXP70iHx09W8X5l2AN51ZCKAEY'
     '3y6W6TNNdeLXj/x8sfoFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUF'
     'BQUFTyX+K1mnctlJfn7QAAAAAElFTkSuQmCC';
-Uint8List get f3dpinBytes => base64Decode(_f3dpinB64);
+final Uint8List f3dpinBytes = base64Decode(_f3dpinB64);
 
 // a happy face.
 const String _f3dgrinB64 =
@@ -1892,7 +1892,7 @@ const String _f3dgrinB64 =
     '0OsP5Vea365OmlSEMaGgvkuBfGdZ8s6Cim0q1QZFNJsYw5uGesPrMDa5kV550iQGMpCBDGQgAxnIQAYykIEMZCADGchABjKQgQxk'
     'IAMZyEAGMpCBDGQgAxnIQAYykIEMZCADGchABjKQgQxkIAMZyEAGMpCBDGQgAxnIQAYykIEMZCADGchABjLn8v8DeUQ3FE0SS+YA'
     'AAAASUVORK5CYII=';
-Uint8List get f3dgrinBytes => base64Decode(_f3dgrinB64);
+final Uint8List f3dgrinBytes = base64Decode(_f3dgrinB64);
 
 // a calm face.
 const String _f3dsmileB64 =
@@ -2428,7 +2428,7 @@ const String _f3dsmileB64 =
     'VepouSNeVnDfpzwM+xRX7FGa/A5upncxRncNp5NbsdTuolecu4q5zGUuc5nLXOYyl7nMZS5zmctc5jKXucxlLnOZy1zmMpe5zGUu'
     'c5nLXOYyl7nMZS5zmctc5jKXucxlLnOZy1zmMpe5zGUuc5nLXOYyl7nMZS5zmctc5jKXuWy6/H8eSo/CjBx/1wAAAABJRU5ErkJg'
     'gg==';
-Uint8List get f3dsmileBytes => base64Decode(_f3dsmileB64);
+final Uint8List f3dsmileBytes = base64Decode(_f3dsmileB64);
 
 // a glowing star (the success accent).
 const String _f3dstarB64 =
@@ -2808,7 +2808,7 @@ const String _f3dstarB64 =
     '3Il0VCFt9o88KGX7Q/s++LyP48aNEhrMezQEsMCw6cKz2yNjTx6GKNcpA2C5EJluuqO0ttX3QmBsBJw0FCQUSuLVnwrwSyXuQvct'
     'MHlzQVtyKe4cz1becOg5n+hBgwYNGjRo0KBBgwYNGjRo0KBBgwYNGjRo0KBBgwYNGjRo0KBBgwYNGjRo0KBBgwYNGjRo0KBBgwYN'
     'GjRo0KBBgwYNGjRo0KBBg1nD/wP3URqLBCRdGQAAAABJRU5ErkJggg==';
-Uint8List get f3dstarBytes => base64Decode(_f3dstarB64);
+final Uint8List f3dstarBytes = base64Decode(_f3dstarB64);
 
 /// The floating element system, shared by the sign-up steps and the
 /// permissions panel: one 3D item widget (bob, tilt, ground shadow), the

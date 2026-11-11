@@ -248,9 +248,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                       width: 240,
                                       height: 240,
                                       child: Stack(children: [
-                                        Image.memory(f3faceOpenBytes, fit: BoxFit.contain, filterQuality: FilterQuality.high),
+                                        Image.memory(f3faceOpenBytes, width: 240, height: 240, fit: BoxFit.contain, filterQuality: FilterQuality.high, gaplessPlayback: true),
                                         if (blinkV > 0)
-                                          Opacity(opacity: blinkV, child: Image.memory(f3faceClosedBytes, fit: BoxFit.contain, filterQuality: FilterQuality.high)),
+                                          Opacity(opacity: blinkV, child: Image.memory(f3faceClosedBytes, width: 240, height: 240, fit: BoxFit.contain, filterQuality: FilterQuality.high, gaplessPlayback: true)),
                                       ]),
                                     ),
                                   ),
