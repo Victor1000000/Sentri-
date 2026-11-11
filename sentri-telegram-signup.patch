@@ -1,0 +1,14 @@
+diff --git a/mobile/lib/features/onboarding/onboarding_screens.dart b/mobile/lib/features/onboarding/onboarding_screens.dart
+--- a/mobile/lib/features/onboarding/onboarding_screens.dart
++++ b/mobile/lib/features/onboarding/onboarding_screens.dart
+@@ -240,6 +240,10 @@
+     );
+   }
+ }
++
++/// Three-item bands for the sign-up steps, mirroring the welcome field's cast.
++
++class _OtpStep extends StatefulWidget {
+   const _OtpStep({required this.c, required this.i18n});
+   final OnboardingController c;
+   final I18n i18n;
