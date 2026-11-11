@@ -261,9 +261,41 @@ class MoodFacePainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final r = size.shortestSide / 2;
     final c = Offset(size.width / 2, size.height / 2);
+    // -- the light layer: a soft key light from the top-left and a shade
+    // pooling low-right, clipped to the rounded card so nothing spills past
+    // its corners. It gives the flat colour volume — the face sits on a lit
+    // surface instead of a flat fill.
+    canvas.save();
+    canvas.clipRRect(RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(28)));
+    final wash = Offset.zero & size;
+    canvas.drawRect(wash, Paint()
+      ..shader = RadialGradient(
+        center: const Alignment(-0.55, -0.7),
+        radius: 1.15,
+        colors: [Colors.white.withValues(alpha: 0.10), Colors.white.withValues(alpha: 0)],
+      ).createShader(wash));
+    canvas.drawRect(wash, Paint()
+      ..shader = RadialGradient(
+        center: const Alignment(0.7, 0.85),
+        radius: 1.25,
+        colors: [Colors.black.withValues(alpha: 0.14), Colors.black.withValues(alpha: 0)],
+      ).createShader(wash));
+    // Two faint cheek glows where the light would catch, just under the eyes.
+    for (final side in [-1.0, 1.0]) {
+      final glowC = Offset(c.dx + side * r * 0.46, c.dy + r * 0.04);
+      final glowR = r * 0.30;
+      canvas.drawCircle(glowC, glowR, Paint()
+        ..shader = RadialGradient(
+          colors: [Colors.white.withValues(alpha: 0.12), Colors.white.withValues(alpha: 0)],
+        ).createShader(Rect.fromCircle(center: glowC, radius: glowR)));
+    }
+    canvas.restore();
+
     final eye = Paint()..color = ink;
     // Two big eyes: vertical rounded bars, sitting on the upper half like the reference.
-    // They stretch a touch while holding, and shut smoothly on a blink.
+    // They stretch a touch while holding, and shut smoothly on a blink. Each open
+    // eye gets a soft drop shadow and a small white glint — the spark that makes
+    // it feel alive; both vanish with the lid on a blink.
     final stretch = 1.0 + 0.25 * hold;
     for (final side in [-1.0, 1.0]) {
       final ex = c.dx + side * r * 0.40;
@@ -275,28 +307,60 @@ class MoodFacePainter extends CustomPainter {
         Rect.fromCenter(center: Offset(ex, ey), width: ew * 2, height: eh * 2),
         Radius.circular(ew),
       );
+      // The shadow each eye casts, blurred, a touch low and toward the light.
+      canvas.drawRRect(rect.shift(Offset(r * 0.02, r * 0.035)), Paint()
+        ..color = Colors.black.withValues(alpha: 0.18)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3));
       canvas.drawRRect(rect, eye);
+      // The glint: a bright dot high on the eye, only while it is open.
+      if (blink < 0.5) {
+        canvas.drawCircle(
+          Offset(ex - ew * 0.35, ey - eh * 0.45),
+          ew * 0.30,
+          Paint()..color = Colors.white.withValues(alpha: 0.85),
+        );
+      }
     }
     // The mouth: a wide smile when safe; while holding (or with the alert on) it
     // settles into a smirk, the right corner lifted - a knowing face, not anger.
+    // A shadow under the stroke and a thin light along its top give the line
+    // depth instead of a flat cut-out.
     final mouth = Paint()
       ..color = ink
       ..style = PaintingStyle.stroke
       ..strokeWidth = r * 0.07
       ..strokeCap = StrokeCap.round;
+    final under = Paint()
+      ..color = Colors.black.withValues(alpha: 0.16)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = r * 0.09
+      ..strokeCap = StrokeCap.round;
+    final sheen = Paint()
+      ..color = Colors.white.withValues(alpha: 0.35)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = r * 0.028
+      ..strokeCap = StrokeCap.round;
     final mw = r * 0.62;
     final my = c.dy + r * 0.26;
+    final Path line;
     if (hold < 0.5) {
-      final path = Path()
+      line = Path()
         ..moveTo(c.dx - mw / 2, my)
         ..quadraticBezierTo(c.dx, my + r * (0.30 - 0.34 * hold * 2), c.dx + mw / 2, my);
-      canvas.drawPath(path, mouth);
     } else {
       final k = (hold - 0.5) * 2;
-      final path = Path()
+      line = Path()
         ..moveTo(c.dx - mw / 2, my + r * 0.02 * k)
         ..quadraticBezierTo(c.dx + mw * 0.08, my + r * 0.08 * k, c.dx + mw / 2, my - r * 0.20 * k);
-      canvas.drawPath(path, mouth);
+    }
+    canvas.drawPath(line.shift(Offset(0, r * 0.035)), under);
+    canvas.drawPath(line, mouth);
+    // The sheen rides just above the smile while it is open wide; on the smirk
+    // it hugs the lifted corner instead.
+    if (hold < 0.5) {
+      canvas.drawPath(line.shift(Offset(0, -r * 0.05)), sheen);
+    } else {
+      canvas.drawPath(line.shift(Offset(-r * 0.02, -r * 0.045)), sheen);
     }
   }
 

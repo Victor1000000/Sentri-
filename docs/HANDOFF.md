@@ -400,3 +400,52 @@ Emoji 3D, MIT license, downloaded 2026-11-11.
   images got explicit 240×240 size + gaplessPlayback:true. Verify: in the APK the bell renders AND face25/
   face49 fragments present; look at the home screen in person for the blinking face.
 
+## 18. Version 34 (this patch) — engineer's notes
+Vic's asks after seeing the blank-ish 3D mascot: "take it back to a 2D mascot that blinks but add more light,
+shadow and highlight to make it more alive"; replace the map's discover icon completely with a reroute button
+("if the user is lost with the initial route they can just click the reroute icon so it can reroute them to
+their desired destination from their current location"); make the map voice sound as realistic as possible;
+and add occasional comfort/sarcasm voice lines while driving ("Are you enjoying the ride", "What a day", or
+better lines that make people feel safe). i18n grows 287 → 295 keys × 5 (8 new keys, all locales).
+- Home mascot is 2D again (flat.dart `MoodFacePainter`, the v26-era painter) but re-lit: paint() now first
+  clips to the 28-radius rounded card and lays a light layer — a soft white key-light wash from the top-left
+  (10% radial) and a shade pooling bottom-right (14% black radial) — plus two faint cheek glows under the
+  eyes. Each OPEN eye then draws with a blurred drop-shadow and a small white glint (both vanish with the lid
+  on a blink), and the mouth stroke gains a soft under-shadow and a thin white sheen above it (the sheen hugs
+  the lifted corner on the hold-smirk). Constructor signature unchanged — sos_screen.dart's 96 px
+  `MoodFacePainter(1, ink)` picks up the same lighting for free. home_screen.dart swaps the 3D crossfade
+  block for `CustomPaint(painter: MoodFacePainter(red, faceInk, blink: blinkV))` with `faceInk` restored
+  (0xFF101B12); the faces3d/floating3d imports drop out of home_screen. The blink still runs on the same
+  2-second controller (`_blinkValue()`), and the hold still lerps the card green↔red. faces3d.dart stays a
+  leaf (the 50 avatars + Faces3d needles unchanged).
+- Reroute on the map: `_showNearby()` (the discover sheet) is deleted; the discover FAB is replaced by
+  `_fab(Icons.alt_route, t('map.reroute'))`, disabled (greyed, null onTap) while no destination is set or a
+  route is being planned. `_reroute()` requires `_toPick != null && !_routeBusy`, bumps `_routeSeq` (any
+  directions run still in flight is dropped), clears `_fromPick`/`_fromName` (the PHONE is the start now — a
+  fresh plan from the current fix to the same destination, not a re-join of the old line), speaks
+  `map.reroute_say` when the voice is on, then calls `_planRoute()`, which already re-announces and re-arms
+  the turn stream on success. `_fetchNearby`/`_nearIcon`/`_near` stay (the map's place labels still use
+  them); `map.nearby*` keys remain in the JSONs unused-but-harmless.
+- Voice realism (features/map/step_voice.dart — NEW LEAF, replaces the old in-tree file): the engine is
+  probed ONCE at construction (`unawaited(_ensure())` warm-up; `_ensure() => _warming ??= _setup()` — a
+  single shared future, so a sentence spoken during setup can never race a second setup). `_setup` selects
+  Google's own engine (`com.google.android.tts`) when the phone has it, then picks the best installed voice
+  with a broadened `_score`: en-ng locale/name = 990-1000, "network" name/locale or enhanced/very_high
+  quality = 520, Google multi-voice-name suffixes (-tpd/-twd/-gdb/-iom/-iol) = 420, legacy quality −100,
+  en-us/en-gb +40, other en +20; a voice is only applied when it scores ≥ 40 (else the engine default
+  speaks). Rate 0.48 / pitch 1.0 / queue mode 1 unchanged. Every probe is guarded — a phone with no voice
+  list still speaks with the plain default.
+- Comfort lines while driving: `_chatTimer` (Timer.periodic, 150 s) is started at the end of `_startVoice`,
+  rotates `_chatIdx` over `map.chat_1`–`map.chat_6`, and only speaks while `_voiceOn && _route != null`.
+  Cancelled in `_toggleVoice` (voice off), `_clearRoute`, `_setMode` and `dispose`. The lines are light,
+  a bit cheeky and always reassuring ("Are you enjoying the ride? Keep it steady — I have the directions.",
+  "What a day, right? You're doing great. Eyes on the road."...). NOTE: spoken guidance strings are English
+  by design (the en-US voice reads them); the ha/ig/pcm/yo values of the 8 new keys are AI translations for
+  UI parity — same caveat as any AI-translated string.
+- i18n: `map.reroute`, `map.reroute_say`, `map.chat_1`…`map.chat_6` added after `map.mode_bike` in ALL five
+  JSONs (set-based parity holds: 295 × 5).
+- Pipeline notes: step_voice.dart joined the leaf table; check-apk20 gained `map\.reroute` + `map\.chat_1`
+  in the per-locale i18n needles and `MoodFacePainter`, `map.chat_5`, `map.reroute_say` in the libapp.so
+  findstr list. Patch payload this round is small (~1 MB; step_voice is tiny, the rest are small diffs).
+
+

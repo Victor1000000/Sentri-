@@ -125,6 +125,10 @@ class MapScreenState extends State<MapScreen> {
   int _nextStep = 0;
   StreamSubscription<Position>? _posSub;
 
+  // -- the little check-ins while driving: a calm line every so often --
+  Timer? _chatTimer;
+  int _chatIdx = 0;
+
   // -- live refinement of the own-position dot and its accuracy ring --
   StreamSubscription<GeoFix>? _refineSub;
 
@@ -165,6 +169,7 @@ class MapScreenState extends State<MapScreen> {
   @override
   void dispose() {
     _timer?.cancel();
+    _chatTimer?.cancel();
     unawaited(_posSub?.cancel());
     unawaited(_refineSub?.cancel());
     unawaited(_voice.stop());
@@ -281,43 +286,6 @@ class MapScreenState extends State<MapScreen> {
     } finally {
       _nearBusy = false;
     }
-  }
-
-  void _showNearby() {
-    final t = widget.i18n.t;
-    final cs = Theme.of(context).colorScheme;
-    final here = _fix == null ? null : LatLng(_fix!.lat, _fix!.lon);
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (ctx) => SafeArea(
-        child: _near.isEmpty
-            ? Padding(
-                padding: const EdgeInsets.all(22),
-                child: Text(t('map.nearby_none'), style: TextStyle(fontSize: 15, height: 1.35, color: cs.onSurface)),
-              )
-            : ListView.builder(
-                shrinkWrap: true,
-                itemCount: _near.length,
-                itemBuilder: (ctx, i) {
-                  final p = _near[i];
-                  final m = here == null ? null : const Distance()(here, LatLng(p.lat, p.lon)).round();
-                  return ListTile(
-                    dense: true,
-                    leading: Icon(_nearIcon(p.kind), size: 22, color: const Color(0xFF6A5FF0)),
-                    title: Text(p.name, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
-                    subtitle: Text(m == null ? p.kind : '${p.kind} - ${t('map.nearby_far', {'m': '$m'})}', style: TextStyle(fontSize: 12.5, color: cs.outline)),
-                    onTap: () {
-                      Navigator.of(ctx).pop();
-                      try {
-                        _map.move(LatLng(p.lat, p.lon), _map.camera.zoom < 17 ? 18 : _map.camera.zoom);
-                      } catch (_) {}
-                    },
-                  );
-                },
-              ),
-      ),
-    );
   }
 
   IconData _nearIcon(String kind) {
@@ -780,8 +748,27 @@ class MapScreenState extends State<MapScreen> {
   Future<void> _clearRoute() async {
     await _posSub?.cancel();
     _posSub = null;
+    _chatTimer?.cancel();
+    _chatTimer = null;
     await _voice.stop();
     if (mounted) setState(() { _route = null; _routeError = null; _routeRetry = false; _voiceOn = false; _nextStep = 0; });
+  }
+
+  /// Reroute from right here. The person has drifted off the line — missed a
+  /// turn, taken a different road on purpose, or the traffic went another way —
+  /// and one tap plans the trip again from the phone's current position to the
+  /// same destination. The voice says what is happening so the driver never
+  /// has to look at the screen.
+  Future<void> _reroute() async {
+    if (_toPick == null || _routeBusy) return;
+    if (_voiceOn) unawaited(_voice.say(widget.i18n.t('map.reroute_say')));
+    _routeSeq++; // any run of directions still in flight is irrelevant now
+    setState(() {
+      // The phone is the start now: any picked start point steps aside.
+      _fromPick = null;
+      _fromName = null;
+    });
+    await _planRoute();
   }
 
   // ---- picked points ----
@@ -828,6 +815,8 @@ class MapScreenState extends State<MapScreen> {
       _voiceOn = false;
       _nextStep = 0;
     });
+    _chatTimer?.cancel();
+    _chatTimer = null;
     unawaited(_posSub?.cancel());
     _posSub = null;
     unawaited(_voice.stop());
@@ -866,6 +855,8 @@ class MapScreenState extends State<MapScreen> {
     setState(() {
       if (_voiceOn) {
         _voiceOn = false;
+        _chatTimer?.cancel();
+        _chatTimer = null;
         unawaited(_voice.stop());
         unawaited(_posSub?.cancel());
         _posSub = null;
@@ -888,6 +879,18 @@ class MapScreenState extends State<MapScreen> {
       if (planL == null || !_voiceOn) return;
       _speakNext(planL, at: LatLng(p.latitude, p.longitude));
     }, onError: (Object _) {});
+    // The little check-ins: every two and a half minutes of driving, a calm,
+    // friendly line — light, a bit cheeky now and then, and always reassuring.
+    // It keeps the voice feeling like company on the road, not a machine.
+    _chatTimer?.cancel();
+    _chatTimer = Timer.periodic(const Duration(seconds: 150), (_) {
+      final planL = _route;
+      if (planL == null || !_voiceOn) return;
+      const keys = ['map.chat_1', 'map.chat_2', 'map.chat_3', 'map.chat_4', 'map.chat_5', 'map.chat_6'];
+      final key = keys[_chatIdx % keys.length];
+      _chatIdx++;
+      unawaited(_voice.say(widget.i18n.t(key)));
+    });
   }
 
   /// Each instruction is spoken as the maneuver point is reached.
@@ -1237,7 +1240,13 @@ class MapScreenState extends State<MapScreen> {
                 iconColor: const Color(0xFFE2574C),
               ),
               const SizedBox(height: 10),
-              _fab(context, icon: Icons.explore_outlined, label: t('map.nearby'), onTap: () => _showNearby(), iconColor: cs.onSurface),
+              _fab(
+                context,
+                icon: Icons.alt_route,
+                label: t('map.reroute'),
+                onTap: _toPick == null || _routeBusy ? null : () => unawaited(_reroute()),
+                iconColor: cs.onSurface,
+              ),
             ]),
           ),
 

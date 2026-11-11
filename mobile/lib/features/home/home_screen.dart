@@ -18,8 +18,6 @@ import '../share/share_controller.dart';
 import '../share/share_screen.dart';
 import '../../core/widgets/flat.dart';
 import '../../core/widgets/avatar_icons.dart';
-import '../../core/widgets/faces3d.dart';
-import '../onboarding/floating3d.dart';
 import '../../core/widgets/glass.dart';
 import '../checkin/checkin_controller.dart';
 import '../onboarding/permissions_panel.dart';
@@ -222,6 +220,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           // the hold animates smoothly.
                           final red = math.max(_hold.value, alarmOn ? 1.0 : 0.0);
                           final skin = Color.lerp(const Color(0xFF1E9E56), alarm, red)!;
+                          const faceInk = Color(0xFF101B12);
                           final blinkV = _blinkValue();
                           return Container(
                           margin: const EdgeInsets.symmetric(horizontal: 22),
@@ -234,27 +233,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           child: Stack(
                             fit: StackFit.expand,
                             children: [
-                              // The 3D mood face: the calm grin, and the happy
-                              // squint crossfaded in for every blink, so the
-                              // face still blinks — now in 3D. Holding stirs
-                              // it: it leans back and shakes a little, like it
-                              // just got startled.
-                              Center(
-                                child: Transform.rotate(
-                                  angle: 0.08 * math.sin(_hold.value * math.pi * 3),
-                                  child: Transform.scale(
-                                    scale: (1.0 - 0.06 * blinkV + 0.05 * _hold.value),
-                                    child: SizedBox(
-                                      width: 240,
-                                      height: 240,
-                                      child: Stack(children: [
-                                        Image.memory(f3faceOpenBytes, width: 240, height: 240, fit: BoxFit.contain, filterQuality: FilterQuality.high, gaplessPlayback: true),
-                                        if (blinkV > 0)
-                                          Opacity(opacity: blinkV, child: Image.memory(f3faceClosedBytes, width: 240, height: 240, fit: BoxFit.contain, filterQuality: FilterQuality.high, gaplessPlayback: true)),
-                                      ]),
-                                    ),
-                                  ),
-                                ),
+                              // The 2D mood face, drawn by the shared painter —
+                              // back from the 3D experiment, but now lit: a key
+                              // light and shade give the card volume, the eyes
+                              // carry shadows and glints, and the smile has
+                              // depth. It still blinks every two seconds via
+                              // [blinkV], and holding still stirs the card.
+                              CustomPaint(
+                                painter: MoodFacePainter(red, faceInk, blink: blinkV),
                               ),
                               Align(
                                 alignment: Alignment.bottomCenter,
