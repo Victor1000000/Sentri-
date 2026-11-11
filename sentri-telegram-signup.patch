@@ -1,0 +1,340 @@
+diff --git a/mobile/lib/features/inbox/inbox_screen.dart b/mobile/lib/features/inbox/inbox_screen.dart
+--- a/mobile/lib/features/inbox/inbox_screen.dart
++++ b/mobile/lib/features/inbox/inbox_screen.dart
+@@ -1,4 +1,5 @@
+ import 'dart:async';
++import 'dart:ui' show FontFeature;
+ 
+ import 'package:flutter/material.dart';
+ import 'package:flutter_map/flutter_map.dart';
+@@ -77,7 +78,9 @@
+                 child: Text(inbox.failed ? (inbox.failedAuth ? t('inbox.need_signin') : t('inbox.failed')) : t('inbox.none'), textAlign: TextAlign.center, style: TextStyle(fontSize: 15, color: Flat.muted(context))),
+               )
+             else
+-              FlatGroup(children: [for (final e in d.items) _tile(context, e)]),
++              // One rounded card per message, like the activity-feed reference:
++              // roomy discs, a time chip, a live chip - sleek, not a flat list.
++              Column(children: [for (final e in d.items) _tile(context, e)]),
+             const SizedBox(height: 22),
+             Text(t('inbox.scam_note'), style: TextStyle(fontSize: 13, height: 1.45, color: Flat.muted(context))),
+             const SizedBox(height: 18),
+@@ -90,30 +93,77 @@
+ 
+   Widget _tile(BuildContext context, InboxEntry e) {
+     final urgent = e.urgent && e.live;
+-    return InkWell(
+-      onTap: () async {
+-        await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => AlertDetailScreen(entry: e, api: api, i18n: i18n, police: police)));
+-        unawaited(inbox.refresh());
+-      },
+-      child: Padding(
+-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+-        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+-          Container(
+-            width: 38,
+-            height: 38,
+-            decoration: BoxDecoration(shape: BoxShape.circle, color: (urgent ? Flat.danger : Brand.indigo).withValues(alpha: 0.12)),
+-            child: Icon(_icon(e), size: 20, color: urgent ? Flat.danger : Brand.indigoHi),
+-          ),
+-          const SizedBox(width: 12),
+-          Expanded(
+-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+-              Text(e.text, maxLines: 3, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 15, height: 1.35, fontWeight: e.read ? FontWeight.w400 : FontWeight.w600)),
+-              const SizedBox(height: 4),
+-              Text(_ago(e.at, i18n.t), style: TextStyle(fontSize: 13, color: Flat.muted(context))),
++    return Padding(
++      padding: const EdgeInsets.only(bottom: 10),
++      child: Card(
++        child: InkWell(
++          borderRadius: BorderRadius.circular(20),
++          onTap: () async {
++            await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => AlertDetailScreen(entry: e, api: api, i18n: i18n, police: police)));
++            unawaited(inbox.refresh());
++          },
++          child: Padding(
++            padding: const EdgeInsets.all(14),
++            child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
++              // The kind of message, on a roomy disc like the reference's
++              // gradient bubbles: alarm red for live danger, indigo otherwise.
++              Container(
++                width: 46,
++                height: 46,
++                decoration: BoxDecoration(
++                  shape: BoxShape.circle,
++                  gradient: LinearGradient(
++                    begin: Alignment.topLeft,
++                    end: Alignment.bottomRight,
++                    colors: urgent
++                        ? const [Color(0xFFE4574C), Color(0xFFB3251B)]
++                        : const [Color(0xFF7B6CF0), Color(0xFF5348C8)],
++                  ),
++                ),
++                child: Icon(_icon(e), size: 22, color: Colors.white),
++              ),
++              const SizedBox(width: 12),
++              Expanded(
++                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
++                  Text(e.text, maxLines: 3, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 15, height: 1.35, fontWeight: e.read ? FontWeight.w400 : FontWeight.w600)),
++                  const SizedBox(height: 7),
++                  // The chip row: a live pill while the alert is running,
++                  // otherwise the quiet time chip from the reference boards.
++                  Row(children: [
++                    if (e.live) ...[
++                      Container(
++                        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
++                        decoration: BoxDecoration(color: Flat.live.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(999)),
++                        child: Row(mainAxisSize: MainAxisSize.min, children: [
++                          const LiveDot(size: 7),
++                          const SizedBox(width: 5),
++                          Text(t('inbox.live'), style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Flat.live)),
++                        ]),
++                      ),
++                      const SizedBox(width: 6),
++                    ],
++                    Container(
++                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
++                      decoration: BoxDecoration(color: Flat.hairline(context), borderRadius: BorderRadius.circular(999)),
++                      child: Row(mainAxisSize: MainAxisSize.min, children: [
++                        Icon(Icons.schedule, size: 12, color: Flat.muted(context)),
++                        const SizedBox(width: 4),
++                        Text(_ago(e.at, i18n.t), style: TextStyle(fontSize: 11.5, color: Flat.muted(context), fontFeatures: const [FontFeature.tabularFigures()])),
++                      ]),
++                    ),
++                  ]),
++                ]),
++              ),
++              if (!e.read) ...[
++                const SizedBox(width: 8),
++                Container(width: 9, height: 9, decoration: const BoxDecoration(shape: BoxShape.circle, color: Brand.indigoHi)),
++              ] else ...[
++                const SizedBox(width: 8),
++                Icon(Icons.check_circle_outline, size: 18, color: Flat.muted(context)),
++              ],
+             ]),
+           ),
+-          if (!e.read) Padding(padding: const EdgeInsets.only(left: 8, top: 6), child: Container(width: 9, height: 9, decoration: const BoxDecoration(shape: BoxShape.circle, color: Brand.indigoHi))),
+-        ]),
++        ),
+       ),
+     );
+   }
+diff --git a/mobile/lib/features/onboarding/onboarding_screens.dart b/mobile/lib/features/onboarding/onboarding_screens.dart
+--- a/mobile/lib/features/onboarding/onboarding_screens.dart
++++ b/mobile/lib/features/onboarding/onboarding_screens.dart
+@@ -1,10 +1,13 @@
+ import 'dart:async';
++import 'dart:math' as math;
+ 
+ import 'package:flutter/material.dart';
+ import 'package:flutter/services.dart';
+ 
+ import '../../core/i18n/i18n.dart';
++import '../../core/widgets/avatar_icons.dart';
+ import '../../core/widgets/brand.dart';
++import '../../core/widgets/flat.dart';
+ import 'onboarding_controller.dart';
+ import 'permissions_panel.dart';
+ import '../../core/platform/native_bridge.dart';
+@@ -141,27 +144,108 @@
+   }
+ 
+   @override
+-  Widget build(BuildContext context) => Column(
++  Widget build(BuildContext context) {
++    // The welcome moment, like the reference: Sentri faces and the tools of
++    // the app float above, the form sits in one soft card below.
++    return Column(
+         crossAxisAlignment: CrossAxisAlignment.stretch,
+         children: [
++          const _FloatingField(),
+           _title(context, widget.i18n.t('phone.title')),
+-          Text(widget.i18n.t('phone.help')),
+-          const SizedBox(height: 16),
+-          PillField(
+-            controller: _ctl,
+-            label: widget.i18n.t('phone.title'),
+-            keyboardType: TextInputType.phone,
+-            autofillHints: const [AutofillHints.telephoneNumber],
+-            inputFormatters: _phoneFormatters,
+-            hint: '0803 123 4567',
+-          ),
++          Text(widget.i18n.t('phone.help'), style: TextStyle(fontSize: 14, height: 1.45, color: Flat.muted(context))),
+           const SizedBox(height: 16),
+-          PillButton(
+-            onPressed: widget.c.busy ? null : () => unawaited(widget.c.submitPhone(_ctl.text)),
+-            label: widget.i18n.t('phone.send_code'),
++          Container(
++            padding: const EdgeInsets.all(16),
++            decoration: BoxDecoration(
++              color: Flat.card(context),
++              borderRadius: BorderRadius.circular(24),
++              border: Border.all(color: Flat.hairline(context)),
++              boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 14, offset: const Offset(0, 6))],
++            ),
++            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
++              PillField(
++                controller: _ctl,
++                label: widget.i18n.t('phone.title'),
++                keyboardType: TextInputType.phone,
++                autofillHints: const [AutofillHints.telephoneNumber],
++                inputFormatters: _phoneFormatters,
++                hint: '0803 123 4567',
++              ),
++              const SizedBox(height: 14),
++              PillButton(
++                onPressed: widget.c.busy ? null : () => unawaited(widget.c.submitPhone(_ctl.text)),
++                label: widget.i18n.t('phone.send_code'),
++              ),
++            ]),
+           ),
+         ],
+       );
++  }
++}
++
++/// The playful welcome field: two of the app's own Sentri faces plus the tools
++/// it is made of - the alert bell, the location pin, the shield - float and bob
++/// gently like the reference's drifting tokens. All drawn in code, no assets.
++class _FloatingField extends StatefulWidget {
++  const _FloatingField();
++  @override
++  State<_FloatingField> createState() => _FloatingFieldState();
++}
++
++class _FloatingFieldState extends State<_FloatingField> with SingleTickerProviderStateMixin {
++  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 4200))..repeat();
++
++  @override
++  void dispose() {
++    _c.dispose();
++    super.dispose();
++  }
++
++  @override
++  Widget build(BuildContext context) {
++    if (MediaQuery.of(context).disableAnimations) return const SizedBox(height: 140);
++    return SizedBox(
++      height: 158,
++      child: AnimatedBuilder(
++        animation: _c,
++        builder: (context, _) {
++          final t = _c.value;
++          Widget bob(double phase, double amp, Widget child) => Transform.translate(
++                offset: Offset(0, -amp * math.sin(2 * math.pi * (t + phase))),
++                child: child,
++              );
++          Widget tool(IconData icon, Color color, double size) => Container(
++                width: size,
++                height: size,
++                decoration: BoxDecoration(
++                  shape: BoxShape.circle,
++                  gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [color.withValues(alpha: 0.9), color]),
++                  boxShadow: [BoxShadow(color: color.withValues(alpha: 0.35), blurRadius: 12, offset: const Offset(0, 5))],
++                ),
++                child: Center(child: Icon(icon, color: Colors.white, size: size * 0.46)),
++              );
++          Widget face(int index, double size) => Container(
++                width: size,
++                height: size,
++                decoration: BoxDecoration(
++                  shape: BoxShape.circle,
++                  border: Border.all(color: Flat.card(context), width: 3),
++                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.10), blurRadius: 12, offset: const Offset(0, 5))],
++                ),
++                child: SentriAvatar(index: index, size: size),
++              );
++          return Stack(children: [
++            Positioned(left: 34, top: 22, child: bob(0.00, 8, tool(Icons.notifications_active_rounded, const Color(0xFF6A5FF0), 54))),
++            Positioned(left: 104, top: 76, child: bob(0.42, 6, tool(Icons.location_on_rounded, const Color(0xFF1E9E56), 46))),
++            Positioned(left: 10, top: 96, child: bob(0.88, 7, face(10, 46))),
++            Positioned(right: 12, top: 6, child: bob(0.20, 7, face(2, 58))),
++            Positioned(right: 86, top: 66, child: bob(0.58, 6, tool(Icons.shield_rounded, const Color(0xFFE5A33C), 44))),
++            Positioned(right: 24, top: 100, child: bob(0.74, 8, face(27, 48))),
++          ]);
++        },
++      ),
++    );
++  }
+ }
+ 
+ class _OtpStep extends StatefulWidget {
+diff --git a/docs/HANDOFF.md b/docs/HANDOFF.md
+--- a/docs/HANDOFF.md
++++ b/docs/HANDOFF.md
+@@ -304,4 +304,24 @@
+   the tab's card now just delegates.
+ - i18n untouched; no new persisted keys; `WorkoutRecord`/`AwardStore` APIs unchanged.
+ 
++## 15. Version 31 (this patch) — engineer's notes
++Vic's asks: fix the broken Yoruba in the health section, redesign the Messages screen to the activity-feed
++reference, and give sign-up the floating-elements welcome. i18n still 287 keys × 5 — VALUE EDITS ONLY.
++- Yoruba fixed: 16 lines of i18n-yo.json were double-encoded mojibake ("IbÃº okan" etc.) — heart-rate, water and
++  nearby-hospital strings plus `tabs.health` ("Ìlera"). Rewritten with proper Yoruba diacritics (ibí okan,
++  ìṣẹ́jú, pàjáwìrì...); keys untouched, parity check passes 287 × 5. No other locale carried mojibake (scanned).
++- Messages screen (`features/inbox/inbox_screen.dart` — NEW LEAF, taken from the head tree): each message is now
++  its own Card instead of a FlatGroup row — a 46 px gradient disc (danger tones for live urgent, indigo
++  otherwise), the text bold when unread, a chip row under it (a green LiveDot pill `inbox.live` while an alert
++  runs, a hairline clock chip with the `inbox.now/min/hr/day` age, tabular digits), a trailing unread dot or a
++  quiet check. Invites, scam note, test-alert button and AlertDetailScreen are untouched. No new keys.
++- Sign-up welcome (`features/onboarding/onboarding_screens.dart`): a new `_FloatingField` (stateful, one
++  repeating 4.2 s AnimationController, off under `disableAnimations`) floats two SentriAvatar faces (indices 2
++  and 27, white-ringed with a soft shadow) among three gradient tool bubbles — alert bell, location pin,
++  shield — each bobbing on its own sine phase above the phone step. The phone form itself sits in one rounded
++  24 card (hairline edge, soft shadow) wrapping the PillField + PillButton, like the reference's bottom card.
++  All text still `phone.title` / `phone.help` / `phone.send_code`.
++- Pipeline notes: inbox_screen.dart joined the leaf table; check-apk20 gained a `FloatingField` libapp.so needle
++  and a Yoruba-health check (bundled yo.json must contain the corrected `Ibí okan` and no U+00C3 mojibake).
++
+ 
+diff --git a/mobile/assets/i18n/yo.json b/mobile/assets/i18n/yo.json
+--- a/mobile/assets/i18n/yo.json
++++ b/mobile/assets/i18n/yo.json
+@@ -63,32 +63,32 @@
+   "sos.contacts_busy": "A kò lè yí àwọn olùbásọ̀rọ̀ padà nígbà tí ìkìlọ̀ bá ń ṣiṣẹ́.",
+   "tabs.home": "Ilé",
+   "tabs.map": "Máàpù",
+-  "tabs.health": "Ilera",
++  "tabs.health": "Ìlera",
+   "health.allow": "Orúkọ rẹ",
+-  "health.heart": "IbÃº okan",
+-  "health.heart_none": "IbÃº okan ko tii wa lÃ³rÃ­ fÃ³nÃ¹ yÃ¬Ã­ tukuna. TÃ³ app ilera tÃ bÃ­ irufin tÃ­ Ã³ nkÃ³ ibÃº okan sÃ­ Health Connect, ibÃº okan mÃ¡Ã  han nibi.",
++  "health.heart": "Ibí okan",
++  "health.heart_none": "Ibí okan kò tíì wà lórí fóònù yìí tukuna. Tàbí app ìlera tàbí irufin tí ó nkọ ibí okan sí Health Connect, ibí okan máà han nibi.",
+   "health.heart_perm": "Àwòrán rẹ wà ní fónù yìí. Orúkọ rẹ̀ nìkan ni a fi ránṣẹ́ pẹ̀lú ìkìlọ̀.",
+-  "health.heart_base": "IbÃº okan rere nÃ­nÃº itiÃ³n: {n} bpm. Mo ntÃ³jÃº o kÃ­ o mÃ¡Ã  ya loro.",
+-  "health.heart_watch": "Mo mÃ¡Ã  fi o leti bÃ­ ibÃº okan bÃ¡ ya gan.",
+-  "health.hr_alert_title": "IbÃº okan ráº¹ ti ga pupo",
+-  "health.hr_alert_body": "{n} bpm nisiseyi. JokoÃ³, serÃ© die. BÃ­ ibÃº okan bÃ¡ kÃºn gan leyin isinmi, lÃ³ fun iranlowo pajawiri.",
+-  "health.water": "Mimu omi mÃº",
+-  "health.water_sub": "Ã€sÃ pÃ²n tÃ­ kÃ² lilÃ©, nÃ­ Ã kÃ³kÃ² tÃ­ o yan. Yan okan isalÃ¨; fÃ³nÃ¹ yÃ³Ã² mÃ¡ mÃ³jÃº e.",
++  "health.heart_base": "Ibí okan rere nígbà ìsinmi: {n} bpm. Mo ń tójú ní ìrọ̀rùn bí ó bá kùn púpọ̀.",
++  "health.heart_watch": "Mo máà fi o léti bí ibí okan bá ya gan.",
++  "health.hr_alert_title": "Ibí okan rẹ ti ga púpọ̀",
++  "health.hr_alert_body": "{n} bpm ní ṣíṣẹ́ yìí. Jọkóò, sère díẹ̀. Bí ibí okan bá kùn gan leyin ìsinmi, lọ fún ìrànlọ́wọ́ pàjáwìrì.",
++  "health.water": "Mímu omi mú",
++  "health.water_sub": "Àṣìpọ̀n tí kò lilé ní àkókò tí o yan. Yan ọ̀kan ní isalẹ̀; fóònù yóò máa ṣe tí ó kù.",
+   "health.water_off": "Duro",
+-  "health.water_30": "IsÃ©jÃº 30",
++  "health.water_30": "Ìṣẹ́jú 30",
+   "health.water_1": "Akoko 1",
+   "health.water_2": "Akoko 2",
+   "health.water_3": "Akoko 3",
+-  "health.water_title": "Asiko lati mÃº omi mÃº",
+-  "health.water_body": "Mimu omi die die nisiseyi yo ba o tbá»sÃ¡n.",
++  "health.water_title": "Àsìkò lati mú omi mú",
++  "health.water_body": "Mímu omi díẹ̀ díẹ̀ nìṣíṣẹ́ yìí yóò ba o tọ́sàn.",
+   "health.water_ok": "Àyẹ̀wò àṣìpọ̀n ti tọ́: ní ìgbà gbogbo {n}, fóònù yìí yóò tàn lẹ́ẹ̀. Má jẹ́ kí Sentri wà nínú ìfipamọ́ bátẹ̀rì kí ó má bá tàn mọ́.",
+   "health.water_broken": "Àṣìpọ̀n yìí lè má tàn lórí fóònù yìí. Yan ìgbà náà lẹ́ẹ̀kan, gba àṣẹ ìkìlọ̀, kí o sì yọ Sentri kúrò nínú ìfipamọ́ bátẹ̀rì.",
+-  "health.hospitals": "WÃ²nÃ¬ tÃ³ soon o mÃ³",
++  "health.hospitals": "Ilé ìwòsàn nítòsí ọ",
+   "health.hosp_error": "Ètò màpì máa ń dáhùn lẹ́yọ díẹ̀ ní ìgbà yìí. A ń máa tún gbìyànjú ní abẹ́; ṣàyẹ̀wọ́ dátà rẹ, tàbí kí o fọwọ́ kàn Gbìyànjú lẹ́ẹ̀kan sí i.",
+   "health.hosp_none": "Kò tíì sí ilé ìwòsàn tí a fi sí màápì nítòsí ọ.",
+-  "health.hosp_no_phone": "Nomba fÃ³nÃ¹ kÃ² tÃ­Ã­ kÃ¡ri mÃ pÃ¬",
+-  "health.hosp_km": "NgbÃ  {n} km jinÃ¡",
+-  "health.call": "PÃ¨",
++  "health.hosp_no_phone": "Nọ́mbà fóònù kò tíì kári màpì",
++  "health.hosp_km": "Ngbà {n} km jìnà",
++  "health.call": "Pè",
+   "health.heart_cam": "Àpplẹ́ yìí lè ka ibú okan rẹ fúnra rẹ̀: fi ọmọ́ ẹ̀yín rẹ bọ́ kàmẹ́rà ìwájú, lókè ibòjú, tẹ̀ bọ́tìnnì tí ó wà ní isalẹ̀. Kò nílo àpplẹ́ ìlera.",
+   "health.measure_nofeed": "Kàmẹ́rà kò fi àwòrán ránṣẹ́ rárá. Rii dájú pé ibòjú rẹ gbà ìmọ́lẹ̀, o kì í wà nínú ìpè fọ́n, tún gbiyanjú.",
+   "health.measure": "Ka ibú okan rẹ pẹ̀lú kàmẹ́rà",
