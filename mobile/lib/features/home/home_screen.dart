@@ -184,9 +184,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           const SizedBox(height: 2),
                           Text(
                             name.isEmpty ? t('home.hero') : name,
-                            maxLines: 1,
+                            // The greeting gets room: two lines instead of one
+                            // clipped line, so the whole line always shows.
+                            maxLines: 2,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, letterSpacing: -0.2),
+                            style: const TextStyle(fontSize: 17.5, height: 1.18, fontWeight: FontWeight.w800, letterSpacing: -0.2),
                           ),
                         ]),
                       ),
@@ -256,22 +258,31 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   // share is running.
                   Padding(
                     padding: const EdgeInsets.fromLTRB(22, 0, 22, 16),
+                    // Each circle gets an equal third of the row, so long names
+                    // like "Ways to call for help" wrap inside their own space
+                    // instead of running off the screen edge.
                     child: Row(children: [
-                      _CircleTile(
-                        label: t('share.title'),
-                        icon: Icons.share_location_rounded,
-                        live: widget.share.active != null,
-                        onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ShareScreen(share: widget.share, api: widget.api, i18n: widget.i18n, people: widget.people))),
+                      Expanded(
+                        child: _CircleTile(
+                          label: t('share.title'),
+                          icon: Icons.share_location_rounded,
+                          live: widget.share.active != null,
+                          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ShareScreen(share: widget.share, api: widget.api, i18n: widget.i18n, people: widget.people))),
+                        ),
                       ),
-                      _CircleTile(
-                        label: t('contacts.title'),
-                        icon: Icons.people_alt_rounded,
-                        onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ContactsScreen(api: widget.api, people: widget.people, i18n: widget.i18n))),
+                      Expanded(
+                        child: _CircleTile(
+                          label: t('contacts.title'),
+                          icon: Icons.people_alt_rounded,
+                          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ContactsScreen(api: widget.api, people: widget.people, i18n: widget.i18n))),
+                        ),
                       ),
-                      _CircleTile(
-                        label: t('triggers.title'),
-                        icon: Icons.campaign_rounded,
-                        onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => _ShortcutsPage(home: this))),
+                      Expanded(
+                        child: _CircleTile(
+                          label: t('triggers.title'),
+                          icon: Icons.campaign_rounded,
+                          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => _ShortcutsPage(home: this))),
+                        ),
                       ),
                     ]),
                   ),
@@ -525,7 +536,8 @@ class _ShortcutsPage extends StatelessWidget {
 
 /// One home function as a circle with its name underneath: a solid card disc
 /// with a hairline edge (the flat card language), the icon in brand indigo,
-/// and a LiveDot badge top-right when something is running.
+/// and a LiveDot badge top-right when something is running. Tapping it makes
+/// the little disc hop and wiggle — excited — before opening the screen.
 class _CircleTile extends StatelessWidget {
   const _CircleTile({required this.label, required this.icon, required this.onTap, this.live = false});
   final String label;
@@ -535,8 +547,7 @@ class _CircleTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(20),
+    return TapBounce(
       onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -570,7 +581,7 @@ class _CircleTile extends StatelessWidget {
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 12.5, height: 1.25, fontWeight: FontWeight.w600, color: Flat.muted(context)),
+            style: TextStyle(fontSize: 12, height: 1.25, fontWeight: FontWeight.w600, color: Flat.muted(context)),
           ),
         ]),
       ),

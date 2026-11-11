@@ -5,6 +5,7 @@ import 'package:latlong2/latlong.dart';
 
 import 'core/theme.dart';
 import 'core/widgets/brand.dart'; // SplashView lives here
+import 'core/widgets/flat.dart';
 import 'package:flutter/services.dart' show rootBundle;
 
 import 'features/home/home_screen.dart';
@@ -218,8 +219,9 @@ class _PillNav extends StatelessWidget {
             children: [
               for (var i = 0; i < labels.length; i++)
                 Expanded(
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
+                  // The excited tap from the reference reel: the chosen icon
+                  // hops and wiggles happily, then settles into its chip.
+                  child: TapBounce(
                     onTap: () => onTap(i),
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 180),

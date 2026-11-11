@@ -267,4 +267,24 @@ accuracy, and a lighter Health banner shading. No i18n changes: still 287 keys �
 - Lesson re-confirmed: arrow-`=>` builders cannot become brace bodies by half (stray `),` / `);` broke
   home_screen in v27's first CI round); and `SizedBox` has no `alignment` (pin_pad needed `Container`).
 
+## 13. Version 29 (this patch) — engineer's notes
+Vic's follow-ups: show the clipped home texts fully, give the 50 faces real personality, and make the whole
+app scroll like the reference reel with icons that react when tapped. No i18n changes: still 287 keys × 5.
+- Clipped texts: the greeting hero line (`home.hero` is long) now wraps to two lines at 17.5 w800 instead of one
+  20 px clipped line; the three home circle tiles each sit in an `Expanded` third of the Row so "Ways to call for
+  help" wraps inside its own space and never runs off the screen edge (label 12 px, 2-line cap kept).
+- Face personality: `SentriAvatarPainter` rewritten — on top of skin/hairstyle/ground, each index derives traits
+  by modulo arithmetic on different primes: round or square glasses, one raised brow, blush, freckles, a beauty
+  mole, open-grin / gentle / lopsided-smirk mouths (lip colours on the women), nose, eye sparks, earrings, bead
+  colours on braids, bun tie ring, hijab fabric palette + trim band, afro sheen arcs, and men carry stubble,
+  goatees, moustaches (the bald one keeps the full beard + moustache). All 50 stay deterministic and distinct.
+- Excited taps: new `TapBounce`/`TapBounceState` in `flat.dart` (shared) — a 480 ms squash-jump (translate −5 px,
+  scale 1→0.90→1) with a two-shake wiggle (sin 4πt, 0.07 rad), disabled under `disableAnimations`. Wired into the
+  `_PillNav` items (home/map/health/police hop then settle into their chip) and the home `_CircleTile`s (which
+  drop their InkWell for it). `TapBounceState.excite()` fires it without a tap if a caller ever needs that.
+- Scroll feel: `FlatPage` default physics is now `AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics(
+  decelerationRate: ScrollDecelerationRate.fast))` — the elastic snap-back of the reference reel, app-wide; home
+  already bounced and keeps its own physics line.
+- i18n untouched; no new persistence keys (the 50-icon pick from v28 is unchanged).
+
 

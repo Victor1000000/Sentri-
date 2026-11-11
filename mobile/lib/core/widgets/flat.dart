@@ -1,8 +1,72 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../theme.dart';
 import 'brand.dart';
 import 'glass.dart';
+
+/// A tap target that "gets excited" when pressed, like the reference reel: the
+/// child does a quick squash-jump with a tiny happy wiggle and settles back.
+/// Give it [onTap] and it also handles the tap itself, or leave it null and
+/// trigger the excitement separately with the [state] handle.
+class TapBounce extends StatefulWidget {
+  const TapBounce({super.key, required this.child, this.onTap, this.jump = 5, this.wiggle = 0.07});
+  final Widget child;
+  final VoidCallback? onTap;
+
+  /// How high the child hops, in logical pixels.
+  final double jump;
+
+  /// How far it wiggles left-right, in radians.
+  final double wiggle;
+
+  @override
+  State<TapBounce> createState() => TapBounceState();
+}
+
+class TapBounceState extends State<TapBounce> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 480));
+
+  /// Fires the excitement without a tap (used by widgets that animate on other
+  /// events too).
+  void excite() => _c.forward(from: 0);
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (MediaQuery.of(context).disableAnimations) return GestureDetector(behavior: HitTestBehavior.opaque, onTap: widget.onTap, child: widget.child);
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {
+        excite();
+        widget.onTap?.call();
+      },
+      child: AnimatedBuilder(
+        animation: _c,
+        builder: (context, child) {
+          // One squash-jump hop plus two little shakes: the "excited pet" move.
+          final t = _c.value;
+          final hop = math.sin(math.pi * t);
+          final shake = math.sin(math.pi * 4 * t) * (1 - t);
+          return Transform.translate(
+            offset: Offset(0, -widget.jump * hop),
+            child: Transform.rotate(
+              angle: widget.wiggle * shake,
+              child: Transform.scale(scale: 1 - 0.10 * hop, child: child),
+            ),
+          );
+        },
+        child: widget.child,
+      ),
+    );
+  }
+}
 
 /// The flat, Apple-style building blocks shared by Messages and Share location.
 class Flat {
@@ -44,7 +108,10 @@ class FlatPage extends StatelessWidget {
         return false;
       },
       child: ListView(
-        physics: physics ?? const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+        // The springy feel from the reference reel, app-wide: always bouncy,
+        // and with the faster deceleration the settle-back has that lively
+        // elastic snap instead of a long glide.
+        physics: physics ?? const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics(decelerationRate: ScrollDecelerationRate.fast)),
         padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
         children: [
           Text(title, style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w700, letterSpacing: -0.5, height: 1.1)),
