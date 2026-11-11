@@ -18,6 +18,7 @@ import '../share/share_controller.dart';
 import '../share/share_screen.dart';
 import '../../core/widgets/flat.dart';
 import '../../core/widgets/avatar_icons.dart';
+import '../onboarding/floating3d.dart';
 import '../../core/widgets/glass.dart';
 import '../checkin/checkin_controller.dart';
 import '../onboarding/permissions_panel.dart';
@@ -182,7 +183,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           Text(greeting, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: muted)),
                           const SizedBox(height: 2),
                           Text(
-                            name.isEmpty ? t('home.hero') : name,
+                            // No name set yet: the bold line under the greeting
+                            // is the protection state itself - confident, and
+                            // it never wastes the space on a filler sentence.
+                            name.isEmpty ? t('home.protected') : name,
                             // The greeting gets room: two lines instead of one
                             // clipped line, so the whole line always shows.
                             maxLines: 2,

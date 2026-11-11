@@ -1,12 +1,15 @@
 import 'dart:async';
+import 'dart:ui' show FontFeature;
 
 import 'package:flutter/material.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../core/i18n/i18n.dart';
 import '../../core/net/api.dart';
 import '../../core/widgets/brand.dart';
 import '../../core/widgets/flat.dart';
+import '../health/health_screen.dart' show FlutterMapSheetMap;
 import '../photos/photo_share.dart';
 import '../sos/contact_people.dart';
 import '../sos/guardian_badges.dart';
@@ -217,27 +220,40 @@ class _ShareScreenState extends State<ShareScreen> {
           const SizedBox(height: 8),
           FlatGroup(header: null, children: [
             for (final r in items.take(15))
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
-                child: Row(children: [
-                  Container(
-                    width: 34,
-                    height: 34,
-                    decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0x1A1FA85B)),
-                    child: const Icon(Icons.location_on_outlined, size: 17, color: Flat.live),
+              InkWell(
+                // One tap opens the story of the share: when it ran, who saw it,
+                // and the line the phone recorded - where the person passed.
+                onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                  builder: (_) => _ShareDetailScreen(
+                    i18n: widget.i18n,
+                    record: r,
+                    track: widget.share.trackPoints(r.id),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text('${clockTime(r.startedAt)} – ${clockTime(r.endedAt)}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
-                      Text(
-                        t('share.people', {'n': r.recipients.toString()}),
-                        style: TextStyle(fontSize: 12.5, color: Flat.muted(context)),
-                      ),
-                    ]),
-                  ),
-                  Icon(Icons.check_circle_outline, size: 18, color: Flat.muted(context)),
-                ]),
+                )),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+                  child: Row(children: [
+                    Container(
+                      width: 34,
+                      height: 34,
+                      decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0x1A1FA85B)),
+                      child: const Icon(Icons.location_on_outlined, size: 17, color: Flat.live),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text('${clockTime(r.startedAt)} – ${clockTime(r.endedAt)}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
+                        Text(
+                          t('share.people', {'n': r.recipients.toString()}),
+                          style: TextStyle(fontSize: 12.5, color: Flat.muted(context)),
+                        ),
+                      ]),
+                    ),
+                    Icon(Icons.check_circle_outline, size: 18, color: Flat.muted(context)),
+                    const SizedBox(width: 6),
+                    Icon(Icons.chevron_right, size: 20, color: Flat.muted(context)),
+                  ]),
+                ),
               ),
           ]),
         ]);
@@ -353,6 +369,61 @@ class _ShareScreenState extends State<ShareScreen> {
           ]),
         ),
         const SizedBox(height: 36),
+        Text(t('share.live_note'), textAlign: TextAlign.center, style: TextStyle(fontSize: 13, height: 1.45, color: Flat.muted(context))),
+      ],
+    );
+  }
+}
+
+/// The story of one past share, the way a finished exercise session tells its
+/// own: the clock window and who was watching, then the line the phone
+/// recorded - where the person actually passed - fitted to the view with the
+/// start and end pinned, Strava-style.
+class _ShareDetailScreen extends StatelessWidget {
+  const _ShareDetailScreen({required this.i18n, required this.record, required this.track});
+  final I18n i18n;
+  final ShareRecord record;
+  final Future<List<List<double>>> track;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = i18n.t;
+    final r = record;
+    final day = '${r.startedAt.day}/${r.startedAt.month}';
+    return FlatPage(
+      title: '${t('share.title')} · ${t('exercise.hist_on', {'d': day})}',
+      children: [
+        // The stat strip: the clock window and who could see it.
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+            child: Column(children: [
+              Text('${clockTime(r.startedAt)} – ${clockTime(r.endedAt)}', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, height: 1.05, fontFeatures: [FontFeature.tabularFigures()])),
+              const SizedBox(height: 4),
+              Text(t('share.people', {'n': r.recipients.toString()}), style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Flat.muted(context))),
+            ]),
+          ),
+        ),
+        const SizedBox(height: 16),
+        // The route, nearly full-bleed like the exercise detail: start green,
+        // end indigo, over the line the person passed while sharing.
+        ClipRRect(
+          borderRadius: BorderRadius.circular(24),
+          child: SizedBox(
+            height: 280,
+            child: FutureBuilder<List<List<double>>>(
+              future: track,
+              builder: (context, snap) {
+                final pts = snap.data ?? const <List<double>>[];
+                return FlutterMapSheetMap(
+                  path: [for (final p in pts) LatLng(p[0], p[1])],
+                  ends: true,
+                );
+              },
+            ),
+          ),
+        ),
+        const SizedBox(height: 14),
         Text(t('share.live_note'), textAlign: TextAlign.center, style: TextStyle(fontSize: 13, height: 1.45, color: Flat.muted(context))),
       ],
     );

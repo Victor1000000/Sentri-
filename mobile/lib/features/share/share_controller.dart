@@ -17,6 +17,11 @@ enum ShareStartOutcome { started, noneReachable, offline, failed }
 ///
 /// Stopping is never silent: if the phone is offline when the person taps Stop, position updates
 /// stop at once, the screen says the stop is still pending, and it is retried until the server confirms.
+///
+/// While a share runs, the phone also keeps the story of it: every fresh fix is written into a
+/// local track, and when the share ends the track joins the history. The share screen draws it
+/// on a small map, the way a finished exercise session shows its route - the contacts who were
+/// invited can later see where the person actually passed.
 class ShareController extends ChangeNotifier {
   ShareController({
     required this.api,
@@ -36,11 +41,15 @@ class ShareController extends ChangeNotifier {
 
   static bool _no() => false;
   static const _k = 'share.active.v1';
+  static const _tk = 'share.tracks.v1';
 
   ShareInfo? _active;
   String? _stopping;
   int _epoch = 0;
   Cancelable? _tick, _stopRetry;
+
+  /// The route being drawn by the share that is running right now.
+  List<List<double>> _track = const <List<double>>[];
 
   /// The share that is running now, or null.
   ShareInfo? get active => _active;
@@ -69,6 +78,7 @@ class ShareController extends ChangeNotifier {
   void _begin(ShareInfo s) {
     _active = s;
     _epoch++;
+    _track = <List<double>>[]; // a fresh share draws a fresh line
     unawaited(_save());
     notifyListeners();
     _schedule(_epoch, const Duration(seconds: 5));
@@ -127,6 +137,7 @@ class ShareController extends ChangeNotifier {
     final fix = await location.fix(highAccuracy: pct > 15, timeout: const Duration(seconds: 8));
     if (epoch != _epoch || _active == null) return;
     if (fix != null) {
+      _record(fix);
       try {
         await api.updateShare(a.id, fix);
       } on ApiHttpError catch (e) {
@@ -138,12 +149,68 @@ class ShareController extends ChangeNotifier {
     if (epoch == _epoch) _schedule(epoch, _interval(pct));
   }
 
+  /// One point on the story map. Points closer than about ten metres to the
+  /// previous one are dropped, so a share spent sitting still stays a dot
+  /// instead of a wall of points, and the line never grows past six hundred.
+  void _record(GeoFix fix) {
+    final last = _track.isEmpty ? null : _track.last;
+    if (last != null && (fix.lat - last[0]).abs() < 0.0001 && (fix.lon - last[1]).abs() < 0.0001) return;
+    if (_track.length >= 600) return;
+    _track.add([fix.lat, fix.lon]);
+  }
+
   void _end() {
+    final id = _active?.id;
     _epoch++;
     _tick?.cancel();
     _active = null;
     unawaited(_save());
+    unawaited(_flushTrack(id));
     notifyListeners();
+  }
+
+  /// The story of the share is written on the phone the moment the share ends:
+  /// the points join the history under the share's id, and stories past the
+  /// newest twenty are dropped so the store stays small. Purely local - it
+  /// never blocks stopping, and a failure only costs the map, not the share.
+  Future<void> _flushTrack(String? id) async {
+    final pts = _track;
+    _track = <List<double>>[];
+    if (id == null || id.isEmpty || pts.length < 2) return;
+    try {
+      Map<String, dynamic> all = <String, dynamic>{};
+      final raw = await store.read(_tk);
+      if (raw != null) {
+        final j = jsonDecode(raw);
+        if (j is Map) all = Map<String, dynamic>.from(j);
+      }
+      all[id] = pts;
+      while (all.length > 20) {
+        all.remove(all.keys.first);
+      }
+      await store.write(_tk, jsonEncode(all));
+    } catch (_) {}
+  }
+
+  /// The route a past share drew: [[lat, lon], ...]. Empty when the phone has
+  /// no story for it - shares made before this version, or points lost to a
+  /// restart mid-share.
+  Future<List<List<double>>> trackPoints(String id) async {
+    try {
+      final raw = await store.read(_tk);
+      if (raw == null) return const [];
+      final j = jsonDecode(raw);
+      if (j is Map) {
+        final t = j[id];
+        if (t is List) {
+          return [
+            for (final p in t)
+              if (p is List && p.length >= 2) [(p[0] as num).toDouble(), (p[1] as num).toDouble()],
+          ];
+        }
+      }
+    } catch (_) {}
+    return const [];
   }
 
   // ---- stop and extend ----
@@ -186,8 +253,12 @@ class ShareController extends ChangeNotifier {
 
   @override
   void dispose() {
+    // A share still running when the screen goes away keeps its server side
+    // alive (resume() picks it up), but the line drawn so far is worth keeping.
+    final id = _active?.id;
     _tick?.cancel();
     _stopRetry?.cancel();
+    if (id != null && _track.length >= 2) unawaited(_flushTrack(id));
     super.dispose();
   }
 }

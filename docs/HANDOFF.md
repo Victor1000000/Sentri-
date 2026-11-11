@@ -448,4 +448,47 @@ better lines that make people feel safe). i18n grows 287 → 295 keys × 5 (8 ne
   in the per-locale i18n needles and `MoodFacePainter`, `map.chat_5`, `map.reroute_say` in the libapp.so
   findstr list. Patch payload this round is small (~1 MB; step_voice is tiny, the rest are small diffs).
 
+## 19. Version 35 (this patch; v34 rides along) — engineer's notes
+Vic's asks: cut the app's texts down to bold, confident lines that still pass the same information ("especially
+the exercise section"); the awards caption ("Badges for your records. Keep going - farther, more steps, more
+sessions - and the shelf fills up.") felt unnecessary and the long texts were crowding the UI; on the home page
+the logo+wordmark were "battling" the profile picture and name; make the share screen's history like the
+exercise history, so emergency contacts can see where the user passed on past shares; and remove
+"One hidden move. Your people already know where." entirely.
+- v34 build failure (root cause, fixed here): the rewritten-head build failed with
+  `home_screen.dart:635:48: The getter 'f3dsirenBytes' isn't defined` — the v34 edit had dropped
+  `import '../onboarding/floating3d.dart';` from home_screen.dart, but `_MessageBar` still uses the 3D
+  siren/bell bytes for its art disc (the earlier grep looked for Float*/Siren3d-style names and missed the
+  `f3d`-prefixed getters). The import is back; that was the ONLY compile error (analyze + tests had passed;
+  the onboarding_screens annotations the run page showed are not present in the run's log and were phantom).
+- Texts shortened (VALUE edits only, 37 keys × 5 locales; home.hero key DELETED in all 5 → 294 keys × 5):
+  every section keeps its information but in one confident sentence — onboarding (phone.help,
+  otp.telegram_hint, contacts.characters, contacts.app_only), home check-in (home.check_sub, home.check_until),
+  sos.contacts_busy, health (heart_none, heart_base, heart_watch, hr_alert_body, water_sub, water_ok,
+  water_broken, heart_cam, measure_tip, hosp_error, hosp_location), exercise (sub, check_sub, perm_denied,
+  discard_body, history_empty), award.shelf_hint ("One badge per record. Keep going."), map (route_failed,
+  route_fix_gps, approx_hint, nearby_none, search_none_near), police (note, approx), inbox (none, scam_note),
+  share (help, limit_note, invite_text) and the share-history empty state (pins.must_differ — its key name is
+  misleading but stays: the needles depend on it; its value was ALREADY the share-history empty text).
+  Placeholders preserved ({n}, {time}); parity verified set-wise 294 × 5. ha/ig/pcm/yo values are AI
+  translations as before.
+- Home hero removed: home_screen falls back to `t('home.protected')` ("Protection is on") when no name is set,
+  so the bold line under the greeting is never a filler sentence.
+- Home top bar (brand.dart SentriTopBar): the mark and the wordmark now sit side by side on ONE line and the
+  whole logo is smaller (mark 24/30, wordmark 16/20, was stacked 30/38 + 19/24), so the profile picture and
+  name below get their room back; row centred, padding 14 top.
+- Share history like exercise history: share_controller.dart is a NEW LEAF (repo copy + local track). While a
+  share runs, every fresh fix is appended to an in-memory track (points within ~10 m of the previous are
+  dropped so sitting still stays a dot; capped at 600 points); when the share ends (stop, expiry, or dispose
+  with a share still running) the track is flushed into the KeyValueStore under the share's id
+  (`share.tracks.v1`, newest 20 kept). share_screen's history rows are now tappable (chevron added) and open
+  _ShareDetailScreen: FlatPage titled like the session detail, a stat card (clock window + "With {n} people"),
+  and the route on FlutterMapSheetMap (path, ends: true — start green, end indigo) reused from health_screen.
+  Shares made before this version have no stored track; the map widget's <2-points state shows a route icon.
+  Note: the track lives on the USER'S phone only (the contacts' phones still just get live positions) —
+  "emergency contacts can see where the user passed" means when they view the history on the user's phone.
+- Pipeline notes: share_controller.dart joined the leaf table; i18n count in check-apk20 stays unasserted
+  (prints 294); all v34 needles stay.
+
+
 

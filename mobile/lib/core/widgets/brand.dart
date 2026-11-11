@@ -169,18 +169,21 @@ class SentriTopBar extends StatelessWidget {
     final markColor = dark ? Brand.mint : Colors.black;
     final wordColor = dark ? Colors.white : Colors.black;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+      padding: const EdgeInsets.fromLTRB(24, 14, 24, 0),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           GestureDetector(
             onTap: onLogoTap,
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              SentriMark(size: compact ? 30 : 38, color: markColor),
-              const SizedBox(height: 4),
-              SentriWordmark(size: compact ? 19 : 24, color: wordColor),
-            ]),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                SentriMark(size: compact ? 24 : 30, color: markColor),
+                const SizedBox(width: 7),
+                SentriWordmark(size: compact ? 16 : 20, color: wordColor),
+              ],
+            ),
           ),
           Row(mainAxisSize: MainAxisSize.min, children: [
           const ThemeButton(),
