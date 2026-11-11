@@ -13,7 +13,9 @@ final _local = FlutterLocalNotificationsPlugin();
 
 /// Every contact-facing notification vibrates in the same alarm rhythm, with the app
 /// open or closed: SOS and duress, but also "Ada started sharing her location" - a
-/// push Vic can miss silently while the phone is in a pocket.
+/// push Vic can miss silently while the phone is in a pocket. The channel plays at
+/// the ALARM volume stream, so an emergency rings like an alarm clock would, even
+/// when media volume is turned down.
 final _alarmPattern = Int64List.fromList([0, 700, 300, 700, 300, 700, 300, 700]);
 
 final _channel = AndroidNotificationChannel(
@@ -24,6 +26,7 @@ final _channel = AndroidNotificationChannel(
   enableVibration: true,
   vibrationPattern: _alarmPattern,
   playSound: true,
+  audioAttributesUsage: AudioAttributesUsage.alarm,
 );
 
 /// Location-sharing updates are important but not an emergency, so they do not ring like one.
@@ -95,15 +98,24 @@ Future<WaterStatus> waterReminderStatus(int minutes) async {
 /// (including "off"), then asks for the notification permission once, right when the person
 /// turns reminders on.
 ///
-/// The quiet problem this fights: phones purge scheduled alarms (reboot, battery saving,
-/// "auto-start" managers), so a reminder set weeks ago can die without anyone noticing. So
-/// this asks the person to excuse Sentri from battery saving (the screen most phones hide
-/// behind), and callers re-run it every time the app opens - but only when it must: if the
-/// same pace is already on the phone's alarm system, re-arming would RESET its countdown,
-/// so the reminder would go off shortly after every app open instead of on its own clock.
+/// The quiet problem this fights, on two fronts:
+///
+/// 1. Phones purge scheduled alarms (reboot, battery saving, "auto-start" managers), so a
+///    reminder set weeks ago can die without anyone noticing. So this asks the person to
+///    excuse Sentri from battery saving (the screen most phones hide behind), and callers
+///    re-run it every time the app opens.
+/// 2. Re-arming on every open RESETS the countdown - the reminder would go off shortly
+///    after every app open instead of on its own clock, and with a pace like 30 minutes
+///    and a person who opens the app often, it would NEVER fire at all. The in-memory
+///    `_waterScheduledMinutes` guard from earlier versions only held within one app
+///    session; the real fix is durable: the pace AND the reminder text (which carries
+///    the language) are written INTO the schedule's payload, and the pending schedule is
+///    read back from the phone itself. Same pace and text still pending -> leave its own
+///    clock running. Anything else (no schedule, purged schedule, different pace,
+///    different language) -> cancel and re-arm.
 /// The schedule itself uses the alarm-clock mode, the one phone makers promise not to
 /// swallow, instead of exact alarms many phones deny by default.
-int? _waterScheduledMinutes;
+const _waterPayloadPrefix = 'water:';
 
 Future<void> scheduleWaterReminder(int minutes, String title, String body) async {
   const details = NotificationDetails(
@@ -118,16 +130,23 @@ Future<void> scheduleWaterReminder(int minutes, String title, String body) async
     iOS: DarwinNotificationDetails(interruptionLevel: InterruptionLevel.timeSensitive),
   );
   try {
-    if (minutes > 0 && _waterScheduledMinutes == minutes) {
-      var stillThere = false;
-      try {
-        final pending = await _local.pendingNotificationRequests();
-        stillThere = pending.any((p) => p.id == _waterId);
-      } catch (_) {}
-      if (stillThere) return; // same pace, still scheduled: let its own clock run
+    // What is ACTUALLY pending on this phone right now - the durable truth, not
+    // this session's memory of it.
+    String? pendingPayload;
+    try {
+      final pending = await _local.pendingNotificationRequests();
+      for (final p in pending) {
+        if (p.id == _waterId) {
+          pendingPayload = p.payload;
+          break;
+        }
+      }
+    } catch (_) {}
+    final wanted = minutes <= 0 ? null : '$_waterPayloadPrefix$minutes|$title|$body';
+    if (minutes > 0 && pendingPayload == wanted) {
+      return; // same pace and same reminder text, still scheduled: let its own clock run
     }
     await _local.cancel(_waterId);
-    _waterScheduledMinutes = null;
     if (minutes <= 0) return;
     final android = _local.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
     await android?.createNotificationChannel(_healthChannel);
@@ -154,9 +173,9 @@ Future<void> scheduleWaterReminder(int minutes, String title, String body) async
         body,
         Duration(minutes: minutes),
         details,
+        payload: wanted,
         androidScheduleMode: AndroidScheduleMode.alarmClock,
       );
-      _waterScheduledMinutes = minutes;
     } on PlatformException {
       // Some phones lock alarm-clock scheduling too: a gently inexact chime still keeps the habit.
       await _local.periodicallyShowWithDuration(
@@ -165,9 +184,9 @@ Future<void> scheduleWaterReminder(int minutes, String title, String body) async
         body,
         Duration(minutes: minutes),
         details,
+        payload: wanted,
         androidScheduleMode: AndroidScheduleMode.inexact,
       );
-      _waterScheduledMinutes = minutes;
     }
   } catch (_) {
     // A reminder that cannot be scheduled must never break the Health tab.
@@ -213,12 +232,18 @@ Future<void> cancelAlertNotification(String inboxId) {
 // after one round. This app does not trust that: while an emergency alert is live and
 // unanswered, the notification is re-issued on a timer, and every re-issue plays the
 // alarm sound and the vibration again. Nothing here is dismissible in between.
+//
+// The nagging never gives up while the alert is live: the first hour it re-rings every
+// 30 seconds; after that it keeps re-ringing every 3 minutes, indefinitely, until the
+// alert is attended to (answered, or a "clear"/end arrives). The notification itself
+// stays on the phone the whole time.
 
 Timer? _alertRepeat;
 int? _alertRepeatId;
 int _alertRepeatCount = 0;
 const _alertRepeatEvery = Duration(seconds: 30);
-const _alertRepeatMax = 120; // one hour of insisting, then the phone gets a break
+const _alertRepeatFast = 120; // the first hour: a ring every 30 seconds
+const _alertRepeatSlow = Duration(minutes: 3); // after that: a ring every 3 minutes, forever
 
 void _stopAlertRepeat() {
   _alertRepeat?.cancel();
@@ -227,14 +252,20 @@ void _stopAlertRepeat() {
   _alertRepeatCount = 0;
 }
 
-void _beginAlertRepeat(int id, Map<String, dynamic> data, NotificationDetails details) {
+void _beginAlertRepeat(int id, Map<String, dynamic> data, NotificationDetails details, {bool persistent = true}) {
   _stopAlertRepeat();
   _alertRepeatId = id;
   _alertRepeatCount = 0;
   _alertRepeat = Timer.periodic(_alertRepeatEvery, (_) async {
     if (_alertRepeatId != id) return; // a newer alert or an end took over
     _alertRepeatCount++;
-    if (_alertRepeatCount > _alertRepeatMax) return _stopAlertRepeat();
+    // Emergencies never give up: past the fast hour, one ring every 3 minutes,
+    // forever, until somebody deals with the alert. A share start keeps the
+    // old bound - it insisted for the first hour, then let the person be.
+    if (_alertRepeatCount > _alertRepeatFast) {
+      if (!persistent) return _stopAlertRepeat();
+      if (_alertRepeatCount % 6 != 0) return; // 3-minute cadence on the same timer
+    }
     try {
       await _local.show(id, 'Sentri', data['text'] as String?, details);
     } catch (_) {
@@ -282,7 +313,12 @@ Future<void> showAlertNotification(Map<String, dynamic> data) async {
     return;
   }
   if (text is! String || text.isEmpty) return;
-  final details = _shareStartDetails();
+  // A live emergency is urgent from the VERY FIRST ring: alarm category, full-screen
+  // intent, alarm-volume sound and the insistent flag. (An earlier version showed the
+  // first ring with the milder share details and only escalated 30 seconds later -
+  // the most important seconds of the alert were also the quietest.)
+  final urgent = kind == 'sos' || kind == 'duress' || kind == 'offline';
+  final details = urgent ? _urgentDetails() : _shareStartDetails();
   final id = _idFor(data);
   try {
     await _local.show(id, 'Sentri', text, details);
@@ -290,11 +326,12 @@ Future<void> showAlertNotification(Map<String, dynamic> data) async {
     // A failed notification must never crash the app.
     return;
   }
-  if (kind == 'sos' || kind == 'duress' || kind == 'offline') {
+  if (urgent) {
     _beginAlertRepeat(id, data, _urgentDetails());
   } else if (kind == 'share_start') {
-    // keep insisting until the person opens it or the share ends
-    _beginAlertRepeat(id, data, details);
+    // keep insisting until the person opens it or the share ends - one hour of
+    // fast ringing, then the person is left in peace (it is not an emergency).
+    _beginAlertRepeat(id, data, details, persistent: false);
   }
 }
 

@@ -490,5 +490,64 @@ exercise history, so emergency contacts can see where the user passed on past sh
 - Pipeline notes: share_controller.dart joined the leaf table; i18n count in check-apk20 stays unasserted
   (prints 294); all v34 needles stay.
 
+## 20. Version 36 (this patch) — engineer's notes
+Vic's asks: the water alert "has never worked" (Sentri is NOT on battery saving and it still never sends a
+notification); the camera heart rate has been "giving funny numbers" (166 bpm in his screenshot); increase the
+exercise awards to 25; and once any emergency tool is triggered, the contact's phone must ALWAYS vibrate like it
+is ringing and not stop until the alert is attended to. Verified thoroughly before his two-device test.
+- Water reminder ROOT CAUSE FOUND: `scheduleWaterReminder`'s "already scheduled, don't reset the countdown"
+  guard used an in-memory variable (`_waterScheduledMinutes`) that is NULL on every fresh app start, so every
+  app open cancelled the schedule and re-armed it, resetting the countdown. With a 30-minute pace and Vic
+  opening the app often, the reminder could literally never fire - matching "it has never worked" exactly.
+  Fix: the guard is now DURABLE - the pace AND the reminder text (which carries the language) are written into
+  the schedule's payload (`water:<minutes>|<title>|<body>`), and `pendingNotificationRequests` is read back from
+  the phone itself. Same pace+text still pending -> leave its own clock running; anything else (no schedule,
+  purged schedule, different pace, different language) -> cancel and re-arm. First fire stays at now+duration
+  (unchanged plugin behaviour).
+- Heart-rate accuracy (heart_camera.dart and heart_signal.dart are NEW LEAVES this round):
+  1. exposure and focus are LOCKED before the frame stream starts (best effort, try/catch) - a hunting
+     auto-exposure draws its own slow brightness waves that are not the pulse; the biggest fake-rhythm source;
+  2. frame rate now comes from the MEDIAN inter-frame gap instead of span/count (dropped/bunched frames);
+  3. a THIRD estimator joins the two: a Hann-windowed, zero-padded FFT spectrum (iterative radix-2, ~40
+     lines) whose peak must stand >=3x above the band's median noise floor; a spectrum cannot put a phantom
+     peak at half the true period (harmonics sit at multiples), so it ARBITRATES octave errors: any view that
+     landed on double/half the spectral rate is aligned to it (`_alignOctave`);
+  4. the autocorr octave guard tightened 0.92 -> 0.96 (a dicrotic wave at half-period must not double the rate);
+  5. a reading needs a CLUSTER: at least two of the three views agreeing within 8%; a single view carries the
+     reading only when the rhythm match is confident (trust+0.05);
+  6. the take must agree with ITSELF: scored in two halves, and if both halves produce readings that differ
+     by more than 12%, the whole take is refused (finger moved / light artefact) instead of averaged.
+  The existing heart_signal_test.dart suite (precision within 2.5 bpm, irregular pulse, flat/faint/short
+  refusals) still defines the contract; the new logic was written to keep it green.
+- Awards: the shelf grows from 8 to 25 kinds. New 17: km2, km42, km50, km100 (distance totals), session5,
+  session10 (single-session km), steps5k, steps20k, minutes30, minutes60, sessions10, sessions25, sessions50,
+  streak3 (3 sessions inside 7 days), firstRun/firstWalk/firstBike. earn logic in exercise_controller.stop()
+  (history cap is 60, so sessions50 stays reachable; streak counts sessions with start within the last 7 days
+  including this one; first-of-mode judged against history minus this session). 51 new i18n keys
+  (award.<id>_title/_desc/_praise) x5 = 345 x5, written with the v36-*.json data files + v36i18n.ps1
+  (insert-before-closing-brace) + fix-json36.ps1 comma normaliser; parity verified. All new badges round;
+  records remain the only shields; icons are stock Material symbols (tour/route/explore/map/terrain/stairs/
+  timer/schedule/event_available/military_tech/workspace_premium/whatshot/hiking/directions_*).
+- Contact-phone vibration "like a ringing phone, never stops until attended":
+  1. BUG FIXED: the FIRST ring of sos/duress/offline used the milder share-channel details (importance high,
+     default sound, no full-screen intent, no insistent flag) and only escalated 30 s later - the most
+     important seconds were the quietest. The first show is now `_urgentDetails()` (alarm category,
+     full-screen intent, alarm-volume audio, vibration pattern, insistent FLAG_INSISTENT(4), ongoing,
+     non-dismissible).
+  2. The alerts channel now plays at the ALARM volume stream (`audioAttributesUsage: alarm` on the channel),
+     so it rings like an alarm even with media volume down.
+  3. The nag NEVER gives up for emergencies: the first hour re-rings every 30 s (120 re-issues as before), then
+     drops to one re-ring every 3 minutes, indefinitely, until the alert is answered or a clear/end arrives (the
+     old code stopped re-ringing after one hour - a compromise Vic explicitly overruled). A share-START notice
+     is not an emergency: it keeps the old bound (one hour of fast ringing, then peace). The notification itself
+     stays on the phone the whole time either way.
+  Manifest already carries VIBRATE, USE_FULL_SCREEN_INTENT, SCHEDULE_EXACT_ALARM, POST_NOTIFICATIONS (verified
+  again). Caveat kept honest: phone makers can still strip the insistent flag or deny alarm stream on some
+  brands - the app re-issues the ring itself, so the sound+vibration return on every re-issue regardless.
+- Pipeline notes: heart_camera.dart and heart_signal.dart joined the leaf table; check-apk20 i18n needles
+  gained award.streak3_title + award.km100_title; libapp.so needles gained 'HeartCamera' and 'water:' (the
+  payload prefix); the i18n count printout is 345 x5.
+
+
 
 

@@ -8,29 +8,64 @@ import 'package:flutter_tts/flutter_tts.dart';
 import '../../core/i18n/i18n.dart';
 import '../../core/storage/key_value_store.dart';
 
-/// The eight exercise awards. Each has its own drawn badge design, its own spoken
+/// The twenty-five exercise awards. Each has its own drawn badge design, its own spoken
 /// praise line and its own haptic "cheer" pattern, so unlocking different kinds feels
-/// different on the hand and in the ear.
+/// different on the hand and in the ear. The shelf shows all twenty-five, dim until
+/// earned.
 enum AwardKind {
   first,        // the first recorded session ever
+  km2,          // two kilometres collected in total
   km5,          // five kilometres collected in total
   km10,         // ten kilometres collected in total
   km21,         // half-marathon distance collected in total
+  km42,         // full-marathon distance collected in total
+  km50,         // fifty kilometres collected in total
+  km100,        // one hundred kilometres collected in total
+  session5,     // five kilometres in ONE session
+  session10,    // ten kilometres in ONE session
+  steps5k,      // five thousand steps in ONE session
   steps10k,     // ten thousand steps in ONE session
+  steps20k,     // twenty thousand steps in ONE session
+  minutes30,    // thirty minutes in ONE session
+  minutes60,    // a full hour in ONE session
+  sessions5,    // five sessions completed - the habit is real
+  sessions10,   // ten sessions completed
+  sessions25,   // twenty-five sessions completed
+  sessions50,   // fifty sessions completed
+  streak3,      // three sessions inside seven days
+  firstRun,     // the first RUN ever recorded
+  firstWalk,    // the first WALK ever recorded
+  firstBike,    // the first RIDE ever recorded
   recordKm,     // longest single session ever (a record broken)
   recordSteps,  // most steps in one session ever (a record broken)
-  sessions5,    // five sessions completed - the habit is real
 }
 
 String awardId(AwardKind k) => switch (k) {
       AwardKind.first => 'first',
+      AwardKind.km2 => 'km2',
       AwardKind.km5 => 'km5',
       AwardKind.km10 => 'km10',
       AwardKind.km21 => 'km21',
+      AwardKind.km42 => 'km42',
+      AwardKind.km50 => 'km50',
+      AwardKind.km100 => 'km100',
+      AwardKind.session5 => 'session5',
+      AwardKind.session10 => 'session10',
+      AwardKind.steps5k => 'steps5k',
       AwardKind.steps10k => 'steps10k',
+      AwardKind.steps20k => 'steps20k',
+      AwardKind.minutes30 => 'minutes30',
+      AwardKind.minutes60 => 'minutes60',
+      AwardKind.sessions5 => 'sessions5',
+      AwardKind.sessions10 => 'sessions10',
+      AwardKind.sessions25 => 'sessions25',
+      AwardKind.sessions50 => 'sessions50',
+      AwardKind.streak3 => 'streak3',
+      AwardKind.firstRun => 'first_run',
+      AwardKind.firstWalk => 'first_walk',
+      AwardKind.firstBike => 'first_bike',
       AwardKind.recordKm => 'record_km',
       AwardKind.recordSteps => 'record_steps',
-      AwardKind.sessions5 => 'sessions5',
     };
 
 /// One earned award: which kind, and when it was earned.
@@ -43,13 +78,30 @@ class Award {
   static Award? fromJson(Map<String, dynamic> j) {
     final k = switch (j['k']) {
       'first' => AwardKind.first,
+      'km2' => AwardKind.km2,
       'km5' => AwardKind.km5,
       'km10' => AwardKind.km10,
       'km21' => AwardKind.km21,
+      'km42' => AwardKind.km42,
+      'km50' => AwardKind.km50,
+      'km100' => AwardKind.km100,
+      'session5' => AwardKind.session5,
+      'session10' => AwardKind.session10,
+      'steps5k' => AwardKind.steps5k,
       'steps10k' => AwardKind.steps10k,
+      'steps20k' => AwardKind.steps20k,
+      'minutes30' => AwardKind.minutes30,
+      'minutes60' => AwardKind.minutes60,
+      'sessions5' => AwardKind.sessions5,
+      'sessions10' => AwardKind.sessions10,
+      'sessions25' => AwardKind.sessions25,
+      'sessions50' => AwardKind.sessions50,
+      'streak3' => AwardKind.streak3,
+      'first_run' => AwardKind.firstRun,
+      'first_walk' => AwardKind.firstWalk,
+      'first_bike' => AwardKind.firstBike,
       'record_km' => AwardKind.recordKm,
       'record_steps' => AwardKind.recordSteps,
-      'sessions5' => AwardKind.sessions5,
       _ => null,
     };
     if (k == null) return null;
@@ -120,17 +172,36 @@ class AwardLook {
 }
 
 /// Distinct shapes and colour moods: journey badges are round medals in green
-/// family, step badges are amber, and RECORD badges are the only shield shape,
-/// in the alert-ish rose family - breaking a record should feel like a big deal.
+/// family, step badges are amber, habit badges are indigo, movement firsts are
+/// sky blue, long-haul badges are deep teal, the streak burns ember, and RECORD
+/// badges are the only shield shape, in the alert-ish rose family - breaking a
+/// record should feel like a big deal.
 AwardLook awardLook(AwardKind k) => switch (k) {
       AwardKind.first => const AwardLook(Icons.emoji_events_outlined, Color(0xFF2BB673), Color(0xFF178A52), 'start'),
+      AwardKind.km2 => const AwardLook(Icons.directions_walk_outlined, Color(0xFF4CC98A), Color(0xFF2BB673), 'solid'),
       AwardKind.km5 => const AwardLook(Icons.directions_walk_outlined, Color(0xFF2BB673), Color(0xFF178A52), 'solid'),
       AwardKind.km10 => const AwardLook(Icons.directions_run_outlined, Color(0xFF1F9A8C), Color(0xFF0E6E62), 'solid'),
       AwardKind.km21 => const AwardLook(Icons.flag_outlined, Color(0xFF1F7A8C), Color(0xFF134B57), 'far'),
+      AwardKind.km42 => const AwardLook(Icons.tour_outlined, Color(0xFF1F7A8C), Color(0xFF134B57), 'far'),
+      AwardKind.km50 => const AwardLook(Icons.route_outlined, Color(0xFF1F7A8C), Color(0xFF134B57), 'far'),
+      AwardKind.km100 => const AwardLook(Icons.explore_outlined, Color(0xFF116B77), Color(0xFF0C4652), 'far'),
+      AwardKind.session5 => const AwardLook(Icons.map_outlined, Color(0xFF25A69A), Color(0xFF0E6E62), 'solid'),
+      AwardKind.session10 => const AwardLook(Icons.terrain_outlined, Color(0xFF1F9A8C), Color(0xFF0E6E62), 'solid'),
+      AwardKind.steps5k => const AwardLook(Icons.stairs, Color(0xFFEDB54A), Color(0xFFE3A13A), 'steps'),
       AwardKind.steps10k => const AwardLook(Icons.stairs, Color(0xFFE3A13A), Color(0xFFB27416), 'steps'),
+      AwardKind.steps20k => const AwardLook(Icons.stairs, Color(0xFFC98A1F), Color(0xFF8A5A0D), 'steps'),
+      AwardKind.minutes30 => const AwardLook(Icons.timer_outlined, Color(0xFF3D8BF0), Color(0xFF2258C9), 'time'),
+      AwardKind.minutes60 => const AwardLook(Icons.schedule_outlined, Color(0xFF3D8BF0), Color(0xFF2258C9), 'time'),
+      AwardKind.sessions5 => const AwardLook(Icons.calendar_today_outlined, Color(0xFF6A5FF0), Color(0xFF4438C9), 'habit'),
+      AwardKind.sessions10 => const AwardLook(Icons.event_available_outlined, Color(0xFF6A5FF0), Color(0xFF4438C9), 'habit'),
+      AwardKind.sessions25 => const AwardLook(Icons.military_tech_outlined, Color(0xFF5A4BE0), Color(0xFF3A2CB8), 'habit'),
+      AwardKind.sessions50 => const AwardLook(Icons.workspace_premium_outlined, Color(0xFF4A3BD0), Color(0xFF2E22A0), 'habit'),
+      AwardKind.streak3 => const AwardLook(Icons.whatshot_outlined, Color(0xFFE5744C), Color(0xFFB24328), 'fire'),
+      AwardKind.firstRun => const AwardLook(Icons.directions_run_outlined, Color(0xFF2E9FD9), Color(0xFF1B6FA8), 'start'),
+      AwardKind.firstWalk => const AwardLook(Icons.hiking_outlined, Color(0xFF2E9FD9), Color(0xFF1B6FA8), 'start'),
+      AwardKind.firstBike => const AwardLook(Icons.directions_bike_outlined, Color(0xFF2E9FD9), Color(0xFF1B6FA8), 'start'),
       AwardKind.recordKm => const AwardLook(Icons.shield_outlined, Color(0xFFE2574C), Color(0xFFA83228), 'best', round: false),
       AwardKind.recordSteps => const AwardLook(Icons.shield_outlined, Color(0xFFE2574C), Color(0xFFA83228), 'best', round: false),
-      AwardKind.sessions5 => const AwardLook(Icons.calendar_today_outlined, Color(0xFF6A5FF0), Color(0xFF4438C9), 'habit'),
     };
 
 /// A drawn award badge: layered gradient disc or shield, an icon, and a tiny
@@ -179,15 +250,34 @@ class AwardBadge extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 /// Haptic "cheers": the pattern length and rhythm differ per award family -
-/// one short tap for the first start, a stamping pair for milestones, a long
-/// drumroll for broken records.
+/// one short tap for a first, a stamping pair for milestones, a long
+/// drumroll for broken records and the grandest totals.
 List<Duration> cheerRhythm(AwardKind k) => switch (k) {
-      AwardKind.first => const [Duration(milliseconds: 300)],
-      AwardKind.km5 || AwardKind.km10 => const [Duration(milliseconds: 220), Duration(milliseconds: 220), Duration(milliseconds: 220)],
-      AwardKind.km21 => const [Duration(milliseconds: 260), Duration(milliseconds: 160), Duration(milliseconds: 260), Duration(milliseconds: 160), Duration(milliseconds: 260)],
-      AwardKind.steps10k => const [Duration(milliseconds: 140), Duration(milliseconds: 140), Duration(milliseconds: 140), Duration(milliseconds: 140), Duration(milliseconds: 140), Duration(milliseconds: 140)],
-      AwardKind.recordKm || AwardKind.recordSteps => const [Duration(milliseconds: 500), Duration(milliseconds: 200), Duration(milliseconds: 500), Duration(milliseconds: 200), Duration(milliseconds: 500)],
-      AwardKind.sessions5 => const [Duration(milliseconds: 300), Duration(milliseconds: 200), Duration(milliseconds: 300)],
+      AwardKind.first ||
+      AwardKind.firstRun ||
+      AwardKind.firstWalk ||
+      AwardKind.firstBike => const [Duration(milliseconds: 300)],
+      AwardKind.km2 ||
+      AwardKind.km5 ||
+      AwardKind.km10 ||
+      AwardKind.km50 ||
+      AwardKind.session5 ||
+      AwardKind.minutes30 ||
+      AwardKind.minutes60 ||
+      AwardKind.sessions5 ||
+      AwardKind.sessions10 ||
+      AwardKind.streak3 => const [Duration(milliseconds: 220), Duration(milliseconds: 220), Duration(milliseconds: 220)],
+      AwardKind.km21 ||
+      AwardKind.km100 ||
+      AwardKind.session10 ||
+      AwardKind.steps5k => const [Duration(milliseconds: 260), Duration(milliseconds: 160), Duration(milliseconds: 260), Duration(milliseconds: 160), Duration(milliseconds: 260)],
+      AwardKind.steps10k ||
+      AwardKind.steps20k ||
+      AwardKind.sessions25 => const [Duration(milliseconds: 140), Duration(milliseconds: 140), Duration(milliseconds: 140), Duration(milliseconds: 140), Duration(milliseconds: 140), Duration(milliseconds: 140)],
+      AwardKind.km42 ||
+      AwardKind.sessions50 ||
+      AwardKind.recordKm ||
+      AwardKind.recordSteps => const [Duration(milliseconds: 500), Duration(milliseconds: 200), Duration(milliseconds: 500), Duration(milliseconds: 200), Duration(milliseconds: 500)],
     };
 
 final _tts = FlutterTts();

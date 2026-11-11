@@ -390,13 +390,35 @@ class ExerciseController extends ChangeNotifier {
       final kinds = <AwardKind>[];
       if (wasFirst) kinds.add(AwardKind.first);
       final total = totalKm;
+      if (total >= 2) kinds.add(AwardKind.km2);
       if (total >= 5) kinds.add(AwardKind.km5);
       if (total >= 10) kinds.add(AwardKind.km10);
       if (total >= 21) kinds.add(AwardKind.km21);
+      if (total >= 42) kinds.add(AwardKind.km42);
+      if (total >= 50) kinds.add(AwardKind.km50);
+      if (total >= 100) kinds.add(AwardKind.km100);
+      if (distanceKm >= 5) kinds.add(AwardKind.session5);
+      if (distanceKm >= 10) kinds.add(AwardKind.session10);
+      if (sessionSteps >= 5000) kinds.add(AwardKind.steps5k);
       if (sessionSteps >= 10000) kinds.add(AwardKind.steps10k);
+      if (sessionSteps >= 20000) kinds.add(AwardKind.steps20k);
+      if (dur >= 1800) kinds.add(AwardKind.minutes30);
+      if (dur >= 3600) kinds.add(AwardKind.minutes60);
+      if (history.length >= 5) kinds.add(AwardKind.sessions5);
+      if (history.length >= 10) kinds.add(AwardKind.sessions10);
+      if (history.length >= 25) kinds.add(AwardKind.sessions25);
+      if (history.length >= 50) kinds.add(AwardKind.sessions50);
+      // Three sessions inside the last seven days, this one included - a real week of movement.
+      final week = history.where((r) => DateTime.now().difference(r.start).inDays < 7).length;
+      if (week >= 3) kinds.add(AwardKind.streak3);
+      // The first of each kind of movement. history[0] is this session; everything
+      // behind it is what came before.
+      final prior = history.length > 1 ? history.sublist(1) : const <WorkoutRecord>[];
+      if (rec.mode == 'run' && !prior.any((r) => r.mode == 'run')) kinds.add(AwardKind.firstRun);
+      if (rec.mode == 'walk' && !prior.any((r) => r.mode == 'walk')) kinds.add(AwardKind.firstWalk);
+      if (rec.mode == 'bike' && !prior.any((r) => r.mode == 'bike')) kinds.add(AwardKind.firstBike);
       if (distanceKm > 0.5 && distanceKm > prevBestKm) kinds.add(AwardKind.recordKm);
       if (sessionSteps >= 2000 && sessionSteps > prevBestSteps) kinds.add(AwardKind.recordSteps);
-      if (history.length >= 5) kinds.add(AwardKind.sessions5);
       earned = await awards.earnAll(kinds);
     }
     notifyListeners();

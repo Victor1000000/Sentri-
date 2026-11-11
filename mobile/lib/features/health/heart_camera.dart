@@ -12,6 +12,12 @@ import 'heart_signal.dart';
 ///
 /// Deliberately patient and honest: it records about thirty seconds, and returns null
 /// (not a guess) whenever the wiggle is too weak or too messy to trust.
+///
+/// v36 accuracy work: the camera's exposure and focus are LOCKED before frames are read.
+/// An auto-exposure that keeps hunting produces its own slow brightness waves that are
+/// not the pulse at all - the single biggest source of "funny numbers". And the answer
+/// must agree with itself: the take is scored in two halves, and a reading whose halves
+/// disagree is refused, not averaged.
 class HeartCamera {
   static const secondsTarget = 30;
 
@@ -78,6 +84,17 @@ class HeartCamera {
       return null; // never pretend a number
     }
     _controller = ctrl;
+    // Lock the exposure and the focus BEFORE the stream starts. Auto-exposure re-lightens
+    // the frame whenever its average drifts, drawing waves that drown the tiny pulse;
+    // auto-focus hunting blurs and brightens for the same reason. A locked camera turns
+    // the finger into a steady lamp, so what wiggles is the blood. Both are best effort:
+    // a phone that refuses the lock still measures with the free-running camera.
+    try {
+      await ctrl.setExposureMode(ExposureMode.locked);
+    } catch (_) {}
+    try {
+      await ctrl.setFocusMode(FocusMode.locked);
+    } catch (_) {}
     // No torch here: the front camera has none. The bright screen supplies the light;
     // the measure screen shows a big bright panel for exactly that.
     try {
@@ -115,16 +132,47 @@ class HeartCamera {
     final n = samples.length;
     frames = _samples.length;
     if (n < 48 || times.isEmpty) return null;
-    final span = times.last - times.first;
-    if (span < 5) return null;
-    final fps = n / span;
+    // The frame rate from the MEDIAN gap between frames, not from span/count: a few
+    // dropped or bunched frames would skew an average, and every estimator below
+    // divides by the frame rate.
+    final fps = _fpsOf(times);
+    if (fps <= 5) return null;
     final ys = detrend(smoothMedian3(samples), (fps * 1.5).round().clamp(3, n));
     // A gentler wiggle floor than the maths default: on dark themes and dim screens the
     // pulse is fainter in camera counts, and demanding more here read "no pulse" on
     // healthy fingers. The agreement checks still rule out junk.
     final bpm = bpmFromSamples(ys, fps, minWiggle: 0.4);
     if (bpm == null) return null;
+    // The take must agree with ITSELF: score the first half and the second half
+    // separately. Two halves that found different hearts mean the window carries
+    // motion or light artefacts, not a pulse - refuse rather than average.
+    final half = samples.length ~/ 2;
+    if (half >= 60) {
+      final ya = detrend(smoothMedian3(samples.sublist(0, half)), (fps * 1.5).round().clamp(3, half));
+      final yb = detrend(smoothMedian3(samples.sublist(half)), (fps * 1.5).round().clamp(3, samples.length - half));
+      final a = bpmFromSamples(ya, fps, minWiggle: 0.4);
+      final b = bpmFromSamples(yb, fps, minWiggle: 0.4);
+      if (a != null && b != null) {
+        final rel = (a - b).abs() / ((a + b) / 2);
+        if (rel > 0.12) return null; // the finger moved, or the light lied: no number
+      }
+    }
     return bpm.round().clamp(30, 220);
+  }
+
+  /// Frames per second from the median inter-frame gap - robust to dropped frames.
+  double _fpsOf(List<double> times) {
+    if (times.length < 2) return 0;
+    final gaps = <double>[];
+    for (var i = 1; i < times.length; i++) {
+      final d = times[i] - times[i - 1];
+      if (d > 0.0005) gaps.add(d); // ignore same-timestamp bunching
+    }
+    if (gaps.isEmpty) return 0;
+    gaps.sort();
+    final med = gaps[gaps.length ~/ 2];
+    if (med <= 0) return 0;
+    return 1 / med;
   }
 
   void _onFrame(CameraImage img) {

@@ -7,14 +7,19 @@
 ///  1. speckle removal (median of neighbours) and slow-drift removal (detrend), done by
 ///     the camera layer before this file is called;
 ///  2. a light 3-tap low-pass trims frame noise above the pulse band;
-///  3. TWO INDEPENDENT estimators read the same window:
+///  3. THREE INDEPENDENT estimators read the same window:
 ///       * the autocorrelation spacing (rhythm-matching, with a parabolic interpolation
 ///         so the lag lands between samples - a whole-frame lag grid alone is too coarse,
-///         which is what made the first version read 71.4 for a true 72), and
-///       * the median spacing between detected beat peaks (works beat by beat);
-///  4. they must agree inside 8% - if the two honest views of the finger disagree, the
-///     reading is refused rather than dressed up. When they agree, the answer is their
-///     blend, which is far steadier than either alone.
+///         which is what made the first version read 71.4 for a true 72),
+///       * the median spacing between detected beat peaks (works beat by beat), and
+///       * a Hann-windowed FFT spectrum (zero-padded for a fine grid): the frequency
+///         whose line stands far above the band's noise floor is the heart. The
+///         spectrum cannot "double" a rate the way a lag grid can - harmonics only
+///         add smaller side peaks - so it is the arbiter of octave errors.
+///  4. an estimator that landed on double or half the others' rate is aligned to the
+///     spectral octave, then the estimates are clustered: a reading is only returned
+///     when at least TWO views agree within 8%. One lone view may carry the reading
+///     only when the rhythm match itself is confident.
 ///
 /// Refusals stay refusals: a flat, noisy, too-short or self-contradicting window returns
 /// null and the screen says "could not trust it" instead of inventing a number.
@@ -86,8 +91,8 @@ double? bpmFromSamples(
 
 const _windows = <double>[999999.0, 24.0, 16.0];
 
-/// How far the two estimators may disagree (relative to the autocorrelation rate) and
-/// still be called the same beat.
+/// How far two estimators may disagree (relative to either rate) and still be called
+/// the same beat.
 const _agreement = 0.08;
 
 double? _readOneWindow(
@@ -123,27 +128,46 @@ double? _readOneWindow(
     s[i] = (a + z[i] + c) / 3;
   }
 
-  final bpmA = _autocorrBpm(s, fps, minBpm: minBpm, maxBpm: maxBpm, trust: trust);
-  final bpmB = _peakIntervalsBpm(s, fps, minBpm: minBpm, maxBpm: maxBpm);
+  final rhythm = _autocorrBpm(s, fps, minBpm: minBpm, maxBpm: maxBpm);
+  var a = rhythm?.bpm;
+  var b = _peakIntervalsBpm(s, fps, minBpm: minBpm, maxBpm: maxBpm);
+  var c = _spectralBpm(s, fps, minBpm: minBpm, maxBpm: maxBpm);
 
-  if (bpmA == null) return null;
-  if (bpmB == null) {
-    // No clean run of beat peaks came out (move artefacts, wet finger, dim light).
-    // The refined rhythm match is admitted whenever it is at least confident: demanding
-    // more here refused far too many real fingers, and the parabolic interpolation plus
-    // the octave guard already keep the rhythm match honest.
-    return bpmA.confidence >= trust ? bpmA.bpm : null;
+  // Octave alignment: if one view landed on double or half of the spectral view's
+  // rate, the spectral view wins the octave (a lag grid can double a rate; a peak
+  // counter can count notches; the spectrum's fundamental cannot lie that way).
+  a = _alignOctave(a, c);
+  b = _alignOctave(b, c);
+
+  // Cluster the surviving views. A reading needs TWO independent views that agree.
+  final views = <double>[];
+  for (final v in [a, b, c]) {
+    if (v != null) views.add(v);
   }
-  final rel = (bpmA.bpm - bpmB).abs() / bpmA.bpm;
-  if (rel > _agreement) {
-    // The two views do not fully agree. Do not refuse blindly: when the rhythm match is
-    // solid, it is the steadier of the two and carries the reading; only refuse when the
-    // match itself is weak. This keeps precision where it is provable and availability
-    // everywhere else.
-    if (bpmA.confidence >= trust + 0.12) return bpmA.bpm;
-    return null;
+  if (views.isNotEmpty) {
+    var bestCluster = <double>[];
+    for (final v in views) {
+      final cl = [for (final w in views) if ((w - v).abs() / v <= _agreement) w];
+      if (cl.length > bestCluster.length) bestCluster = cl;
+    }
+    if (bestCluster.length >= 2) {
+      return bestCluster.reduce((x, y) => x + y) / bestCluster.length;
+    }
   }
-  return (bpmA.bpm + bpmB) / 2;
+  // A single view may carry the reading only when the rhythm match is itself
+  // confident - the parabolic interpolation and the octave guard keep it honest.
+  if (rhythm != null && rhythm.confidence >= trust + 0.05) return rhythm.bpm;
+  return null;
+}
+
+/// Brings [x] into [y]'s octave when they sit a factor of two (or half) apart.
+/// A factor of three is left alone - a genuine disagreement, not an octave slip.
+double? _alignOctave(double? x, double? y) {
+  if (x == null || y == null || y <= 0) return x;
+  final ratio = x / y;
+  if (ratio >= 1.8 && ratio <= 2.25) return y; // x doubled the rate
+  if (ratio >= 1 / 2.25 && ratio <= 1 / 1.8) return 2 * y; // x halved the rate
+  return x;
 }
 
 class _Rhythm {
@@ -159,7 +183,6 @@ _Rhythm? _autocorrBpm(
   double fps, {
   required double minBpm,
   required double maxBpm,
-  required double trust,
 }) {
   final n = s.length;
   final minLag = (fps * 60 / maxBpm).floor().clamp(1, n - 3);
@@ -196,11 +219,13 @@ _Rhythm? _autocorrBpm(
   // Octave guard: at fast rates the correlation at double the lag (half the rate)
   // lines up almost perfectly because a whole-frame lag grid hurts short lags more.
   // If a shorter lag scores nearly as well, that shorter lag is the true fundamental.
+  // The bar is deliberately high (0.96): a dicrotic wave can look tempting at half
+  // the true period, and calling it the fundamental doubles the reading.
   var lag0 = bestLag;
   for (final k in const [2, 3]) {
     final cand = (bestLag / k).round();
     if (cand < minLag || cand >= bestLag) continue;
-    if (normAt(cand) >= best * 0.92) {
+    if (normAt(cand) >= best * 0.96) {
       lag0 = cand;
       break;
     }
@@ -286,4 +311,109 @@ double? _peakIntervalsBpm(
   final bpm = 60.0 * fps / med2;
   if (bpm < minBpm || bpm > maxBpm) return null;
   return bpm;
+}
+
+// ---- the spectral view ----
+
+/// Hann-windowed, zero-padded FFT: the frequency in the pulse band whose line stands
+/// clearly above the band's noise floor. Unlike a lag grid, a spectrum does not put
+/// phantom peaks at half the true period - harmonics appear as smaller lines at
+/// MULTIPLES of the rate, never at a fraction of it - so this view arbitrates the
+/// octave errors the other two can make.
+double? _spectralBpm(
+  List<double> s,
+  double fps, {
+  required double minBpm,
+  required double maxBpm,
+}) {
+  final n = s.length;
+  if (n < 64 || fps <= 0) return null;
+  var m = 1;
+  while (m < 2 * n) {
+    m <<= 1;
+    if (m > 16384) break; // plenty: even 16384 bins is a fraction of a bpm here
+  }
+  final re = List<double>.filled(m, 0);
+  final im = List<double>.filled(m, 0);
+  for (var i = 0; i < n; i++) {
+    // Hann window: the take is a snippet of an endless stream, and a hard cut at
+    // both ends would smear one sharp line into a wide skirt.
+    re[i] = s[i] * 0.5 * (1 - math.cos(2 * math.pi * i / (n - 1)));
+  }
+  _fft(re, im);
+  final binHz = fps / m;
+  final kLo = (minBpm / 60 / binHz).floor().clamp(1, m ~/ 2 - 2);
+  final kHi = (maxBpm / 60 / binHz).ceil().clamp(kLo + 1, m ~/ 2 - 1);
+
+  var bestK = -1;
+  var bestMag = -1.0;
+  final band = <double>[];
+  double magAt(int k) => math.sqrt(re[k] * re[k] + im[k] * im[k]);
+  for (var k = kLo; k <= kHi; k++) {
+    final mag = magAt(k);
+    band.add(mag);
+    if (mag > bestMag) {
+      bestMag = mag;
+      bestK = k;
+    }
+  }
+  if (bestK < 0 || bestMag <= 0) return null;
+  // The line must stand above the band's noise floor: the median magnitude of the
+  // band, computed away from the peak's own skirts (plus or minus 2 bins).
+  final floorSorted = List<double>.of(band)..sort();
+  final noise = floorSorted[floorSorted.length ~/ 2];
+  if (noise <= 0 || bestMag / noise < 3.0) return null;
+
+  // Parabolic refinement: the true line sits between bins.
+  double kF = bestK.toDouble();
+  final ym = bestMag, yl = magAt(bestK - 1), yr = magAt(bestK + 1);
+  final denom = yl - 2 * ym + yr;
+  if (denom.abs() > 1e-12) {
+    final delta = 0.5 * (yl - yr) / denom;
+    if (delta.abs() <= 0.5) kF = bestK + delta;
+  }
+  final bpm = 60.0 * kF * binHz;
+  if (bpm < minBpm || bpm > maxBpm) return null;
+  return bpm;
+}
+
+/// In-place radix-2 FFT (iterative Cooley-Tukey). [re] and [im] must be the same
+/// length, a power of two.
+void _fft(List<double> re, List<double> im) {
+  final n = re.length;
+  if (n <= 1) return;
+  // Bit-reversal permutation first.
+  var j = 0;
+  for (var i = 1; i < n; i++) {
+    var bit = n >> 1;
+    for (; (j & bit) != 0; bit >>= 1) {
+      j ^= bit;
+    }
+    j ^= bit;
+    if (i < j) {
+      final tr = re[i]; re[i] = re[j]; re[j] = tr;
+      final ti = im[i]; im[i] = im[j]; im[j] = ti;
+    }
+  }
+  for (var len = 2; len <= n; len <<= 1) {
+    final ang = -2 * math.pi / len;
+    final wr = math.cos(ang), wi = math.sin(ang);
+    final half = len >> 1;
+    for (var i = 0; i < n; i += len) {
+      var cr = 1.0, ci = 0.0;
+      for (var k = 0; k < half; k++) {
+        final ar = re[i + k], ai = im[i + k];
+        final p = i + k + half;
+        final vr = re[p] * cr - im[p] * ci;
+        final vi = re[p] * ci + im[p] * cr;
+        re[i + k] = ar + vr;
+        im[i + k] = ai + vi;
+        re[p] = ar - vr;
+        im[p] = ai - vi;
+        final ncr = cr * wr - ci * wi;
+        ci = cr * wi + ci * wr;
+        cr = ncr;
+      }
+    }
+  }
 }
