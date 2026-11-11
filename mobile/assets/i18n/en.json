@@ -60,7 +60,7 @@
   "sos.wrong_pin": "Wrong PIN.",
   "sos.locked": "Too many tries. Try again later.",
   "sos.im_safe": "I'm safe",
-  "sos.contacts_busy": "Contacts cannot be changed while an alert is active.",
+  "sos.contacts_busy": "An alert started earlier is still running, so contacts can't be saved on the server yet. They are saved on this phone and will sync on their own - you can continue.",
   "tabs.home": "Home",
   "tabs.map": "Map",
   "tabs.police": "Police",

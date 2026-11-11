@@ -60,7 +60,7 @@
   "sos.wrong_pin": "Wrong PIN.",
   "sos.locked": "Too many tries. Try later.",
   "sos.im_safe": "I dey safe",
-  "sos.contacts_busy": "You no fit change contacts while alert dey active.",
+  "sos.contacts_busy": "One alert wey start before still dey run, so contacts no fit save for server yet. Dem save for this phone and dem go sync by demsef - you fit continue.",
   "tabs.home": "Home",
   "tabs.map": "Map",
   "tabs.health": "Health",

@@ -1,13 +1,14 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:typed_data' show Uint8List;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/i18n/i18n.dart';
-import '../../core/widgets/avatar_icons.dart';
 import '../../core/widgets/brand.dart';
 import '../../core/widgets/flat.dart';
+import 'floating3d.dart';
 import 'onboarding_controller.dart';
 import 'permissions_panel.dart';
 import '../../core/platform/native_bridge.dart';
@@ -145,8 +146,7 @@ class _PhoneStepState extends State<_PhoneStep> {
 
   @override
   Widget build(BuildContext context) {
-    // The welcome moment, like the reference: Sentri faces and the tools of
-    // the app float above, the form sits in one soft card below.
+    // The welcome moment: the 3D floating field above, the form in one soft card below.
     return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -183,9 +183,9 @@ class _PhoneStepState extends State<_PhoneStep> {
   }
 }
 
-/// The playful welcome field: two of the app's own Sentri faces plus the tools
-/// it is made of - the alert bell, the location pin, the shield - float and bob
-/// gently like the reference's drifting tokens. All drawn in code, no assets.
+/// The playful welcome field: real 3D renders - the siren, the bell, the shield,
+/// the pin and two faces - drift and tilt on their own sine phases above the
+/// form, each grounded by a soft shadow that reacts to its height.
 class _FloatingField extends StatefulWidget {
   const _FloatingField();
   @override
@@ -203,47 +203,54 @@ class _FloatingFieldState extends State<_FloatingField> with SingleTickerProvide
 
   @override
   Widget build(BuildContext context) {
-    if (MediaQuery.of(context).disableAnimations) return const SizedBox(height: 140);
+    if (MediaQuery.of(context).disableAnimations) return _field(t: 0.25, animate: false);
+    return AnimatedBuilder(
+      animation: _c,
+      builder: (context, _) => _field(t: _c.value, animate: true),
+    );
+  }
+
+  /// The welcome moment: real 3D renders (the siren, the bell, the shield, the
+  /// pin, and two faces) drifting above the form. Each one bobs on its own sine
+  /// phase, tilts gently, and casts a ground shadow that shrinks and fades as
+  /// it rises - which is what makes the depth read as true 3D, not stickers.
+  Widget _field({required double t, required bool animate}) {
+    double wave(double phase) => math.sin(2 * math.pi * (t + phase));
+    Widget item(Uint8List bytes, double size, {required double phase, required double amp, required double left, required double top, double spin = 0.05}) {
+      final lift = animate ? wave(phase) : 0.0;
+      return Stack(clipBehavior: Clip.none, children: [
+        // Ground shadow: reacts to height, so the element floats over the page.
+        Positioned(
+          left: left + size * 0.16,
+          top: top + size - 6,
+          child: Opacity(
+            opacity: (0.16 - 0.07 * lift).clamp(0.0, 1.0),
+            child: Transform.scale(
+              scale: 1.0 - 0.14 * lift,
+              child: Container(width: size * 0.68, height: size * 0.13, decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(999))),
+            ),
+          ),
+        ),
+        Positioned(
+          left: left,
+          top: top - amp * lift,
+          child: Transform.rotate(
+            angle: spin * wave(phase + 0.14),
+            child: Image.memory(bytes, width: size, height: size, filterQuality: FilterQuality.high, gaplessPlayback: true),
+          ),
+        ),
+      ]);
+    }
     return SizedBox(
-      height: 158,
-      child: AnimatedBuilder(
-        animation: _c,
-        builder: (context, _) {
-          final t = _c.value;
-          Widget bob(double phase, double amp, Widget child) => Transform.translate(
-                offset: Offset(0, -amp * math.sin(2 * math.pi * (t + phase))),
-                child: child,
-              );
-          Widget tool(IconData icon, Color color, double size) => Container(
-                width: size,
-                height: size,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [color.withValues(alpha: 0.9), color]),
-                  boxShadow: [BoxShadow(color: color.withValues(alpha: 0.35), blurRadius: 12, offset: const Offset(0, 5))],
-                ),
-                child: Center(child: Icon(icon, color: Colors.white, size: size * 0.46)),
-              );
-          Widget face(int index, double size) => Container(
-                width: size,
-                height: size,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Flat.card(context), width: 3),
-                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.10), blurRadius: 12, offset: const Offset(0, 5))],
-                ),
-                child: SentriAvatar(index: index, size: size),
-              );
-          return Stack(children: [
-            Positioned(left: 34, top: 22, child: bob(0.00, 8, tool(Icons.notifications_active_rounded, const Color(0xFF6A5FF0), 54))),
-            Positioned(left: 104, top: 76, child: bob(0.42, 6, tool(Icons.location_on_rounded, const Color(0xFF1E9E56), 46))),
-            Positioned(left: 10, top: 96, child: bob(0.88, 7, face(10, 46))),
-            Positioned(right: 12, top: 6, child: bob(0.20, 7, face(2, 58))),
-            Positioned(right: 86, top: 66, child: bob(0.58, 6, tool(Icons.shield_rounded, const Color(0xFFE5A33C), 44))),
-            Positioned(right: 24, top: 100, child: bob(0.74, 8, face(27, 48))),
-          ]);
-        },
-      ),
+      height: 170,
+      child: Stack(children: [
+        item(f3dsirenBytes, 78, phase: 0.00, amp: 9, left: 30, top: 12, spin: 0.07),
+        item(f3dgrinBytes, 50, phase: 0.20, amp: 7, left: 128, top: 4),
+        item(f3dshieldBytes, 46, phase: 0.55, amp: 6, left: 232, top: 56),
+        item(f3dpinBytes, 40, phase: 0.42, amp: 6, left: 208, top: 120),
+        item(f3dsmileBytes, 46, phase: 0.80, amp: 7, left: 6, top: 116),
+        item(f3dbellBytes, 42, phase: 0.68, amp: 8, left: 106, top: 100),
+      ]),
     );
   }
 }
@@ -414,11 +421,21 @@ class _ContactsStepState extends State<_ContactsStep> {
           PillButton(
             onPressed: widget.c.busy
                 ? null
-                : () => unawaited(widget.c.submitContacts(
+                : () {
+                    // The server refused the save because an alert started earlier is
+                    // still running on this account. The list is safe on this phone and
+                    // a quiet retry syncs it, so Continue moves on instead of trapping
+                    // the person on this step.
+                    if (widget.c.contactsPendingServer) {
+                      widget.c.continuePastBlockedContacts();
+                      return;
+                    }
+                    unawaited(widget.c.submitContacts(
                       [for (final c in _ctls) c.text],
                       // Each contact is texted in the language chosen for this app, until per-contact choice is added.
                       locales: [for (final _ in _ctls) widget.i18n.code],
-                    )),
+                    ));
+                  },
             label: widget.i18n.t('common.continue'),
           ),
         ],

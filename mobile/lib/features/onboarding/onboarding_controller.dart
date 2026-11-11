@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
@@ -64,6 +65,13 @@ class OnboardingController extends ChangeNotifier {
 
   /// Earliest moment another code may be requested (30 s after the last one).
   DateTime resendAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// True when the server refused the contacts save because an alert started earlier
+  /// is still running on this account. The list is safe on this phone and a quiet
+  /// retry keeps trying to sync it, so onboarding is never held hostage by the 409.
+  bool contactsPendingServer = false;
+  List<({String phone, String locale})>? _pendingContacts;
+  Timer? _contactRetry;
 
   /// Picks up where the user left off if they quit part-way.
   Future<void> resume() async {
@@ -224,10 +232,81 @@ class OnboardingController extends ChangeNotifier {
     }
     await _run(() async {
       final list = [for (var i = 0; i < r.phones!.length; i++) (phone: r.phones![i], locale: i < locales.length ? locales[i] : 'en')];
-      await api.saveContacts(list);
+      try {
+        await api.saveContacts(list);
+      } on ApiHttpError catch (e) {
+        if (e.status == 409) {
+          // The server has an alert for this account that is still running (one started
+          // before this install and never ended). It ends by itself, so: keep the list
+          // safe on this phone, quietly retry the sync until the alert is over, tell the
+          // person plainly, and let them continue - sign-up must not be bricked by it.
+          await contacts.save([for (final c in list) LocalContact(phone: c.phone, locale: c.locale)]);
+          _pendingContacts = list;
+          contactsPendingServer = true;
+          _startContactRetry();
+          errorKey = 'sos.contacts_busy';
+          return;
+        }
+        rethrow;
+      }
+      _pendingContacts = null;
+      contactsPendingServer = false;
+      _stopContactRetry();
       await contacts.save([for (final c in list) LocalContact(phone: c.phone, locale: c.locale)]);
       _go(OnboardingStep.pins);
     });
+  }
+
+  /// Continues past the blocked contacts step. The list is already saved on this
+  /// phone and [_startContactRetry] keeps syncing it; the alert ends by itself.
+  void continuePastBlockedContacts() {
+    if (step != OnboardingStep.contacts) return;
+    _go(OnboardingStep.pins);
+  }
+
+  /// Quietly re-tries the contacts sync once a minute while the app is open. The
+  /// server only refuses while an alert is running, and alerts end on their own
+  /// (they are capped by the repeat loop and swept if the backend restarted).
+  /// Capped at 120 tries (~2 h), the longest a stuck alert can live server-side.
+  void _startContactRetry() {
+    _stopContactRetry();
+    _contactTries = 0;
+    _contactRetry = Timer.periodic(const Duration(seconds: 60), (_) => unawaited(_retryPendingContacts()));
+    unawaited(_retryPendingContacts());
+  }
+
+  int _contactTries = 0;
+
+  void _stopContactRetry() {
+    _contactRetry?.cancel();
+    _contactRetry = null;
+  }
+
+  Future<void> _retryPendingContacts() async {
+    final list = _pendingContacts;
+    if (list == null) {
+      _stopContactRetry();
+      return;
+    }
+    if (++_contactTries > 120) {
+      _stopContactRetry();
+      return;
+    }
+    try {
+      await api.saveContacts(list);
+      _pendingContacts = null;
+      contactsPendingServer = false;
+      _stopContactRetry();
+      notifyListeners();
+    } catch (_) {
+      // The alert is still running, or the network is down. Try again next minute.
+    }
+  }
+
+  @override
+  void dispose() {
+    _stopContactRetry();
+    super.dispose();
   }
 
   /// One cancel PIN, typed twice. The server and the phone still expect a second "silent alert" PIN, so

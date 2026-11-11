@@ -324,4 +324,36 @@ reference, and give sign-up the floating-elements welcome. i18n still 287 keys �
 - Pipeline notes: inbox_screen.dart joined the leaf table; check-apk20 gained a `FloatingField` libapp.so needle
   and a Yoruba-health check (bundled yo.json must contain the corrected `Ibí okan` and no U+00C3 mojibake).
 
+## 16. Version 32 (this patch) — engineer's notes
+Vic's asks: make the sign-up floating elements REAL 3D ("go online to download the 3d elements if you have to,
+just make sure it's dope") and fix the login blocker ("Contacts cannot be changed while an alert is active."
+during the onboarding contacts step - he had hit it once before). i18n stays 287 keys × 5 — VALUE EDITS ONLY.
+- 3D floating welcome (`features/onboarding/floating3d.dart` — NEW LEAF): six genuine 3D renders with
+  transparency embedded as base64 (siren hero, bell, shield, pin, two faces). Artwork: Microsoft Fluent Emoji
+  3D, MIT license (github.com/microsoft/fluentui-emoji), downloaded 2026-11-11. `_FloatingField` in
+  onboarding_screens.dart now draws them via `Image.memory`; each element bobs on its own sine phase (4.2 s
+  repeating controller, unchanged), tilts gently, and casts a ground shadow that shrinks and fades as it rises,
+  which sells the depth. Off under `disableAnimations` (static arrangement shown instead). Code-drawn gradient
+  bubbles and SentriAvatar usage in the field are gone (avatar_icons import removed from onboarding_screens).
+- Login blocker root cause: `PUT /v1/me/contacts` is answered 409 `sos_active` whenever the account has a
+  sos_event in countdown/active state (backend auth routes; user repos throw LiveSosError). An alert started on
+  a previous install and never cancelled keeps that state until its repeat cap expires it (~100 min) or the
+  backend's boot sweeper expires it - so a reinstall inside that window bricks sign-up: during onboarding the
+  SOS screen (and cancel PIN) is unreachable, the error was a dead end, and any 409 anywhere was mapped to
+  `sos.contacts_busy`. Backend patches in this repo do NOT reach the deployed server (no deploy workflow), so
+  the fix lives entirely in the app (`features/onboarding/onboarding_controller.dart` — NEW LEAF):
+  * submitContacts catches the 409: saves the list on the phone (LocalContact store), sets
+    `contactsPendingServer`, starts a quiet retry (every 60 s, immediate first try, capped at 120 tries ≈ 2 h,
+    the longest a stuck alert can live) that syncs the same list to the server as soon as it succeeds, and
+    shows the rewritten `sos.contacts_busy` message; no throw, no bricked step.
+  * the contacts step's Continue button acts as the escape while `contactsPendingServer` is set
+    (`continuePastBlockedContacts()` → pins step), so sign-up always completes; a later success quietly clears
+    the flag. Controller now overrides dispose to cancel the retry timer.
+  * `sos.contacts_busy` value rewritten in all 5 locales (key untouched): explains the older alert is still
+    running, that contacts are saved on the phone and will sync on their own, and that you can continue.
+- Tests: FakeApi gained `saveContactsError`; onboarding_test gained the 409 path (error key, local save,
+  pending flag, continue past, and later-save clears pending).
+- Pipeline notes: onboarding_controller.dart and floating3d.dart joined the leaf table; check-apk20 gained one
+  unique base64 fragment needle per 3D render (all six PNGs share headers, so fragments are taken deeper into
+  each blob) plus new-text/gone-old-text checks for the rewritten `sos.contacts_busy` in the bundled en.json.
 

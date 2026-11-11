@@ -244,6 +244,23 @@ void main() {
       expect(r.api.contactsSaved.single, ['+2348031111111', '+2348032222222', '+2348033333333']);
       expect(r.c.step, OnboardingStep.pins);
     });
+
+    test('a 409 from a still-running alert does not brick sign-up: the list is kept on the phone and onboarding can continue', () async {
+      final r = _rig();
+      r.api.saveContactsError = ApiHttpError(409, 'sos_active');
+      await r.c.submitContacts(['08031111111', '08032222222']);
+      expect(r.c.errorKey, 'sos.contacts_busy');
+      expect(r.c.contactsPendingServer, isTrue);
+      expect(r.c.step, OnboardingStep.contacts);
+      expect((await r.c.contacts.load()).length, 2); // kept safe on this phone
+      r.c.continuePastBlockedContacts();
+      expect(r.c.step, OnboardingStep.pins);
+      // And a later save (alert over) clears the pending state.
+      r.api.saveContactsError = null;
+      await r.c.submitContacts(['08031111111', '08032222222']);
+      expect(r.c.contactsPendingServer, isFalse);
+      expect(r.c.step, OnboardingStep.pins);
+    });
   });
 
   group('requestOtp over HTTP', () {

@@ -148,9 +148,14 @@ class FakeApi implements SentriApi {
 
   @override
   Future<void> saveContacts(List<({String phone, String locale})> contacts) async {
+    if (saveContactsError != null) throw saveContactsError!;
     contactsSaved.add([for (final c in contacts) c.phone]);
   }
   final List<List<String>> contactsSaved = [];
+
+  /// Set to make saveContacts fail, e.g. the 409 the server answers with while an
+  /// alert started earlier is still running on the account.
+  ApiHttpError? saveContactsError;
 
   @override
   Future<void> savePins({required String cancelPin, required String duressPin}) async {
