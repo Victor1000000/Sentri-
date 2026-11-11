@@ -211,51 +211,35 @@ class _FloatingFieldState extends State<_FloatingField> with SingleTickerProvide
   }
 
   /// The welcome moment: real 3D renders (the siren, the bell, the shield, the
-  /// pin, and two faces) drifting above the form. Each one bobs on its own sine
-  /// phase, tilts gently, and casts a ground shadow that shrinks and fades as
-  /// it rises - which is what makes the depth read as true 3D, not stickers.
+  /// pin, and two faces) drifting above the form, connected by a moving line
+  /// that glides from one to the next and directs the eye across them.
   Widget _field({required double t, required bool animate}) {
     double wave(double phase) => math.sin(2 * math.pi * (t + phase));
-    Widget item(Uint8List bytes, double size, {required double phase, required double amp, required double left, required double top, double spin = 0.05}) {
-      final lift = animate ? wave(phase) : 0.0;
-      return Stack(clipBehavior: Clip.none, children: [
-        // Ground shadow: reacts to height, so the element floats over the page.
-        Positioned(
-          left: left + size * 0.16,
-          top: top + size - 6,
-          child: Opacity(
-            opacity: (0.16 - 0.07 * lift).clamp(0.0, 1.0),
-            child: Transform.scale(
-              scale: 1.0 - 0.14 * lift,
-              child: Container(width: size * 0.68, height: size * 0.13, decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(999))),
-            ),
-          ),
-        ),
-        Positioned(
-          left: left,
-          top: top - amp * lift,
-          child: Transform.rotate(
-            angle: spin * wave(phase + 0.14),
-            child: Image.memory(bytes, width: size, height: size, filterQuality: FilterQuality.high, gaplessPlayback: true),
-          ),
-        ),
-      ]);
-    }
+    final items = <({Uint8List bytes, double size, double phase, double amp, double left, double top, double spin})>[
+      (bytes: f3dsirenBytes, size: 78, phase: 0.00, amp: 9, left: 30, top: 12, spin: 0.07),
+      (bytes: f3dgrinBytes, size: 50, phase: 0.20, amp: 7, left: 128, top: 4, spin: 0.05),
+      (bytes: f3dshieldBytes, size: 46, phase: 0.55, amp: 6, left: 232, top: 56, spin: 0.05),
+      (bytes: f3dpinBytes, size: 40, phase: 0.42, amp: 6, left: 208, top: 120, spin: 0.06),
+      (bytes: f3dsmileBytes, size: 46, phase: 0.80, amp: 7, left: 6, top: 116, spin: 0.05),
+      (bytes: f3dbellBytes, size: 42, phase: 0.68, amp: 8, left: 106, top: 100, spin: 0.06),
+    ];
     return SizedBox(
       height: 170,
       child: Stack(children: [
-        item(f3dsirenBytes, 78, phase: 0.00, amp: 9, left: 30, top: 12, spin: 0.07),
-        item(f3dgrinBytes, 50, phase: 0.20, amp: 7, left: 128, top: 4),
-        item(f3dshieldBytes, 46, phase: 0.55, amp: 6, left: 232, top: 56),
-        item(f3dpinBytes, 40, phase: 0.42, amp: 6, left: 208, top: 120),
-        item(f3dsmileBytes, 46, phase: 0.80, amp: 7, left: 6, top: 116),
-        item(f3dbellBytes, 42, phase: 0.68, amp: 8, left: 106, top: 100),
+        // The moving line: a smooth path through the elements, dashed, with the
+        // dashes gliding along it - it reads as energy flowing element to
+        // element, directing the eye exactly like the reference boards.
+        Positioned.fill(
+          child: CustomPaint(
+            painter: ConnectLine([for (final it in items) Offset(it.left + it.size / 2, it.top + it.size / 2)], wave(0.30)),
+          ),
+        ),
+        for (final it in items)
+          FloatItem3d(bytes: it.bytes, size: it.size, phase: it.phase, amp: it.amp, left: it.left, top: it.top, spin: it.spin, t: t, animate: animate),
       ]),
     );
   }
 }
-
-class _OtpStep extends StatefulWidget {
   const _OtpStep({required this.c, required this.i18n});
   final OnboardingController c;
   final I18n i18n;
@@ -292,6 +276,11 @@ class _OtpStepState extends State<_OtpStep> {
     return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          FloatBand([
+            (bytes: f3dbellBytes, size: 50, left: 26, top: 10, phase: 0.00),
+            (bytes: f3dstarBytes, size: 44, left: 150, top: 34, phase: 0.40),
+            (bytes: f3dshieldBytes, size: 48, left: 258, top: 6, phase: 0.72),
+          ]),
           _title(context, widget.i18n.t('otp.title')),
           Text(widget.i18n.t(telegram ? 'otp.telegram_sent' : 'otp.sent_to', {'phone': widget.c.phone})),
           if (telegram) ...[
@@ -402,6 +391,11 @@ class _ContactsStepState extends State<_ContactsStep> {
   Widget build(BuildContext context) => Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          FloatBand([
+            (bytes: f3dgrinBytes, size: 50, left: 26, top: 10, phase: 0.00),
+            (bytes: f3dsmileBytes, size: 44, left: 150, top: 34, phase: 0.40),
+            (bytes: f3dpinBytes, size: 48, left: 258, top: 6, phase: 0.72),
+          ]),
           _title(context, widget.i18n.t('contacts.title')),
           Text(widget.i18n.t('contacts.help')),
           const SizedBox(height: 16),
@@ -472,6 +466,11 @@ class _PinsStepState extends State<_PinsStep> {
   Widget build(BuildContext context) => Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          FloatBand([
+            (bytes: f3dshieldBytes, size: 50, left: 26, top: 10, phase: 0.00),
+            (bytes: f3dstarBytes, size: 44, left: 150, top: 34, phase: 0.40),
+            (bytes: f3dsmileBytes, size: 48, left: 258, top: 6, phase: 0.72),
+          ]),
           _title(context, widget.i18n.t('pins.title')),
           Text(widget.i18n.t('pins.cancel_help')),
           const SizedBox(height: 16),

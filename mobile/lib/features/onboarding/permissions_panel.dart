@@ -6,6 +6,7 @@ import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/i18n/i18n.dart';
 import '../../core/platform/native_bridge.dart';
+import 'floating3d.dart';
 
 /// Shows which permissions Sentri needs and lets the user turn each on. Used in onboarding and in
 /// Settings. Re-checks when the app returns from the system settings screens.
@@ -87,6 +88,13 @@ class _PermissionsPanelState extends State<PermissionsPanel> with WidgetsBinding
     final android = Platform.isAndroid;
     return Column(
       children: [
+        // The same floating band every sign-up step wears, so the settings
+        // phase feels like part of the same journey.
+        FloatBand([
+          (bytes: f3dsirenBytes, size: 50, left: 26, top: 10, phase: 0.00),
+          (bytes: f3dshieldBytes, size: 44, left: 150, top: 34, phase: 0.40),
+          (bytes: f3dbellBytes, size: 48, left: 258, top: 6, phase: 0.72),
+        ]),
         _row('perm.location', _location, _askLocation),
         _row('perm.notifications', _notifications, () async {
           await Permission.notification.request();

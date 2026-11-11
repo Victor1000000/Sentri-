@@ -103,16 +103,55 @@ class SplashView extends StatelessWidget {
       );
 }
 
-/// Soft lavender gradient used behind every screen.
+/// Soft lavender gradient used behind every screen, with two quiet pools of
+/// the brand's complementary colours (indigo and mint) glowing at the corners,
+/// so pages have gentle colour life instead of dead flat grey.
 class SentriBackground extends StatelessWidget {
   const SentriBackground({super.key, required this.child});
   final Widget child;
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
-    // Both modes stay flat and calm: plain surface, no gradients, no glow spots.
-    return DecoratedBox(decoration: BoxDecoration(color: dark ? SentriColors.surfaceDark : SentriColors.surfaceLight), child: child);
+    // The surface stays calm; only two very soft washes sit on it.
+    return DecoratedBox(
+      decoration: BoxDecoration(color: dark ? SentriColors.surfaceDark : SentriColors.surfaceLight),
+      child: CustomPaint(
+        painter: _WashPainter(dark: dark),
+        child: child,
+      ),
+    );
   }
+}
+
+/// Two radial colour pools: warm indigo at the top right, mint at the bottom
+/// left, plus a whisper of amber between them - complementary to both. In
+/// light mode they are barely there (6%); dark mode lets them breathe (11%).
+class _WashPainter extends CustomPainter {
+  const _WashPainter({required this.dark});
+  final bool dark;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final a = dark ? 0.11 : 0.06;
+    final pools = [
+      (color: const Color(0xFF6A5FF0), center: Offset(size.width * 1.02, -size.width * 0.18), radius: size.width * 0.85),
+      (color: const Color(0xFF17B86A), center: Offset(-size.width * 0.18, size.height * 1.05), radius: size.width * 0.9),
+      (color: const Color(0xFFE5A33C), center: Offset(size.width * 0.85, size.height * 0.92), radius: size.width * 0.55),
+    ];
+    for (final p in pools) {
+      canvas.drawCircle(
+        p.center,
+        p.radius,
+        Paint()
+          ..shader = RadialGradient(
+            colors: [p.color.withValues(alpha: a), p.color.withValues(alpha: 0.0)],
+          ).createShader(Rect.fromCircle(center: p.center, radius: p.radius)),
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_WashPainter oldDelegate) => oldDelegate.dark != dark;
 }
 
 /// Logo top-left, round translate button top-right. Tapping it opens the language sheet.

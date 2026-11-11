@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data' show Uint8List;
 import 'dart:ui' show FontFeature;
 
 import 'package:flutter/material.dart';
@@ -12,6 +13,7 @@ import '../../core/net/api.dart';
 import '../../core/widgets/brand.dart';
 import '../../core/widgets/flat.dart';
 import '../../core/widgets/glass.dart';
+import '../onboarding/floating3d.dart';
 import '../police/police_call_card.dart';
 import '../police/police_directory.dart';
 import '../share/share_screen.dart';
@@ -26,13 +28,45 @@ String _ago(DateTime d, String Function(String, [Map<String, String>]) t) {
   return t('inbox.day', {'n': '${m ~/ 1440}'});
 }
 
-IconData _icon(InboxEntry e) => switch (e.kind) {
-      'sos' || 'duress' || 'offline' => Icons.warning_amber_rounded,
-      'low_battery' => Icons.battery_alert,
-      'health_alert' => Icons.monitor_heart_outlined,
-      'share_start' => Icons.near_me,
-      'share_stop' => Icons.near_me_disabled,
-      _ => Icons.notifications_none,
+/// Which art wears the message disc: a 3D render when we have one that fits,
+/// an icon on a coloured disc otherwise. Each kind also carries its own
+/// complementary accent, so the list reads as a colourful feed, not grey rows.
+({Uint8List? img, IconData? icon, Color a, Color b, Color wash}) _art(InboxEntry e, bool urgent) => switch (e.kind) {
+      'sos' || 'duress' || 'offline' => (
+        img: urgent ? f3dsirenBytes : f3dbellBytes,
+        icon: null,
+        a: urgent ? const Color(0xFFFF6B5E) : const Color(0xFFFF8A65),
+        b: urgent ? const Color(0xFFB3251B) : const Color(0xFFC2412F),
+        wash: urgent ? const Color(0xFFB3251B) : const Color(0xFF7B6CF0),
+      ),
+      'low_battery' => (
+        img: null,
+        icon: Icons.battery_alert,
+        a: const Color(0xFFFFC64D),
+        b: const Color(0xFFE5A33C),
+        wash: const Color(0xFFE5A33C),
+      ),
+      'health_alert' => (
+        img: null,
+        icon: Icons.monitor_heart_outlined,
+        a: const Color(0xFF4CD6A8),
+        b: const Color(0xFF1E9E56),
+        wash: const Color(0xFF1E9E56),
+      ),
+      'share_start' || 'share_stop' => (
+        img: f3dpinBytes,
+        icon: null,
+        a: const Color(0xFFFF7BAC),
+        b: const Color(0xFFD6336C),
+        wash: const Color(0xFFD6336C),
+      ),
+      _ => (
+        img: f3dbellBytes,
+        icon: null,
+        a: const Color(0xFF9C8FF5),
+        b: const Color(0xFF5348C8),
+        wash: const Color(0xFF5348C8),
+      ),
     };
 
 /// Everything people sent you inside Sentri. Alerts only ever arrive here and as a push: never as a text.
@@ -74,8 +108,14 @@ class InboxScreen extends StatelessWidget {
             ],
             if (d.items.isEmpty && !inbox.loading)
               Padding(
-                padding: const EdgeInsets.symmetric(vertical: 48),
-                child: Text(inbox.failed ? (inbox.failedAuth ? t('inbox.need_signin') : t('inbox.failed')) : t('inbox.none'), textAlign: TextAlign.center, style: TextStyle(fontSize: 15, color: Flat.muted(context))),
+                padding: const EdgeInsets.symmetric(vertical: 40),
+                // The empty mailbox wears the 3D bell, so even "nothing yet"
+                // carries the app's character.
+                child: Column(children: [
+                  Image.memory(f3dbellBytes, width: 84, height: 84, filterQuality: FilterQuality.high),
+                  const SizedBox(height: 12),
+                  Text(inbox.failed ? (inbox.failedAuth ? t('inbox.need_signin') : t('inbox.failed')) : t('inbox.none'), textAlign: TextAlign.center, style: TextStyle(fontSize: 15, color: Flat.muted(context))),
+                ]),
               )
             else
               // One rounded card per message, like the activity-feed reference:
@@ -93,9 +133,13 @@ class InboxScreen extends StatelessWidget {
 
   Widget _tile(BuildContext context, InboxEntry e) {
     final urgent = e.urgent && e.live;
+    final art = _art(e, urgent);
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Card(
+        // Unread messages carry a soft wash of their kind's accent, so the
+        // feed reads colourful and new things pop.
+        color: e.read ? null : art.wash.withValues(alpha: 0.08),
         child: InkWell(
           borderRadius: BorderRadius.circular(20),
           onTap: () async {
@@ -105,22 +149,25 @@ class InboxScreen extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.all(14),
             child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
-              // The kind of message, on a roomy disc like the reference's
-              // gradient bubbles: alarm red for live danger, indigo otherwise.
+              // The kind of message: a 3D render (siren, bell, pin) on a
+              // colourful pastel disc, or its icon when no render fits.
               Container(
-                width: 46,
-                height: 46,
+                width: 48,
+                height: 48,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   gradient: LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
-                    colors: urgent
-                        ? const [Color(0xFFE4574C), Color(0xFFB3251B)]
-                        : const [Color(0xFF7B6CF0), Color(0xFF5348C8)],
+                    colors: [Color.lerp(art.a, Colors.white, 0.25)!, art.b],
                   ),
                 ),
-                child: Icon(_icon(e), size: 22, color: Colors.white),
+                child: Padding(
+                  padding: const EdgeInsets.all(6),
+                  child: art.img != null
+                      ? Image.memory(art.img!, fit: BoxFit.contain, filterQuality: FilterQuality.high)
+                      : Icon(art.icon, size: 22, color: Colors.white),
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(

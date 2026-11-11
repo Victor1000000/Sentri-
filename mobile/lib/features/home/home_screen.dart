@@ -18,6 +18,8 @@ import '../share/share_controller.dart';
 import '../share/share_screen.dart';
 import '../../core/widgets/flat.dart';
 import '../../core/widgets/avatar_icons.dart';
+import '../../core/widgets/faces3d.dart';
+import '../onboarding/floating3d.dart';
 import '../../core/widgets/glass.dart';
 import '../checkin/checkin_controller.dart';
 import '../onboarding/permissions_panel.dart';
@@ -140,7 +142,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         /// smirk) for as long as the alert is live: countdown, active, contacts
         /// responding; only idle calms it back to green.
         final alarmOn = widget.sos.phase != SosPhase.idle;
-        const faceInk = Color(0xFF101B12);
         final greeting = t(_greetKey());
         final name = widget.profile.name;
         final faceHeight = (MediaQuery.of(context).size.height * 0.42).clamp(300.0, 430.0);
@@ -221,6 +222,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           // the hold animates smoothly.
                           final red = math.max(_hold.value, alarmOn ? 1.0 : 0.0);
                           final skin = Color.lerp(const Color(0xFF1E9E56), alarm, red)!;
+                          final blinkV = _blinkValue();
                           return Container(
                           margin: const EdgeInsets.symmetric(horizontal: 22),
                           height: faceHeight,
@@ -232,7 +234,28 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           child: Stack(
                             fit: StackFit.expand,
                             children: [
-                              CustomPaint(painter: MoodFacePainter(red, faceInk, blink: _blinkValue())),
+                              // The 3D mood face: the calm grin, and the happy
+                              // squint crossfaded in for every blink, so the
+                              // face still blinks — now in 3D. Holding stirs
+                              // it: it leans back and shakes a little, like it
+                              // just got startled.
+                              Center(
+                                child: Transform.rotate(
+                                  angle: 0.08 * math.sin(_hold.value * math.pi * 3),
+                                  child: Transform.scale(
+                                    scale: (1.0 - 0.06 * blinkV + 0.05 * _hold.value),
+                                    child: SizedBox(
+                                      width: 240,
+                                      height: 240,
+                                      child: Stack(children: [
+                                        Image.memory(f3faceOpenBytes, fit: BoxFit.contain, filterQuality: FilterQuality.high),
+                                        if (blinkV > 0)
+                                          Opacity(opacity: blinkV, child: Image.memory(f3faceClosedBytes, fit: BoxFit.contain, filterQuality: FilterQuality.high)),
+                                      ]),
+                                    ),
+                                  ),
+                                ),
+                              ),
                               Align(
                                 alignment: Alignment.bottomCenter,
                                 child: Padding(
@@ -620,7 +643,11 @@ class _MessageBar extends StatelessWidget {
                 width: 34,
                 height: 34,
                 decoration: BoxDecoration(shape: BoxShape.circle, color: accent.withValues(alpha: 0.14)),
-                child: Icon(urgent ? Icons.warning_amber_rounded : (n > 0 ? Icons.notifications : Icons.notifications_none), size: 19, color: accent),
+                // The 3D bell — or the 3D siren when an emergency is live.
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: Image.memory(urgent ? f3dsirenBytes : f3dbellBytes, fit: BoxFit.contain, filterQuality: FilterQuality.high),
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(

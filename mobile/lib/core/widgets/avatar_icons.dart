@@ -2,13 +2,14 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-/// The app's own profile pictures: 50 flat Sentri faces, men and women, drawn
-/// in code (not shipped as photos) so they cost the app nothing and always
-/// match the flat look. Every character has their own personality — the face
-/// reads a list of traits (glasses, brows, beard, earrings, freckles, smile…)
-/// derived from the index, on top of the skin tone, hairstyle and pastel
-/// ground. No two of the fifty come out the same. The person picks one in the
-/// profile sheet; it stays on this phone like everything else there.
+import 'faces3d.dart';
+
+/// The app's own profile pictures: 50 3D Sentri characters, shipped as real 3D
+/// renders (Microsoft Fluent Emoji 3D artwork, MIT license — see faces3d.dart).
+/// Each character sits on its own soft pastel disc derived from the index, so
+/// the pick grid reads as a colourful cast. The chosen one stays on this phone
+/// like everything else there. (The old flat painter remains below as the
+/// fallback and for [SentriAvatarPainter.count].)
 class SentriAvatar extends StatelessWidget {
   const SentriAvatar({super.key, required this.index, this.size = 48});
   final int index;
@@ -17,12 +18,26 @@ class SentriAvatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final i = index % SentriAvatarPainter.count;
+    final ground = SentriAvatarPainter._grounds[(i * 3 + 1) % 10];
     return Container(
       width: size,
       height: size,
       clipBehavior: Clip.antiAlias,
-      decoration: const BoxDecoration(shape: BoxShape.circle),
-      child: CustomPaint(painter: SentriAvatarPainter(i)),
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color.lerp(ground, Colors.white, 0.35)!,
+            ground,
+          ],
+        ),
+      ),
+      child: Padding(
+        padding: EdgeInsets.all(size * 0.07),
+        child: Image.memory(faces3dAll[i], fit: BoxFit.contain, filterQuality: FilterQuality.high, gaplessPlayback: true),
+      ),
     );
   }
 }

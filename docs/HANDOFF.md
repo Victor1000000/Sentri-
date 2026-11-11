@@ -357,3 +357,37 @@ during the onboarding contacts step - he had hit it once before). i18n stays 287
   unique base64 fragment needle per 3D render (all six PNGs share headers, so fragments are taken deeper into
   each blob) plus new-text/gone-old-text checks for the rewritten `sos.contacts_busy` in the bundled en.json.
 
+## 17. Version 33 (this patch) — engineer's notes
+Vic's asks: every sign-up step (code, emergency contacts, PINs, settings/permissions) should carry the same 3D
+floating elements with a moving line connecting them that "directs their eyes"; the 50 avatars become 3D
+characters; the home SOS smiley becomes 3D AND still blinks; a real (visible) Messages redesign; more
+complementary colours across the whole UI. i18n untouched this round (287 × 5). Artwork: Microsoft Fluent
+Emoji 3D, MIT license, downloaded 2026-11-11.
+- Shared 3D element system moved into `floating3d.dart` (leaf updated, now also has a star render): public
+  `FloatItem3d` (bob/tilt/ground-shadow), `ConnectLine` (Catmull-Rom path through the element anchors stroked
+  with dashes that GLIDE along it — indigo→green→amber gradient, 55% alpha — plus one `FloatBand` stateful
+  widget: a compact 3-element band, 3.6 s cycle, 118 px tall, static under `disableAnimations`).
+- Sign-up steps: `_FloatingField` (welcome) now lays out its six elements + moving line through them; `_OtpStep`
+  (bell/star/shield), `_ContactsStep` (grin/smile/pin) and `_PinsStep` (shield/star/smile) each open with a
+  `FloatBand` above the title.
+- Settings phase: `features/onboarding/permissions_panel.dart` is now a NEW LEAF (copy of the repo file) that
+  opens with a `FloatBand` (siren/shield/bell) — the panel is used in onboarding AND in Settings, so both match.
+- 50 avatars in 3D: `core/widgets/faces3d.dart` is a NEW LEAF with 50 unique 3D faces embedded as base64
+  (66 downloaded, MD5-deduped to 50; `f3face00`–`f3face49` getters + `faces3dAll`). `SentriAvatar`
+  (avatar_icons.dart) renders the face on a pastel gradient disc derived from the index; `SentriAvatarPainter`
+  remains for `count` and as fallback.
+- Home SOS face: the mood field still lerps green↔red, but the face itself is now 3D — `f3faceOpenBytes`
+  (grinning face) crossfaded with `f3faceClosedBytes` (smiling face with smiling eyes) on the existing 2 s blink
+  controller, so it still blinks every two seconds; holding adds a rotate/scale wobble. `faceInk` const removed;
+  `MoodFacePainter` stays in flat.dart (sos_screen.dart still uses it at 96 px).
+- Messages redesign (this time visible): inbox tiles get a per-kind art disc — `_art(e, urgent)` returns
+  (3D image or icon, gradient colours, wash colour): live urgent = 3D siren on red gradient, non-urgent SOS =
+  3D bell on orange, battery = amber icon disc, health = green icon disc, shares = 3D pin on pink, other = 3D
+  bell on violet. Unread cards carry a soft wash of their kind's accent; disc grown to 48 px. Empty mailbox
+  shows a big 3D bell. The home message bar's disc shows the 3D bell (or 3D siren while an alert is live).
+- App-wide colour: `SentriBackground` (brand.dart) paints three quiet radial pools behind every page — indigo
+  top-right, mint bottom-left, amber whisper bottom-right — 6% alpha in light mode, 11% in dark.
+- Pipeline notes: faces3d.dart and permissions_panel.dart joined the leaf table; check-apk20 gained a unique
+  base64 fragment needle for faces 0 and 25 of faces3d.dart (taken at b64 chars 160..216, past the shared PNG
+  header). APK grows ~3 MB (the 50 faces); patch ~3.4 MB.
+
