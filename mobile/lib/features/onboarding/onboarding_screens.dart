@@ -1,10 +1,13 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/i18n/i18n.dart';
+import '../../core/widgets/avatar_icons.dart';
 import '../../core/widgets/brand.dart';
+import '../../core/widgets/flat.dart';
 import 'onboarding_controller.dart';
 import 'permissions_panel.dart';
 import '../../core/platform/native_bridge.dart';
@@ -141,27 +144,108 @@ class _PhoneStepState extends State<_PhoneStep> {
   }
 
   @override
-  Widget build(BuildContext context) => Column(
+  Widget build(BuildContext context) {
+    // The welcome moment, like the reference: Sentri faces and the tools of
+    // the app float above, the form sits in one soft card below.
+    return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          const _FloatingField(),
           _title(context, widget.i18n.t('phone.title')),
-          Text(widget.i18n.t('phone.help')),
+          Text(widget.i18n.t('phone.help'), style: TextStyle(fontSize: 14, height: 1.45, color: Flat.muted(context))),
           const SizedBox(height: 16),
-          PillField(
-            controller: _ctl,
-            label: widget.i18n.t('phone.title'),
-            keyboardType: TextInputType.phone,
-            autofillHints: const [AutofillHints.telephoneNumber],
-            inputFormatters: _phoneFormatters,
-            hint: '0803 123 4567',
-          ),
-          const SizedBox(height: 16),
-          PillButton(
-            onPressed: widget.c.busy ? null : () => unawaited(widget.c.submitPhone(_ctl.text)),
-            label: widget.i18n.t('phone.send_code'),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Flat.card(context),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: Flat.hairline(context)),
+              boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 14, offset: const Offset(0, 6))],
+            ),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              PillField(
+                controller: _ctl,
+                label: widget.i18n.t('phone.title'),
+                keyboardType: TextInputType.phone,
+                autofillHints: const [AutofillHints.telephoneNumber],
+                inputFormatters: _phoneFormatters,
+                hint: '0803 123 4567',
+              ),
+              const SizedBox(height: 14),
+              PillButton(
+                onPressed: widget.c.busy ? null : () => unawaited(widget.c.submitPhone(_ctl.text)),
+                label: widget.i18n.t('phone.send_code'),
+              ),
+            ]),
           ),
         ],
       );
+  }
+}
+
+/// The playful welcome field: two of the app's own Sentri faces plus the tools
+/// it is made of - the alert bell, the location pin, the shield - float and bob
+/// gently like the reference's drifting tokens. All drawn in code, no assets.
+class _FloatingField extends StatefulWidget {
+  const _FloatingField();
+  @override
+  State<_FloatingField> createState() => _FloatingFieldState();
+}
+
+class _FloatingFieldState extends State<_FloatingField> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 4200))..repeat();
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (MediaQuery.of(context).disableAnimations) return const SizedBox(height: 140);
+    return SizedBox(
+      height: 158,
+      child: AnimatedBuilder(
+        animation: _c,
+        builder: (context, _) {
+          final t = _c.value;
+          Widget bob(double phase, double amp, Widget child) => Transform.translate(
+                offset: Offset(0, -amp * math.sin(2 * math.pi * (t + phase))),
+                child: child,
+              );
+          Widget tool(IconData icon, Color color, double size) => Container(
+                width: size,
+                height: size,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [color.withValues(alpha: 0.9), color]),
+                  boxShadow: [BoxShadow(color: color.withValues(alpha: 0.35), blurRadius: 12, offset: const Offset(0, 5))],
+                ),
+                child: Center(child: Icon(icon, color: Colors.white, size: size * 0.46)),
+              );
+          Widget face(int index, double size) => Container(
+                width: size,
+                height: size,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Flat.card(context), width: 3),
+                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.10), blurRadius: 12, offset: const Offset(0, 5))],
+                ),
+                child: SentriAvatar(index: index, size: size),
+              );
+          return Stack(children: [
+            Positioned(left: 34, top: 22, child: bob(0.00, 8, tool(Icons.notifications_active_rounded, const Color(0xFF6A5FF0), 54))),
+            Positioned(left: 104, top: 76, child: bob(0.42, 6, tool(Icons.location_on_rounded, const Color(0xFF1E9E56), 46))),
+            Positioned(left: 10, top: 96, child: bob(0.88, 7, face(10, 46))),
+            Positioned(right: 12, top: 6, child: bob(0.20, 7, face(2, 58))),
+            Positioned(right: 86, top: 66, child: bob(0.58, 6, tool(Icons.shield_rounded, const Color(0xFFE5A33C), 44))),
+            Positioned(right: 24, top: 100, child: bob(0.74, 8, face(27, 48))),
+          ]);
+        },
+      ),
+    );
+  }
 }
 
 class _OtpStep extends StatefulWidget {

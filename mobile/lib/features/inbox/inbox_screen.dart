@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show FontFeature;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -77,7 +78,9 @@ class InboxScreen extends StatelessWidget {
                 child: Text(inbox.failed ? (inbox.failedAuth ? t('inbox.need_signin') : t('inbox.failed')) : t('inbox.none'), textAlign: TextAlign.center, style: TextStyle(fontSize: 15, color: Flat.muted(context))),
               )
             else
-              FlatGroup(children: [for (final e in d.items) _tile(context, e)]),
+              // One rounded card per message, like the activity-feed reference:
+              // roomy discs, a time chip, a live chip - sleek, not a flat list.
+              Column(children: [for (final e in d.items) _tile(context, e)]),
             const SizedBox(height: 22),
             Text(t('inbox.scam_note'), style: TextStyle(fontSize: 13, height: 1.45, color: Flat.muted(context))),
             const SizedBox(height: 18),
@@ -90,30 +93,77 @@ class InboxScreen extends StatelessWidget {
 
   Widget _tile(BuildContext context, InboxEntry e) {
     final urgent = e.urgent && e.live;
-    return InkWell(
-      onTap: () async {
-        await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => AlertDetailScreen(entry: e, api: api, i18n: i18n, police: police)));
-        unawaited(inbox.refresh());
-      },
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(shape: BoxShape.circle, color: (urgent ? Flat.danger : Brand.indigo).withValues(alpha: 0.12)),
-            child: Icon(_icon(e), size: 20, color: urgent ? Flat.danger : Brand.indigoHi),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(e.text, maxLines: 3, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 15, height: 1.35, fontWeight: e.read ? FontWeight.w400 : FontWeight.w600)),
-              const SizedBox(height: 4),
-              Text(_ago(e.at, i18n.t), style: TextStyle(fontSize: 13, color: Flat.muted(context))),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Card(
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: () async {
+            await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => AlertDetailScreen(entry: e, api: api, i18n: i18n, police: police)));
+            unawaited(inbox.refresh());
+          },
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+              // The kind of message, on a roomy disc like the reference's
+              // gradient bubbles: alarm red for live danger, indigo otherwise.
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: urgent
+                        ? const [Color(0xFFE4574C), Color(0xFFB3251B)]
+                        : const [Color(0xFF7B6CF0), Color(0xFF5348C8)],
+                  ),
+                ),
+                child: Icon(_icon(e), size: 22, color: Colors.white),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(e.text, maxLines: 3, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 15, height: 1.35, fontWeight: e.read ? FontWeight.w400 : FontWeight.w600)),
+                  const SizedBox(height: 7),
+                  // The chip row: a live pill while the alert is running,
+                  // otherwise the quiet time chip from the reference boards.
+                  Row(children: [
+                    if (e.live) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                        decoration: BoxDecoration(color: Flat.live.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(999)),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          const LiveDot(size: 7),
+                          const SizedBox(width: 5),
+                          Text(t('inbox.live'), style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Flat.live)),
+                        ]),
+                      ),
+                      const SizedBox(width: 6),
+                    ],
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                      decoration: BoxDecoration(color: Flat.hairline(context), borderRadius: BorderRadius.circular(999)),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(Icons.schedule, size: 12, color: Flat.muted(context)),
+                        const SizedBox(width: 4),
+                        Text(_ago(e.at, i18n.t), style: TextStyle(fontSize: 11.5, color: Flat.muted(context), fontFeatures: const [FontFeature.tabularFigures()])),
+                      ]),
+                    ),
+                  ]),
+                ]),
+              ),
+              if (!e.read) ...[
+                const SizedBox(width: 8),
+                Container(width: 9, height: 9, decoration: const BoxDecoration(shape: BoxShape.circle, color: Brand.indigoHi)),
+              ] else ...[
+                const SizedBox(width: 8),
+                Icon(Icons.check_circle_outline, size: 18, color: Flat.muted(context)),
+              ],
             ]),
           ),
-          if (!e.read) Padding(padding: const EdgeInsets.only(left: 8, top: 6), child: Container(width: 9, height: 9, decoration: const BoxDecoration(shape: BoxShape.circle, color: Brand.indigoHi))),
-        ]),
+        ),
       ),
     );
   }

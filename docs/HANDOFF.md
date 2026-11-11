@@ -304,4 +304,24 @@ session, its route like the Strava reference, and the awards. Sleek. No i18n cha
   the tab's card now just delegates.
 - i18n untouched; no new persisted keys; `WorkoutRecord`/`AwardStore` APIs unchanged.
 
+## 15. Version 31 (this patch) — engineer's notes
+Vic's asks: fix the broken Yoruba in the health section, redesign the Messages screen to the activity-feed
+reference, and give sign-up the floating-elements welcome. i18n still 287 keys × 5 — VALUE EDITS ONLY.
+- Yoruba fixed: 16 lines of i18n-yo.json were double-encoded mojibake ("IbÃº okan" etc.) — heart-rate, water and
+  nearby-hospital strings plus `tabs.health` ("Ìlera"). Rewritten with proper Yoruba diacritics (ibí okan,
+  ìṣẹ́jú, pàjáwìrì...); keys untouched, parity check passes 287 × 5. No other locale carried mojibake (scanned).
+- Messages screen (`features/inbox/inbox_screen.dart` — NEW LEAF, taken from the head tree): each message is now
+  its own Card instead of a FlatGroup row — a 46 px gradient disc (danger tones for live urgent, indigo
+  otherwise), the text bold when unread, a chip row under it (a green LiveDot pill `inbox.live` while an alert
+  runs, a hairline clock chip with the `inbox.now/min/hr/day` age, tabular digits), a trailing unread dot or a
+  quiet check. Invites, scam note, test-alert button and AlertDetailScreen are untouched. No new keys.
+- Sign-up welcome (`features/onboarding/onboarding_screens.dart`): a new `_FloatingField` (stateful, one
+  repeating 4.2 s AnimationController, off under `disableAnimations`) floats two SentriAvatar faces (indices 2
+  and 27, white-ringed with a soft shadow) among three gradient tool bubbles — alert bell, location pin,
+  shield — each bobbing on its own sine phase above the phone step. The phone form itself sits in one rounded
+  24 card (hairline edge, soft shadow) wrapping the PillField + PillButton, like the reference's bottom card.
+  All text still `phone.title` / `phone.help` / `phone.send_code`.
+- Pipeline notes: inbox_screen.dart joined the leaf table; check-apk20 gained a `FloatingField` libapp.so needle
+  and a Yoruba-health check (bundled yo.json must contain the corrected `Ibí okan` and no U+00C3 mojibake).
+
 
