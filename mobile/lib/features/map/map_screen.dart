@@ -9,6 +9,8 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:http/http.dart' as http;
 
 import '../../core/config.dart';
+
+import '../../core/settings.dart';
 import '../../core/i18n/i18n.dart';
 import '../../core/net/api.dart';
 import '../location/location.dart';
@@ -48,15 +50,44 @@ class _SearchHit {
 
 bool _sameWord(String a, String b) => a.trim().toLowerCase() == b.trim().toLowerCase();
 
+// ---- base layers, Strava-style ----
+// Four honest, free base maps. Standard is the app's usual street map; Satellite
+// and Hybrid use Esri's World Imagery (Hybrid draws place names and borders on
+// top of the imagery); Night is CARTO's dark map, made for riding after dark.
+const _esriImageryUrl = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+const _esriReferenceUrl = 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}';
+const _cartoNightUrl = 'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png';
+
+/// The tile URLs and the attribution line each layer owes its maker.
+({List<String> urls, List<String> attributions}) _baseLayers(String type) => switch (type) {
+      'satellite' => (
+          urls: const [_esriImageryUrl],
+          attributions: const ['© Esri, Maxar, Earthstar Geographics', '© OpenStreetMap contributors'],
+        ),
+      'hybrid' => (
+          urls: const [_esriImageryUrl, _esriReferenceUrl],
+          attributions: const ['© Esri, Maxar, Earthstar Geographics', '© OpenStreetMap contributors'],
+        ),
+      'night' => (
+          urls: const [_cartoNightUrl],
+          attributions: const ['© CARTO', '© OpenStreetMap contributors'],
+        ),
+      _ => (
+          urls: const [AppConfig.tileUrl],
+          attributions: const ['© OpenStreetMap contributors', '© CARTO'],
+        ),
+    };
+
 /// The map, Google Maps-style: the map is the whole screen and every control is a floating
 /// round icon. The person can type where they are going (search picks the exact spot), or
 /// long-press the map to drop a point. Nearby named places are written on the map, the way
 /// Google Maps and Organic Maps show them.
 class MapScreen extends StatefulWidget {
-  const MapScreen({super.key, required this.location, required this.api, required this.i18n, this.placeLookup, this.onPlace, this.refresh = const Duration(seconds: 6), this.police});
+  const MapScreen({super.key, required this.location, required this.api, required this.i18n, this.placeLookup, this.onPlace, this.refresh = const Duration(seconds: 6), this.police, this.settings});
   final LocationSource location;
   final SentriApi api;
   final I18n i18n;
+  final AppSettings? settings;
 
   /// The police commands, parsed once by the app shell. With no points picked, directions aim
   /// at the closest command's post. Null: the button then stays disabled.
@@ -95,6 +126,64 @@ class MapScreenState extends State<MapScreen> {
   LatLng? _toPick;
   String? _toName;
   String? _pickMode; // 'from' | 'to' while waiting for a long-press
+
+  /// The chosen base layer, remembered between launches in the settings.
+  /// Without a settings object (tests) the map just stays Standard.
+  String get _mapType => widget.settings?.mapType ?? 'standard';
+
+  /// Switches the base layer, remembers the choice, repaints the map.
+  void _setMapType(String type) {
+    unawaited(widget.settings?.update(mapType: type));
+    setState(() {});
+  }
+
+  /// The layer sheet: four preview rows, the current one ringed. Every row carries
+  /// the name in the person's language and a small painted swatch of the map's feel.
+  void _showLayerSheet() {
+    final t = widget.i18n.t;
+    final cs = Theme.of(context).colorScheme;
+    final rows = <(String, IconData, Color)>[
+      ('standard', Icons.map_outlined, const Color(0xFF4CC98A)),
+      ('satellite', Icons.satellite_outlined, const Color(0xFF5F8D4E)),
+      ('hybrid', Icons.layers_outlined, const Color(0xFF3D8BF0)),
+      ('night', Icons.dark_mode_outlined, const Color(0xFF2B2B3A)),
+    ];
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Padding(
+              padding: const EdgeInsets.only(left: 4, bottom: 10),
+              child: Text(t('map.layer_title'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+            ),
+            for (final r in rows)
+              ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                leading: CircleAvatar(
+                  radius: 17,
+                  backgroundColor: r.$3,
+                  child: Icon(r.$2, size: 19, color: Colors.white),
+                ),
+                title: Text(switch (r.$1) {
+                  'standard' => t('map.layer_standard'),
+                  'satellite' => t('map.layer_satellite'),
+                  'hybrid' => t('map.layer_hybrid'),
+                  _ => t('map.layer_night'),
+                }, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                trailing: _mapType == r.$1 ? Icon(Icons.check_rounded, color: cs.primary) : null,
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _setMapType(r.$1);
+                },
+              ),
+          ]),
+        ),
+      ),
+    );
+  }
 
   // ---- typed destination search ----
 
@@ -1060,7 +1149,8 @@ class MapScreenState extends State<MapScreen> {
                 onLongPress: (_, pt) => unawaited(_onLongPress(pt)),
               ),
               children: [
-                TileLayer(urlTemplate: AppConfig.tileUrl, userAgentPackageName: 'ng.sentri.sentri'),
+                for (final url in _baseLayers(_mapType).urls)
+                  TileLayer(urlTemplate: url, userAgentPackageName: 'ng.sentri.sentri'),
                 if (f != null)
                   CircleLayer(circles: [
                     CircleMarker(point: here, radius: (f.accuracyM ?? 20), useRadiusInMeter: true, color: cs.primary.withValues(alpha: 0.15), borderColor: cs.primary.withValues(alpha: 0.4), borderStrokeWidth: 1),
@@ -1140,7 +1230,7 @@ class MapScreenState extends State<MapScreen> {
                       child: const Icon(Icons.flag, size: 30, color: Color(0xFF6A5FF0), shadows: [Shadow(blurRadius: 6, color: Colors.white)]),
                     ),
                   ]),
-                const RichAttributionWidget(attributions: [TextSourceAttribution('© OpenStreetMap contributors'), TextSourceAttribution('© CARTO')]),
+                RichAttributionWidget(attributions: [for (final a in _baseLayers(_mapType).attributions) TextSourceAttribution(a)]),
               ],
             ),
           ),
@@ -1212,6 +1302,8 @@ class MapScreenState extends State<MapScreen> {
             right: 10,
             bottom: MediaQuery.paddingOf(context).bottom + (_route != null || _toPick != null ? 168.0 : 118.0),
             child: Column(children: [
+              _fab(context, icon: Icons.layers_outlined, label: t('map.layer_title'), onTap: _showLayerSheet),
+              const SizedBox(height: 10),
               _fab(context, icon: Icons.visibility_outlined, label: t('map.street_view'), onTap: f == null ? null : () => unawaited(_streetView(f))),
               const SizedBox(height: 10),
               _fab(

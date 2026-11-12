@@ -6,6 +6,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:timezone/data/latest_all.dart' as tzdata;
+import 'package:timezone/timezone.dart' as tz;
 
 import '../../core/net/api.dart';
 
@@ -65,11 +67,10 @@ const _healthNoteId = 7202;
 enum WaterStatus { off, ok, noPermission, notScheduled }
 
 /// Checks what actually became of the reminder on this phone instead of assuming it
-/// works: is the notification permission granted, and is the recurring alarm still
-/// among the phone's pending scheduled notifications. The battery-exemption question
-/// is asked when the pace is picked, but it does not report the reminder as broken:
-/// the alarm-clock schedule the app uses is one phone makers promise not to swallow,
-/// and re-arming on every open keeps a purged schedule alive anyway.
+/// works: is the notification permission granted, and is at least one link of the
+/// reminder's alarm CHAIN still among the phone's pending scheduled notifications.
+/// The chain is a batch of independent one-shot alarms the app lays down itself (see
+/// [scheduleWaterReminder]), so "still pending" means the phone really has the alarms.
 Future<WaterStatus> waterReminderStatus(int minutes) async {
   if (minutes <= 0) return WaterStatus.off;
   try {
@@ -83,8 +84,7 @@ Future<WaterStatus> waterReminderStatus(int minutes) async {
     var scheduled = false;
     try {
       final pending = await _local.pendingNotificationRequests();
-      // pendingNotificationRequests returns int ids; comparing with a string never matched.
-      scheduled = pending.any((p) => p.id == _waterId);
+      scheduled = pending.any((p) => p.id >= _waterChainFirst && p.id <= _waterChainLast);
     } catch (_) {}
     if (!scheduled) return WaterStatus.notScheduled;
     return WaterStatus.ok;
@@ -94,28 +94,33 @@ Future<WaterStatus> waterReminderStatus(int minutes) async {
   }
 }
 
-/// Repeats the drink-water reminder at the person's own pace. Cancels the previous one first
-/// (including "off"), then asks for the notification permission once, right when the person
-/// turns reminders on.
+/// The drink-water reminder, rebuilt as a CHAIN of independent one-shot alarms.
 ///
-/// The quiet problem this fights, on two fronts:
-///
-/// 1. Phones purge scheduled alarms (reboot, battery saving, "auto-start" managers), so a
-///    reminder set weeks ago can die without anyone noticing. So this asks the person to
-///    excuse Sentri from battery saving (the screen most phones hide behind), and callers
-///    re-run it every time the app opens.
-/// 2. Re-arming on every open RESETS the countdown - the reminder would go off shortly
-///    after every app open instead of on its own clock, and with a pace like 30 minutes
-///    and a person who opens the app often, it would NEVER fire at all. The in-memory
-///    `_waterScheduledMinutes` guard from earlier versions only held within one app
-///    session; the real fix is durable: the pace AND the reminder text (which carries
-///    the language) are written INTO the schedule's payload, and the pending schedule is
-///    read back from the phone itself. Same pace and text still pending -> leave its own
-///    clock running. Anything else (no schedule, purged schedule, different pace,
-///    different language) -> cancel and re-arm.
-/// The schedule itself uses the alarm-clock mode, the one phone makers promise not to
-/// swallow, instead of exact alarms many phones deny by default.
+/// Why: the plugin's repeating schedule (`periodicallyShowWithDuration`) turned out to
+/// be the one part of this feature that no code could make trustworthy - on several
+/// phone brands it never fires at all, with every permission granted. So the app now
+/// lays down its OWN chain: up to 48 separate one-shot alarms on the phone's alarm
+/// system (alarm-clock mode, the one phone makers promise not to swallow), one per
+/// interval. When one fires, the next one is already waiting. Every time the app
+/// opens, the chain is topped back up - so a chain the phone partially purged is
+/// refilled instead of dying. The pace and the reminder text (which carries the
+/// language) live in every link's payload as a fingerprint; the pending list is read
+/// back from the phone itself, so a chain with a different pace or language is torn
+/// down and rebuilt, and a healthy chain is left strictly alone.
 const _waterPayloadPrefix = 'water:';
+
+/// The chain's fixed id range - 48 slots, far from the emergency and health-note ids.
+const _waterChainFirst = 7300;
+const _waterChainLast = 7347;
+const _waterChainKeep = 24; // how many links are considered "enough" while topping up
+
+bool _tzReady = false;
+
+void _initTz() {
+  if (_tzReady) return;
+  tzdata.initializeTimeZones();
+  _tzReady = true;
+}
 
 Future<void> scheduleWaterReminder(int minutes, String title, String body) async {
   const details = NotificationDetails(
@@ -130,63 +135,115 @@ Future<void> scheduleWaterReminder(int minutes, String title, String body) async
     iOS: DarwinNotificationDetails(interruptionLevel: InterruptionLevel.timeSensitive),
   );
   try {
+    final fingerprint = minutes <= 0 ? null : '$_waterPayloadPrefix$minutes|$title|$body';
     // What is ACTUALLY pending on this phone right now - the durable truth, not
     // this session's memory of it.
+    var pendingCount = 0;
+    final pendingIds = <int>{};
     String? pendingPayload;
     try {
       final pending = await _local.pendingNotificationRequests();
       for (final p in pending) {
-        if (p.id == _waterId) {
-          pendingPayload = p.payload;
-          break;
+        final id = p.id;
+        if (id >= _waterChainFirst && id <= _waterChainLast) {
+          pendingCount++;
+          pendingIds.add(id);
+          pendingPayload ??= p.payload;
+        }
+      }
+      if (pendingIds.isEmpty) {
+        // A v36 install may still carry the old repeating schedule: find its payload too.
+        for (final p in pending) {
+          if (p.id == _waterId) {
+            pendingPayload ??= p.payload;
+            break;
+          }
         }
       }
     } catch (_) {}
-    final wanted = minutes <= 0 ? null : '$_waterPayloadPrefix$minutes|$title|$body';
-    if (minutes > 0 && pendingPayload == wanted) {
-      return; // same pace and same reminder text, still scheduled: let its own clock run
+    if (minutes <= 0) {
+      if (pendingCount > 0 || pendingPayload != null) {
+        for (var id = _waterChainFirst; id <= _waterChainLast; id++) {
+          await _local.cancel(id);
+        }
+        await _local.cancel(_waterId);
+      }
+      return;
     }
-    await _local.cancel(_waterId);
-    if (minutes <= 0) return;
+    final healthy = pendingPayload == fingerprint && pendingCount >= _waterChainKeep;
+    if (healthy) {
+      return; // the chain is stocked: leave its own clock running
+    }
+    final sameChain = pendingPayload == fingerprint && pendingCount > 0;
+    if (!sameChain) {
+      // Different pace or language (or a dead chain): tear the whole chain down first.
+      for (var id = _waterChainFirst; id <= _waterChainLast; id++) {
+        await _local.cancel(id);
+      }
+      await _local.cancel(_waterId);
+    }
     final android = _local.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
     await android?.createNotificationChannel(_healthChannel);
-    await android?.requestNotificationsPermission();
-    // Exact alarms are finer-grained than the alarm-clock schedule, but some phones deny
-    // them by default; asking keeps the reminder exact where the phone allows it. A refusal
-    // must never block the reminder, so this is best effort.
-    try {
-      await android?.requestExactAlarmsPermission();
-    } catch (_) {}
-    // Battery savers on common phone brands silently drop scheduled reminders - the classic
-    // "it never rings at all" case. Ask to be always allowed to run in the background.
-    try {
-      if (!await Permission.ignoreBatteryOptimizations.isGranted) {
-        await Permission.ignoreBatteryOptimizations.request();
+    if (!sameChain) {
+      await android?.requestNotificationsPermission();
+      // Exact alarms are finer-grained than the alarm-clock schedule, but some phones
+      // deny them by default; asking keeps the reminder exact where the phone allows
+      // it. A refusal must never block the reminder, so this is best effort.
+      try {
+        await android?.requestExactAlarmsPermission();
+      } catch (_) {}
+      // Battery savers on common phone brands silently drop scheduled reminders - the
+      // classic "it never rings at all" case. Ask to be always allowed to run in the
+      // background.
+      try {
+        if (!await Permission.ignoreBatteryOptimizations.isGranted) {
+          await Permission.ignoreBatteryOptimizations.request();
+        }
+      } catch (_) {
+        // Only ask when the platform supports the question; a refusal must never block the reminder.
       }
-    } catch (_) {
-      // Only ask when the platform supports the question; a refusal must never block the reminder.
     }
-    try {
-      await _local.periodicallyShowWithDuration(
-        _waterId,
-        title,
-        body,
-        Duration(minutes: minutes),
-        details,
-        payload: wanted,
-        androidScheduleMode: AndroidScheduleMode.alarmClock,
-      );
-    } on PlatformException {
-      // Some phones lock alarm-clock scheduling too: a gently inexact chime still keeps the habit.
-      await _local.periodicallyShowWithDuration(
-        _waterId,
-        title,
-        body,
-        Duration(minutes: minutes),
-        details,
-        payload: wanted,
-        androidScheduleMode: AndroidScheduleMode.inexact,
-      );
+    _initTz();
+    // How many links to lay down: a fresh chain lays the FULL batch (48 x the pace -
+    // a full day at the 30-minute pace); a top-up refills back up to [keep].
+    final want = sameChain ? _waterChainKeep : 48;
+    var slots = [for (var id = _waterChainFirst; id <= _waterChainLast; id++) if (!pendingIds.contains(id)) id];
+    final now = DateTime.now();
+    var placed = 0;
+    // Links walk forward in whole paces from now. A top-up starts at two paces out:
+    // a link for the immediate next slot is almost certainly still pending, and two
+    // reminders ten minutes apart is noise.
+    var offset = sameChain ? 2 : 1;
+    for (final id in slots) {
+      if (placed >= want) break;
+      final at = now.add(Duration(minutes: minutes * offset));
+      offset++;
+      placed++;
+      try {
+        await _local.zonedSchedule(
+          id,
+          title,
+          body,
+          tz.TZDateTime.from(at, tz.UTC),
+          details,
+          payload: fingerprint,
+          androidScheduleMode: AndroidScheduleMode.alarmClock,
+        );
+      } on PlatformException {
+        // Some phones lock alarm-clock scheduling too: a gently inexact alarm still
+        // keeps the habit - far better than a chain the phone refuses outright.
+        try {
+          await _local.zonedSchedule(
+            id,
+            title,
+            body,
+            tz.TZDateTime.from(at, tz.UTC),
+            details,
+            payload: fingerprint,
+            androidScheduleMode: AndroidScheduleMode.inexact,
+          );
+        } catch (_) {}
+      } catch (_) {}
     }
   } catch (_) {
     // A reminder that cannot be scheduled must never break the Health tab.

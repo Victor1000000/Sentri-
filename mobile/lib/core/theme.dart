@@ -1,5 +1,53 @@
 import 'package:flutter/material.dart';
 
+/// The app-wide background wash, used by [SentriBackground] and the page backdrop.
+///
+/// Two radial colour pools: warm indigo at the top right, mint at the bottom left,
+/// plus a whisper of amber between them - complementary to both. Dark mode lets
+/// them breathe (11%) - that is the cool blend behind every dark screen. Light
+/// mode wears the same three hues, softened to sit on white (10% indigo/mint,
+/// 7% amber) so the day theme carries the same colour life without ever
+/// lowering text contrast.
+class WashPainter extends CustomPainter {
+  const WashPainter({required this.dark});
+  final bool dark;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final pools = dark
+        ? const [
+            (color: Color(0xFF6A5FF0), alpha: 0.11),
+            (color: Color(0xFF17B86A), alpha: 0.11),
+            (color: Color(0xFFE5A33C), alpha: 0.07),
+          ]
+        : const [
+            (color: Color(0xFF6A5FF0), alpha: 0.10),
+            (color: Color(0xFF17B86A), alpha: 0.10),
+            (color: Color(0xFFE5A33C), alpha: 0.07),
+          ];
+    final centres = [
+      Offset(size.width * 1.02, -size.width * 0.18),
+      Offset(-size.width * 0.18, size.height * 1.05),
+      Offset(size.width * 0.85, size.height * 0.92),
+    ];
+    final radii = [size.width * 0.85, size.width * 0.9, size.width * 0.55];
+    for (var i = 0; i < pools.length; i++) {
+      final p = pools[i];
+      canvas.drawCircle(
+        centres[i],
+        radii[i],
+        Paint()
+          ..shader = RadialGradient(
+            colors: [p.color.withValues(alpha: p.alpha), p.color.withValues(alpha: 0.0)],
+          ).createShader(Rect.fromCircle(center: centres[i], radius: radii[i])),
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(WashPainter oldDelegate) => oldDelegate.dark != dark;
+}
+
 /// Sentri's look. One calm base, one alarm colour used only for SOS, one reassurance colour.
 /// Both themes share the same roles so screens never hard-code colours.
 class SentriColors {

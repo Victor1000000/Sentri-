@@ -34,8 +34,10 @@ class Glass extends StatelessWidget {
   }
 }
 
-/// The page background. It used to paint light behind glass; it is simply the flat
-/// calm surface colour now.
+/// The page background. Every page and sheet in the app sits on the same soft
+/// wash of brand colour - the cool indigo/mint/amber blend Vic picked for the
+/// emergency panel, in dark and in a tuned light version - instead of a dead
+/// flat grey, so no part of the app ever feels like a different app.
 class GlassBackdrop extends StatelessWidget {
   const GlassBackdrop({super.key, required this.child});
   final Widget child;
@@ -43,7 +45,12 @@ class GlassBackdrop extends StatelessWidget {
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
     return Stack(children: [
-      Positioned.fill(child: ColoredBox(color: dark ? SentriColors.surfaceDark : SentriColors.surfaceLight)),
+      Positioned.fill(
+        child: DecoratedBox(
+          decoration: BoxDecoration(color: dark ? SentriColors.surfaceDark : SentriColors.surfaceLight),
+          child: CustomPaint(painter: WashPainter(dark: dark)),
+        ),
+      ),
       Positioned.fill(child: child),
     ]);
   }

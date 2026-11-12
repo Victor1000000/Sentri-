@@ -116,42 +116,11 @@ class SentriBackground extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(color: dark ? SentriColors.surfaceDark : SentriColors.surfaceLight),
       child: CustomPaint(
-        painter: _WashPainter(dark: dark),
+        painter: WashPainter(dark: dark),
         child: child,
       ),
     );
   }
-}
-
-/// Two radial colour pools: warm indigo at the top right, mint at the bottom
-/// left, plus a whisper of amber between them - complementary to both. In
-/// light mode they are barely there (6%); dark mode lets them breathe (11%).
-class _WashPainter extends CustomPainter {
-  const _WashPainter({required this.dark});
-  final bool dark;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final a = dark ? 0.11 : 0.06;
-    final pools = [
-      (color: const Color(0xFF6A5FF0), center: Offset(size.width * 1.02, -size.width * 0.18), radius: size.width * 0.85),
-      (color: const Color(0xFF17B86A), center: Offset(-size.width * 0.18, size.height * 1.05), radius: size.width * 0.9),
-      (color: const Color(0xFFE5A33C), center: Offset(size.width * 0.85, size.height * 0.92), radius: size.width * 0.55),
-    ];
-    for (final p in pools) {
-      canvas.drawCircle(
-        p.center,
-        p.radius,
-        Paint()
-          ..shader = RadialGradient(
-            colors: [p.color.withValues(alpha: a), p.color.withValues(alpha: 0.0)],
-          ).createShader(Rect.fromCircle(center: p.center, radius: p.radius)),
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(_WashPainter oldDelegate) => oldDelegate.dark != dark;
 }
 
 /// Logo top-left, round translate button top-right. Tapping it opens the language sheet.

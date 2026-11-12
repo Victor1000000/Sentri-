@@ -548,6 +548,67 @@ is ringing and not stop until the alert is attended to. Verified thoroughly befo
   gained award.streak3_title + award.km100_title; libapp.so needles gained 'HeartCamera' and 'water:' (the
   payload prefix); the i18n count printout is 345 x5.
 
+## 21. Version 37 (this patch) — engineer's notes
+Vic's asks: the heart rate "doesn't work anymore" (v36 regression); the water alert STILL sends no notification
+even with every setting enabled; take the dark-mode gradient from the "Ways to call for help" panel app-wide and
+design a matching light-mode gradient; Strava-style map types; Strava-style build-your-own-route for walk/run/
+bike; a consistency graph in the profile; features that beat competitors; the emergency alert must work (he has
+not yet done the two-device test).
+- Heart-rate regression ROOT CAUSE: v36 locked exposure/focus immediately after `initialize()`, BEFORE the
+  auto-exposure had ever seen the fingertip - it locked onto the bright empty-screen scene, then the pressed
+  finger darkened the whole frame and the flat signal failed `minWiggle` -> every reading refused ("that
+  reading was not strong enough" repeatedly). Fix in heart_camera.dart: the image stream STARTS first, runs
+  ~2 s so AE adapts to the finger, THEN exposure+focus lock (lock moment recorded, `lockAt`); analysis skips
+  samples before `max(2.0, lockAt + 0.7)` s; halves-agreement gate relaxed 0.12 -> 0.15; heart_signal.dart's
+  lone-view fallback restored to `confidence >= trust` (v36's +0.05 was too strict on dark screens). The
+  heart_signal_test.dart contract (64/72/88/110 within 2.5 bpm, irregular ±4.0, flat/faint/short refused)
+  stays the bar.
+- Water alert REBUILT - the plugin's repeating schedule is gone. New design in push_service.dart: the app
+  manages a CHAIN of one-shot `zonedSchedule` alarms itself, ids 7300..7347 (48 slots; `_waterId` 7201 and
+  `_healthNoteId` 7202 untouched), alarm-clock schedule mode, `tz.TZDateTime.from(at, tz.UTC)` instants
+  (`tzdata.initializeTimeZones()` lazily once; `timezone: ^0.10.0` added to pubspec). Rules: fingerprint
+  `'water:<minutes>|<title>|<body>'` carried in every link's payload and checked against
+  `pendingNotificationRequests` read from the phone; same fingerprint AND >= 24 links pending -> strict no-op;
+  same fingerprint, 1..23 links -> TOP-UP only (fills free slots at now+2*pace, now+3*pace, ... up to 24
+  links, skipping the immediate next slot); different fingerprint or 0 links -> full teardown + fresh 48-link
+  batch (now+pace .. now+48*pace) + permission/channel/exact-alarm/battery asks; pace off -> cancel every
+  chain id + legacy `_waterId`. `waterReminderStatus` counts pending links in the id range. A fresh chain =
+  a full day of reminders at the 30-minute pace; the Health tab's status line stays truthful.
+- App-wide wash: `_WashPainter` moved from brand.dart to theme.dart as PUBLIC `WashPainter` (brand.dart's
+  SentriBackground and glass.dart's GlassBackdrop both paint it; glass.dart imports theme.dart, no cycle -
+  brand.dart already imported glass.dart so a brand<-glass import would have been circular). Dark mode keeps
+  the exact blend Vic approved (indigo TR 11%, mint BL 11%, amber whisper 7%); light mode now carries the same
+  three hues at 10%/10%/7% on the light surface. Every FlatPage, the home screen (both via GlassBackdrop),
+  onboarding/sign-up and the shortcuts page (SentriBackground) wear it. Map/workout screens keep their maps.
+- Map layers (map_screen.dart): `_baseLayers(type)` switch -> Standard = AppConfig.tileUrl; Satellite = Esri
+  World_Imagery; Hybrid = Esri imagery + Esri World_Boundaries_and_Places overlay (two TileLayers); Night =
+  CARTO dark_all. Attribution widget rebuilt per type. A `layers` FAB (top of the right column) opens a sheet
+  with four named rows and a check on the current one; the choice persists as `settings.mapType` ('standard'/
+  'satellite'/'hybrid'/'night' - AppSettings grew the field, written into settings.v1). Mini-maps
+  (FlutterMapSheetMap, history details) stay Standard on purpose.
+- Route builder (NEW LEAF route_builder.dart, class PlannedRoute + RouteBuilderScreen): opened from the
+  exercise card's "Build your route" button (health_screen.dart; pre-fill map centre at exercise.lastFix).
+  Tap the map to add up to 12 waypoints; every add refetches an OSRM route through all of them (car-founded
+  street map like directions, 3 attempts + router.project-osrm.org fallback; pace-derived minutes: walk
+  1.35, run 2.6, bike 4.17 m/s); dashed straight-line preview while the router thinks; undo/clear; stats
+  (planned km, ~minutes, points n/12); "Use this route" pops a PlannedRoute into the exercise card, which
+  shows a confirmed chip and can clear it. WorkoutScreen takes `planned:` and draws it as a dashed line
+  (flutter_map 7 StrokePattern.dashed) under the live line, plus a chip with planned km/mins and
+  `route.left` km remaining (nearest plan point to current position, then plan metres to the end).
+- Consistency graph (home_screen.dart `_ConsistencyCard` + `_ConsistencyBars` painter) inside the profile
+  sheet: ten weekly buckets (weeks start Monday) of session counts from ExerciseController.history, bars
+  scaled to the busiest week, faint stubs for empty weeks, "n this week" chip, totals line
+  (sessions + exercise.hist_total km). HomeScreen gained the `exercise:` controller (wired from app.dart).
+- 18 new i18n keys x5 = 363 x5: map.layer_title/_standard/_satellite/_hybrid/_night, route.build/hint/busy/
+  failed/undo/clear/done/waypoints/planned/left, profile.consistency/week_now/consistency_hint, via
+  v37-*.json + v37i18n.ps1 + fix-json36.ps1; parity verified.
+- Competitor features kept from earlier rounds that still stand (nothing forgotten): 25 awards, 3D mascot,
+  voice directions + reroute, street view, contacts' persistent alarm ring (v36), share history stories,
+  police directory, offline resilience.
+- Pipeline notes: route_builder.dart joined the leaf table; check-apk20 i18n needles gained map.layer_title/
+  map.layer_night/route.build/route.left/profile.consistency; libapp.so needles gained 'RouteBuilderScreen',
+  'basemaps.cartocdn.com', 'server.arcgisonline.com'; the i18n count printout is 363 x5.
+
 
 
 

@@ -11,6 +11,7 @@ import '../../core/platform/native_bridge.dart';
 import '../../core/settings.dart';
 import '../../core/net/api.dart';
 import '../contacts/contacts_screen.dart';
+import '../health/exercise_controller.dart';
 import '../inbox/inbox_controller.dart';
 import '../police/police_directory.dart';
 import '../inbox/inbox_screen.dart';
@@ -33,7 +34,7 @@ import '../sos/sos_controller.dart';
 /// alarm red and the face smirks, not frowns. The face blinks every two seconds
 /// so it feels alive; the shared painter lives in flat.dart.
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key, required this.sos, required this.settings, required this.i18n, required this.bridge, required this.api, required this.inbox, required this.share, required this.checkin, required this.police, required this.people, required this.profile});
+  const HomeScreen({super.key, required this.sos, required this.settings, required this.i18n, required this.bridge, required this.api, required this.inbox, required this.share, required this.checkin, required this.police, required this.people, required this.profile, required this.exercise});
   final SentriApi api;
   final InboxController inbox;
   final ShareController share;
@@ -44,6 +45,7 @@ class HomeScreen extends StatefulWidget {
   final I18n i18n;
   final NativeBridge bridge;
   final Profile profile;
+  final ExerciseController exercise;
 
   /// Names and drawn characters for the emergency contacts.
   final ContactPeople people;
@@ -124,7 +126,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (ctx) => _ProfileSheet(profile: profile, api: widget.api, i18n: widget.i18n),
+      builder: (ctx) => _ProfileSheet(profile: profile, api: widget.api, i18n: widget.i18n, exercise: widget.exercise),
     );
   }
 
@@ -370,10 +372,11 @@ class _Avatar extends StatelessWidget {
 /// and the name that alert texts use ("Ada needs you"). Saving the name also tries
 /// the server; offline saves still stick on the phone.
 class _ProfileSheet extends StatefulWidget {
-  const _ProfileSheet({required this.profile, required this.api, required this.i18n});
+  const _ProfileSheet({required this.profile, required this.api, required this.i18n, required this.exercise});
   final Profile profile;
   final SentriApi api;
   final I18n i18n;
+  final ExerciseController exercise;
   @override
   State<_ProfileSheet> createState() => _ProfileSheetState();
 }
@@ -442,6 +445,10 @@ class _ProfileSheetState extends State<_ProfileSheet> {
               ),
               const SizedBox(height: 6),
               Center(child: Text(t('health.heart_perm'), style: TextStyle(fontSize: 12, color: muted))),
+              const SizedBox(height: 14),
+              // The activity story: sessions per week for the last ten weeks, so the
+              // person can watch their own consistency build up.
+              _ConsistencyCard(exercise: widget.exercise, i18n: widget.i18n),
               const SizedBox(height: 16),
               TextField(
                 controller: _name,
@@ -491,6 +498,116 @@ class _ProfileSheetState extends State<_ProfileSheet> {
       ),
     );
   }
+}
+
+/// The consistency graph, Strava's Progress in miniature: one bar per week for
+/// the last ten weeks, tallest week tallest bar, with the person's totals under
+/// it. Painted, not a chart package - nothing to add to the app's size.
+class _ConsistencyCard extends StatelessWidget {
+  const _ConsistencyCard({required this.exercise, required this.i18n});
+  final ExerciseController exercise;
+  final I18n i18n;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = i18n.t;
+    final cs = Theme.of(context).colorScheme;
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final now = DateTime.now();
+    // One bucket per week, oldest first; weeks start on Monday.
+    final counts = List<int>.filled(10, 0);
+    var km = 0.0;
+    for (final r in exercise.history) {
+      final start = r.start;
+      final monday = DateTime(start.year, start.month, start.day - (start.weekday - 1));
+      final weeksAgo = (DateTime(now.year, now.month, now.day).difference(DateTime(monday.year, monday.month, monday.day)).inDays / 7).floor();
+      if (weeksAgo < 0 || weeksAgo >= 10) continue;
+      counts[9 - weeksAgo]++;
+      km += r.km;
+    }
+    final thisWeek = counts.isEmpty ? 0 : counts.last;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: cs.onSurface.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Icon(Icons.insights_outlined, size: 18, color: cs.primary),
+          const SizedBox(width: 8),
+          Expanded(child: Text(t('profile.consistency'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700))),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(color: cs.primary.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(999)),
+            child: Text(
+              t('profile.week_now', {'n': '$thisWeek'}),
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: dark ? cs.primary.withValues(alpha: 0.95) : cs.primary),
+            ),
+          ),
+        ]),
+        const SizedBox(height: 10),
+        CustomPaint(
+          size: const Size.fromHeight(96),
+          painter: _ConsistencyBars(
+            counts,
+            bar: cs.primary,
+            faint: cs.onSurface.withValues(alpha: 0.10),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Row(children: [
+          Expanded(child: Text(t('profile.consistency_hint'), style: TextStyle(fontSize: 11.5, height: 1.35, color: cs.onSurface.withValues(alpha: 0.55)))),
+          Text(
+            '${exercise.history.length} · ${t('exercise.hist_total', {'n': km < 1 ? km.toStringAsFixed(2) : km.toStringAsFixed(1)})}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: cs.onSurface.withValues(alpha: 0.55)),
+          ),
+        ]),
+      ]),
+    );
+  }
+}
+
+/// Ten bars, one per week. A week with sessions wears a full-height-scaled bar
+/// with a rounded top; an empty week wears a faint stub, so the gaps are as
+/// visible as the effort - that is what consistency looks like.
+class _ConsistencyBars extends CustomPainter {
+  const _ConsistencyBars(this.counts, {required this.bar, required this.faint});
+  final List<int> counts;
+  final Color bar;
+  final Color faint;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (counts.isEmpty) return;
+    final max = counts.fold<int>(0, (a, b) => a > b ? a : b);
+    final n = counts.length;
+    final gap = 6.0;
+    final barW = (size.width - gap * (n - 1)) / n;
+    for (var i = 0; i < n; i++) {
+      final x = i * (barW + gap);
+      final c = counts[i];
+      if (c <= 0) {
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(Rect.fromLTWH(x, size.height - 5, barW, 5), const Radius.circular(3)),
+          Paint()..color = faint,
+        );
+        continue;
+      }
+      final h = max <= 0 ? 0.0 : 8.0 + (size.height - 8.0) * c / max;
+      final top = size.height - h;
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(Rect.fromLTWH(x, top, barW, h), Radius.circular(barW / 2)),
+        Paint()..color = bar,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_ConsistencyBars oldDelegate) =>
+      oldDelegate.bar != bar || oldDelegate.faint != faint || oldDelegate.counts.length != counts.length;
 }
 
 /// Trigger switches and permissions, one tap away from the clean home screen.

@@ -21,6 +21,7 @@ import '../photos/photo_water.dart';
 import 'awards.dart';
 import 'exercise_controller.dart';
 import 'health_controller.dart';
+import 'route_builder.dart';
 import 'workout_screen.dart';
 
 /// The Health tab: heart-rate readings taken by the app itself - fingertip over the
@@ -408,6 +409,7 @@ class _HealthScreenState extends State<HealthScreen> {
 
   ExerciseMode _mode = ExerciseMode.walk;
   int _checkMinutes = 0;
+  PlannedRoute? _planned;
 
   Widget _exerciseCard(BuildContext context, ColorScheme cs) {
     final e = widget.exercise;
@@ -476,6 +478,53 @@ class _HealthScreenState extends State<HealthScreen> {
                 ),
             ],
           ),
+          // Build your own route, Strava-style: tap every street the session should
+          // pass through, the plan is drawn and carried into the live session.
+          const SizedBox(height: 14),
+          Row(children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(42), padding: const EdgeInsets.symmetric(horizontal: 14)),
+                onPressed: () async {
+                  final fix = widget.exercise.lastFix;
+                  final plan = await Navigator.of(context).push<PlannedRoute>(MaterialPageRoute(
+                    builder: (_) => RouteBuilderScreen(
+                      i18n: widget.i18n,
+                      mode: _mode,
+                      start: fix == null ? null : LatLng(fix.lat, fix.lon),
+                    ),
+                  ));
+                  if (plan != null) setState(() => _planned = plan);
+                },
+                icon: const Icon(Icons.route_outlined, size: 20),
+                label: Text(t('route.build'), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+              ),
+            ),
+            if (_planned != null) ...[
+              const SizedBox(width: 8),
+              InkWell(
+                onTap: () => setState(() => _planned = null),
+                customBorder: const CircleBorder(),
+                child: Padding(
+                  padding: const EdgeInsets.all(6),
+                  child: Icon(Icons.cancel_rounded, size: 24, color: cs.primary),
+                ),
+              ),
+            ],
+          ]),
+          if (_planned != null) ...[
+            const SizedBox(height: 8),
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Icon(Icons.check_circle_outline_rounded, size: 17, color: cs.tertiary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '${t('route.planned')} ${_planned!.km < 1 ? _planned!.km.toStringAsFixed(2) : _planned!.km.toStringAsFixed(1)} km · ~${_planned!.mins} min',
+                  style: TextStyle(fontSize: 12.5, height: 1.4, color: cs.onSurface.withValues(alpha: 0.75)),
+                ),
+              ),
+            ]),
+          ],
           // The safety watch for the session, moved here from the home screen:
           // pick how long the session may take; if it goes past that without
           // "I'm safe", the contacts get a full alert, same as any other check.
@@ -541,6 +590,7 @@ class _HealthScreenState extends State<HealthScreen> {
         i18n: widget.i18n,
         mode: _mode,
         checkMinutes: mins,
+        planned: _planned,
       ),
     ));
     if (started == null) return; // discarded inside: nothing to celebrate

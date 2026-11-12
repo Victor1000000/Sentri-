@@ -13,11 +13,13 @@ import 'heart_signal.dart';
 /// Deliberately patient and honest: it records about thirty seconds, and returns null
 /// (not a guess) whenever the wiggle is too weak or too messy to trust.
 ///
-/// v36 accuracy work: the camera's exposure and focus are LOCKED before frames are read.
-/// An auto-exposure that keeps hunting produces its own slow brightness waves that are
-/// not the pulse at all - the single biggest source of "funny numbers". And the answer
-/// must agree with itself: the take is scored in two halves, and a reading whose halves
-/// disagree is refused, not averaged.
+/// v36 accuracy work: the camera's exposure and focus are LOCKED so an auto-exposure
+/// that keeps hunting cannot draw its own slow brightness waves - fake pulses. v37
+/// fixes the regression that lock caused: the lock happens AFTER the stream has run
+/// for two seconds (so the auto-exposure first adapts to the fingertip, not to the
+/// bright empty screen), and samples before the lock are thrown away.
+/// And the answer must agree with itself: the take is scored in two halves, and a
+/// reading whose halves disagree is refused, not averaged.
 class HeartCamera {
   static const secondsTarget = 30;
 
@@ -84,19 +86,12 @@ class HeartCamera {
       return null; // never pretend a number
     }
     _controller = ctrl;
-    // Lock the exposure and the focus BEFORE the stream starts. Auto-exposure re-lightens
-    // the frame whenever its average drifts, drawing waves that drown the tiny pulse;
-    // auto-focus hunting blurs and brightens for the same reason. A locked camera turns
-    // the finger into a steady lamp, so what wiggles is the blood. Both are best effort:
-    // a phone that refuses the lock still measures with the free-running camera.
-    try {
-      await ctrl.setExposureMode(ExposureMode.locked);
-    } catch (_) {}
-    try {
-      await ctrl.setFocusMode(FocusMode.locked);
-    } catch (_) {}
-    // No torch here: the front camera has none. The bright screen supplies the light;
-    // the measure screen shows a big bright panel for exactly that.
+    // The stream starts FIRST, and the exposure lock comes ~2 seconds later. The v36
+    // order (lock right after initialize) was the regression: the AE locked onto the
+    // bright empty-screen scene, then the fingertip darkened the whole frame and every
+    // reading came back "not strong enough". Letting the auto-exposure run for two
+    // seconds means it adapts to the finger as its scene; only then is it locked, so
+    // what wiggles afterwards is the blood, not the exposure hunting.
     try {
       await ctrl.startImageStream(_onFrame);
     } catch (_) {
@@ -104,6 +99,15 @@ class HeartCamera {
       await _close();
       return null;
     }
+    await Future<void>.delayed(const Duration(milliseconds: 2000));
+    var lockAt = 0.0;
+    try {
+      await ctrl.setExposureMode(ExposureMode.locked);
+      lockAt = _sw.elapsedMicroseconds / 1e6;
+    } catch (_) {}
+    try {
+      await ctrl.setFocusMode(FocusMode.locked);
+    } catch (_) {}
 
     final wait = _measureFrames();
     final total = secondsTarget;
@@ -121,10 +125,13 @@ class HeartCamera {
     } catch (_) {}
     await _close();
 
-    // Skip the first ~2 seconds: that is when the finger press is still settling and
-    // the exposure is still hunting - analysis runs only on the settled stream.
+    // Skip the settling lead-in: the finger press settling, plus the auto-exposure
+    // adapting to the fingertip before the lock, plus a short margin after the lock
+    // (a lock can itself shift the frame for a moment). Analysis runs only on the
+    // locked, settled stream.
+    final settle = (lockAt + 0.7 > 2.0) ? lockAt + 0.7 : 2.0;
     var i0 = 0;
-    while (i0 < _times.length && _times[i0] < 2.0) {
+    while (i0 < _times.length && _times[i0] < settle) {
       i0++;
     }
     final samples = _samples.sublist(i0);
@@ -154,7 +161,7 @@ class HeartCamera {
       final b = bpmFromSamples(yb, fps, minWiggle: 0.4);
       if (a != null && b != null) {
         final rel = (a - b).abs() / ((a + b) / 2);
-        if (rel > 0.12) return null; // the finger moved, or the light lied: no number
+        if (rel > 0.15) return null; // the finger moved, or the light lied: no number
       }
     }
     return bpm.round().clamp(30, 220);

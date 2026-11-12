@@ -220,9 +220,10 @@ class HealthController extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  /// The drink-water reminder is scheduled on the phone's alarm system, which the system
-  /// can drop after a reboot or a battery-saving purge. Re-arming it every time the app
-  /// becomes visible is how the reminder "sticks" - one fresh schedule each app open.
+  /// The drink-water reminder lives as a chain of one-shot alarms the app tops back
+  /// up on every open (see push_service.scheduleWaterReminder). Re-running it here is
+  /// what keeps the chain stocked - a healthy chain is left strictly alone, a purged
+  /// one is refilled.
   void ensureWaterReminder() {
     unawaited(scheduleWaterReminder(
       settings.waterMinutes,

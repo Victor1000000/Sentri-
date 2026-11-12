@@ -154,9 +154,11 @@ double? _readOneWindow(
       return bestCluster.reduce((x, y) => x + y) / bestCluster.length;
     }
   }
-  // A single view may carry the reading only when the rhythm match is itself
-  // confident - the parabolic interpolation and the octave guard keep it honest.
-  if (rhythm != null && rhythm.confidence >= trust + 0.05) return rhythm.bpm;
+  // A single view may carry the reading when the rhythm match is itself confident -
+  // the parabolic interpolation and the octave guard keep it honest. (The v36
+  // +0.05 bar read healthy fingers as "not strong enough" on dark screens; `trust`
+  // alone is still a firm bar, and the cluster + self-agreement checks above stay.)
+  if (rhythm != null && rhythm.confidence >= trust) return rhythm.bpm;
   return null;
 }
 

@@ -27,6 +27,9 @@ class AppSettings extends ChangeNotifier {
   /// Minutes between drink-water reminders; 0 means reminders are off.
   int waterMinutes = 0;
 
+  /// The map's base layer: 'standard', 'satellite', 'hybrid' or 'night'.
+  String mapType = 'standard';
+
   Future<void> load() async {
     final raw = await _store.read(_k);
     if (raw == null) return;
@@ -44,6 +47,7 @@ class AppSettings extends ChangeNotifier {
     language = j['lang'] as String? ?? 'en';
     theme = j['theme'] as String? ?? 'system';
     waterMinutes = j['water'] as int? ?? 0;
+    mapType = j['mapType'] as String? ?? 'standard';
   }
 
   Future<void> update({
@@ -54,6 +58,7 @@ class AppSettings extends ChangeNotifier {
     String? language,
     String? theme,
     int? waterMinutes,
+    String? mapType,
   }) async {
     this.triggers = triggers ?? this.triggers;
     this.dataSaver = dataSaver ?? this.dataSaver;
@@ -62,6 +67,7 @@ class AppSettings extends ChangeNotifier {
     this.language = language ?? this.language;
     this.theme = theme ?? this.theme;
     this.waterMinutes = waterMinutes ?? this.waterMinutes;
+    mapType = mapType ?? this.mapType;
     await _store.write(
       _k,
       jsonEncode({
@@ -76,6 +82,7 @@ class AppSettings extends ChangeNotifier {
         'lang': this.language,
         'theme': this.theme,
         'water': this.waterMinutes,
+        'mapType': mapType,
       }),
     );
     notifyListeners();

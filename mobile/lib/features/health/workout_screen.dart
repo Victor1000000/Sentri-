@@ -10,6 +10,7 @@ import '../../core/i18n/i18n.dart';
 import '../checkin/checkin_controller.dart';
 import 'awards.dart';
 import 'exercise_controller.dart';
+import 'route_builder.dart';
 
 /// A live workout on the app's map: the session starts the moment this screen
 /// opens and everything counts right away - the clock, real steps from the
@@ -18,6 +19,9 @@ import 'exercise_controller.dart';
 /// chosen length, so if the person never comes back and never marks themselves
 /// safe, their contacts hear the alert exactly like any other missed check.
 /// Finishing saves the session to the history and hands out any awards.
+///
+/// A session can carry a plan the person built on the route-builder screen; the
+/// plan is drawn as a dashed line and the stats show how much of it is left.
 class WorkoutScreen extends StatefulWidget {
   const WorkoutScreen({
     super.key,
@@ -26,12 +30,14 @@ class WorkoutScreen extends StatefulWidget {
     required this.i18n,
     required this.mode,
     required this.checkMinutes,
+    this.planned,
   });
   final ExerciseController exercise;
   final CheckInController checkin;
   final I18n i18n;
   final ExerciseMode mode;
   final int checkMinutes; // 0 = no check-on-me for this session
+  final PlannedRoute? planned;
 
   @override
   State<WorkoutScreen> createState() => _WorkoutScreenState();
@@ -160,6 +166,16 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
                   options: MapOptions(initialCenter: here ?? const LatLng(9.0820, 7.4730), initialZoom: here == null ? 5.5 : 17),
                   children: [
                     TileLayer(urlTemplate: AppConfig.tileUrl, userAgentPackageName: 'ng.sentri.sentri'),
+                    // The plan the person built: a dashed line the walked line grows along.
+                    if (widget.planned != null)
+                      PolylineLayer(polylines: [
+                        Polyline(
+                          points: widget.planned!.points,
+                          strokeWidth: 4,
+                          color: dark ? const Color(0xFFB9C4D4) : const Color(0xFF44546A),
+                          pattern: const StrokePattern.dashed(segments: [10.0, 10.0]),
+                        ),
+                      ]),
                     if (path.length >= 2)
                       PolylineLayer(polylines: [Polyline(points: path, strokeWidth: 5, color: const Color(0xFF6A5FF0))]),
                     if (here != null)
@@ -183,6 +199,42 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
                 right: 14,
                 bottom: MediaQuery.paddingOf(context).bottom + 14,
                 child: Column(children: [
+                  if (widget.planned != null) ...[
+                    Builder(builder: (context) {
+                      final left = _kmLeftOnPlan(e);
+                      final plan = widget.planned!;
+                      final km = plan.km < 1 ? plan.km.toStringAsFixed(2) : plan.km.toStringAsFixed(1);
+                      final sub = left == null ? '' : ' · ${t('route.left', {'km': left < 1 ? left.toStringAsFixed(2) : left.toStringAsFixed(1)})}';
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Material(
+                          color: dark ? const Color(0xFF17181D) : Colors.white,
+                          borderRadius: BorderRadius.circular(30),
+                          elevation: 4,
+                          shadowColor: Colors.black38,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            child: Row(mainAxisSize: MainAxisSize.min, children: [
+                              Icon(switch (widget.mode) {
+                                ExerciseMode.walk => Icons.directions_walk,
+                                ExerciseMode.run => Icons.directions_run,
+                                ExerciseMode.bike => Icons.directions_bike,
+                              }, size: 18, color: cs.primary),
+                              const SizedBox(width: 8),
+                              Flexible(
+                                child: Text(
+                                  '${t('route.planned')} $km km · ~${plan.mins} min$sub',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                                ),
+                              ),
+                            ]),
+                          ),
+                        ),
+                      );
+                    }),
+                  ],
                   if (widget.checkin.running)
                     ListenableBuilder(
                       listenable: widget.checkin,
@@ -275,6 +327,31 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
         const SizedBox(height: 2),
         Text(label, style: TextStyle(fontSize: 12.5, color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.55))),
       ]);
+
+  /// How much of the built plan is still ahead: the plan point closest to the
+  /// person right now, then every plan metre from there to the route's end.
+  /// Null while the session has no position yet.
+  double? _kmLeftOnPlan(ExerciseController e) {
+    final plan = widget.planned;
+    if (plan == null || plan.points.length < 2) return null;
+    final here = e.path.isEmpty ? null : e.path.last;
+    if (here == null) return null;
+    const d = Distance();
+    var bestI = 0;
+    var bestM = double.infinity;
+    for (var i = 0; i < plan.points.length; i++) {
+      final m = d.distance(plan.points[i], here);
+      if (m < bestM) {
+        bestM = m;
+        bestI = i;
+      }
+    }
+    var left = 0.0;
+    for (var i = bestI; i < plan.points.length - 1; i++) {
+      left += d.distance(plan.points[i], plan.points[i + 1]);
+    }
+    return left / 1000.0;
+  }
 
   Future<void> _askBeforePop(BuildContext context) async {
     // Same plain question as the discard button; nothing is lost silently.

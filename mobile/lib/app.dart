@@ -155,8 +155,8 @@ class _TabsState extends State<_Tabs> {
     final body = IndexedStack(
       index: _tab,
       children: [
-        HomeScreen(sos: s.sos, settings: s.settings, i18n: s.i18n, bridge: s.bridge, api: s.api, inbox: s.inbox, share: s.share, checkin: s.checkin, police: s.police, people: s.people, profile: s.profile),
-        MapScreen(key: _mapKey, location: s.location, api: s.api, i18n: s.i18n, placeLookup: const DevicePlaceLookup(), onPlace: (p) => _state = p?.state, police: _directoryFuture),
+        HomeScreen(sos: s.sos, settings: s.settings, i18n: s.i18n, bridge: s.bridge, api: s.api, inbox: s.inbox, share: s.share, checkin: s.checkin, police: s.police, people: s.people, profile: s.profile, exercise: s.exercise),
+        MapScreen(key: _mapKey, location: s.location, api: s.api, i18n: s.i18n, placeLookup: const DevicePlaceLookup(), onPlace: (p) => _state = p?.state, police: _directoryFuture, settings: s.settings),
         HealthScreen(
           health: s.health,
           i18n: s.i18n,
