@@ -173,7 +173,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
                           points: widget.planned!.points,
                           strokeWidth: 4,
                           color: dark ? const Color(0xFFB9C4D4) : const Color(0xFF44546A),
-                          pattern: const StrokePattern.dashed(segments: [10.0, 10.0]),
+                          pattern: StrokePattern.dashed(segments: [10.0, 10.0]),
                         ),
                       ]),
                     if (path.length >= 2)

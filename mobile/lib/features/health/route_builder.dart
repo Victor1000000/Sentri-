@@ -209,7 +209,7 @@ class _RouteBuilderState extends State<RouteBuilderScreen> {
                     points: List<LatLng>.of(_way),
                     strokeWidth: 3,
                     color: const Color(0xFF6A5FF0).withValues(alpha: 0.55),
-                    pattern: const StrokePattern.dashed(segments: [8.0, 8.0]),
+                    pattern: StrokePattern.dashed(segments: [8.0, 8.0]),
                   ),
                 ]),
               if (_route != null)
@@ -271,7 +271,7 @@ class _RouteBuilderState extends State<RouteBuilderScreen> {
               child: Column(children: [
                 Row(children: [
                   Expanded(child: _stat(t('route.planned'), _route == null ? '--' : '${_km < 1 ? _km.toStringAsFixed(2) : _km.toStringAsFixed(1)} km')),
-                  Expanded(child: _stat(t('exercise.time'), _route == null ? '--' : '~$(_mins) min')),
+                  Expanded(child: _stat(t('exercise.time'), _route == null ? '--' : '~$_mins min')),
                   Expanded(child: _stat(t('route.waypoints'), '${_way.length}/$_maxWaypoints')),
                 ]),
                 const SizedBox(height: 12),

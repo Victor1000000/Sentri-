@@ -228,6 +228,7 @@ Future<void> scheduleWaterReminder(int minutes, String title, String body) async
           details,
           payload: fingerprint,
           androidScheduleMode: AndroidScheduleMode.alarmClock,
+          uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
         );
       } on PlatformException {
         // Some phones lock alarm-clock scheduling too: a gently inexact alarm still
@@ -241,6 +242,7 @@ Future<void> scheduleWaterReminder(int minutes, String title, String body) async
             details,
             payload: fingerprint,
             androidScheduleMode: AndroidScheduleMode.inexact,
+            uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
           );
         } catch (_) {}
       } catch (_) {}

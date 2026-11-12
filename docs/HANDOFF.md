@@ -566,7 +566,10 @@ not yet done the two-device test).
 - Water alert REBUILT - the plugin's repeating schedule is gone. New design in push_service.dart: the app
   manages a CHAIN of one-shot `zonedSchedule` alarms itself, ids 7300..7347 (48 slots; `_waterId` 7201 and
   `_healthNoteId` 7202 untouched), alarm-clock schedule mode, `tz.TZDateTime.from(at, tz.UTC)` instants
-  (`tzdata.initializeTimeZones()` lazily once; `timezone: ^0.10.0` added to pubspec). Rules: fingerprint
+  (`tzdata.initializeTimeZones()` lazily once; `timezone: ^0.9.4` added to pubspec - FLN 17.2.3 pins
+  timezone ^0.9.0, so ^0.10.0 would break pub-solve; and FLN 17.2.x still REQUIRES the named
+  `uiLocalNotificationDateInterpretation` param on zonedSchedule - it is only gone in 19.x - so the
+  chain passes `UILocalNotificationDateInterpretation.absoluteTime`). Rules: fingerprint
   `'water:<minutes>|<title>|<body>'` carried in every link's payload and checked against
   `pendingNotificationRequests` read from the phone; same fingerprint AND >= 24 links pending -> strict no-op;
   same fingerprint, 1..23 links -> TOP-UP only (fills free slots at now+2*pace, now+3*pace, ... up to 24
