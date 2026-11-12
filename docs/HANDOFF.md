@@ -611,6 +611,15 @@ not yet done the two-device test).
 - Pipeline notes: route_builder.dart joined the leaf table; check-apk20 i18n needles gained map.layer_title/
   map.layer_night/route.build/route.left/profile.consistency; libapp.so needles gained 'RouteBuilderScreen',
   'basemaps.cartocdn.com', 'server.arcgisonline.com'; the i18n count printout is 363 x5.
+- CI release-build fix (after v37's first Build fell back to a debug APK): the release build died in
+  `:camera_android_camerax:lintVitalAnalyzeRelease` - a known lint-tool bug under the CI's JDK 17
+  (`NoSuchMethodError: List.removeLast()` in the JavaDoc parser while `CommentDetector` scans plugin
+  Java sources), which lintVital treats as fatal. New CHECKED-IN LEAF `mobile/android/app/lint.xml`
+  disables the two CommentDetector checks the lint error message itself recommends (EasterEgg,
+  StopShip - they comment-hunt plugin sources for STOPSHIP markers, meaningless for a Flutter APK).
+  The file survives `flutter create` (it only writes its own templates), is read by AGP lint from the
+  module dir, and lint still runs for everything else. Dart compile passed in both failed/succeeded
+  runs; the debug fallback APK must never be shipped.
 
 
 

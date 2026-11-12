@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Lint is switched off where it would break the release build on CI. The
+     CommentDetector checks (EasterEgg, StopShip) crash the lint tool on the
+     build runner (a known lint bug: under JDK 17 its Java source parser throws
+     NoSuchMethodError List.removeLast while reading plugin Java sources, e.g.
+     camera_android_camerax's AnalyzerProxyApi.java), and lintVital treats that
+     internal crash as fatal, which failed the release APK in v37's first build.
+     These two checks comment-hunt for leftover "TODO STOPSHIP" markers in
+     plugin source code - they have never found anything in this app and have
+     no meaning for a Flutter APK, so they are off. Lint itself still runs and
+     still checks everything else. -->
+<lint>
+    <issue id="EasterEgg" severity="ignore" />
+    <issue id="StopShip" severity="ignore" />
+</lint>
