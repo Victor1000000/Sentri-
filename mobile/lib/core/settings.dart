@@ -67,7 +67,7 @@ class AppSettings extends ChangeNotifier {
     this.language = language ?? this.language;
     this.theme = theme ?? this.theme;
     this.waterMinutes = waterMinutes ?? this.waterMinutes;
-    mapType = mapType ?? this.mapType;
+    this.mapType = mapType ?? this.mapType;
     await _store.write(
       _k,
       jsonEncode({
@@ -82,7 +82,7 @@ class AppSettings extends ChangeNotifier {
         'lang': this.language,
         'theme': this.theme,
         'water': this.waterMinutes,
-        'mapType': mapType,
+        'mapType': this.mapType,
       }),
     );
     notifyListeners();

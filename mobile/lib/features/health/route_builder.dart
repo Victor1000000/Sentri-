@@ -250,9 +250,9 @@ class _RouteBuilderState extends State<RouteBuilderScreen> {
                 Text(t('route.busy'), style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w600)),
               ]))
             else if (_error != null)
-              _pill(Flexible(child: Text(_error!, textAlign: TextAlign.center, style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w600))))
+              _pill(Text(_error!, textAlign: TextAlign.center, style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w600)))
             else if (_way.isEmpty)
-              _pill(Flexible(child: Text(t('route.hint'), textAlign: TextAlign.center, style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w600)))),
+              _pill(Text(t('route.hint'), textAlign: TextAlign.center, style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w600))),
           ]),
         ),
 

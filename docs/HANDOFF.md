@@ -626,6 +626,33 @@ not yet done the two-device test).
   rewritten-head Build does not reliably auto-trigger after Apply, the round ends by dispatching
   `sentri-apk.yml` on main by hand (workflow supports workflow_dispatch) and watching that run.
 
+## 22. Version 38 (this patch) — engineer's notes
+
+Vic tested v37: heart rate now WORKS. Two bugs reported, both root-caused and fixed:
+
+- Map layer switching did nothing. `_setMapType` and the layer sheet were fine; the bug was in
+  core_settings.dart `update()`: `mapType = mapType ?? this.mapType;` — the parameter shadows the
+  field, so that line assigned the LOCAL PARAMETER and the field `this.mapType` never changed. The
+  map's `_mapType` getter (`widget.settings?.mapType`) therefore always returned 'standard', while
+  the JSON write (which read the parameter) DID save the new value — the choice only took effect
+  after an app restart. Worse, the JSON wrote the raw parameter, so any `update()` call without a
+  `mapType:` (theme, language, water...) saved `null`, which `load()` turns back into 'standard' —
+  the saved choice was silently wiped. Fix: `this.mapType = mapType ?? this.mapType;` and
+  `'mapType': this.mapType` in the JSON. One-line-each; the whole sheet/tile/attribution chain
+  (`_baseLayers`) was verified correct.
+- Route builder showed a solid light-gray box over the map center (map labels visible only at the
+  screen edges) and every tap was swallowed (0/12 points). Cause: the hint/error pills wrapped
+  their Text in `Flexible` with no Row/Column above it (`_pill` = Material > Padding > Flexible >
+  Text). Flexible is a ParentDataWidget<FlexParentData>; debug mode flags it ("Incorrect use of
+  ParentDataWidget") but RELEASE silently replaces the pill subtree with the error widget — a
+  solid gray box sized to the available space, sitting in the Stack ABOVE the map, absorbing all
+  gestures. The v37 note that this pattern was "benign in release" was wrong. Fix: drop the
+  Flexible wrappers, pass Text directly (long text still wraps at the pill's max width). Audited
+  every other Flexible/Expanded in the leaves: all are inside Row/Column children; these two were
+  the only invalid ones.
+- No new i18n keys (still 363 x5). No pubspec/workflow changes. check-apk20 needles unchanged.
+
+
 
 
 
