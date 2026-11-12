@@ -1,0 +1,67 @@
+diff --git a/docs/HANDOFF.md b/docs/HANDOFF.md
+--- a/docs/HANDOFF.md
++++ b/docs/HANDOFF.md
+@@ -566,7 +566,10 @@
+ - Water alert REBUILT - the plugin's repeating schedule is gone. New design in push_service.dart: the app
+   manages a CHAIN of one-shot `zonedSchedule` alarms itself, ids 7300..7347 (48 slots; `_waterId` 7201 and
+   `_healthNoteId` 7202 untouched), alarm-clock schedule mode, `tz.TZDateTime.from(at, tz.UTC)` instants
+-  (`tzdata.initializeTimeZones()` lazily once; `timezone: ^0.10.0` added to pubspec). Rules: fingerprint
++  (`tzdata.initializeTimeZones()` lazily once; `timezone: ^0.9.4` added to pubspec - FLN 17.2.3 pins
++  timezone ^0.9.0, so ^0.10.0 would break pub-solve; and FLN 17.2.x still REQUIRES the named
++  `uiLocalNotificationDateInterpretation` param on zonedSchedule - it is only gone in 19.x - so the
++  chain passes `UILocalNotificationDateInterpretation.absoluteTime`). Rules: fingerprint
+   `'water:<minutes>|<title>|<body>'` carried in every link's payload and checked against
+   `pendingNotificationRequests` read from the phone; same fingerprint AND >= 24 links pending -> strict no-op;
+   same fingerprint, 1..23 links -> TOP-UP only (fills free slots at now+2*pace, now+3*pace, ... up to 24
+diff --git a/mobile/lib/features/health/workout_screen.dart b/mobile/lib/features/health/workout_screen.dart
+--- a/mobile/lib/features/health/workout_screen.dart
++++ b/mobile/lib/features/health/workout_screen.dart
+@@ -173,7 +173,7 @@
+                           points: widget.planned!.points,
+                           strokeWidth: 4,
+                           color: dark ? const Color(0xFFB9C4D4) : const Color(0xFF44546A),
+-                          pattern: const StrokePattern.dashed(segments: [10.0, 10.0]),
++                          pattern: StrokePattern.dashed(segments: [10.0, 10.0]),
+                         ),
+                       ]),
+                     if (path.length >= 2)
+diff --git a/mobile/lib/features/push/push_service.dart b/mobile/lib/features/push/push_service.dart
+--- a/mobile/lib/features/push/push_service.dart
++++ b/mobile/lib/features/push/push_service.dart
+@@ -228,6 +228,7 @@
+           details,
+           payload: fingerprint,
+           androidScheduleMode: AndroidScheduleMode.alarmClock,
++          uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
+         );
+       } on PlatformException {
+         // Some phones lock alarm-clock scheduling too: a gently inexact alarm still
+@@ -241,6 +242,7 @@
+             details,
+             payload: fingerprint,
+             androidScheduleMode: AndroidScheduleMode.inexact,
++            uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
+           );
+         } catch (_) {}
+       } catch (_) {}
+diff --git a/mobile/lib/features/health/route_builder.dart b/mobile/lib/features/health/route_builder.dart
+--- a/mobile/lib/features/health/route_builder.dart
++++ b/mobile/lib/features/health/route_builder.dart
+@@ -209,7 +209,7 @@
+                     points: List<LatLng>.of(_way),
+                     strokeWidth: 3,
+                     color: const Color(0xFF6A5FF0).withValues(alpha: 0.55),
+-                    pattern: const StrokePattern.dashed(segments: [8.0, 8.0]),
++                    pattern: StrokePattern.dashed(segments: [8.0, 8.0]),
+                   ),
+                 ]),
+               if (_route != null)
+@@ -271,7 +271,7 @@
+               child: Column(children: [
+                 Row(children: [
+                   Expanded(child: _stat(t('route.planned'), _route == null ? '--' : '${_km < 1 ? _km.toStringAsFixed(2) : _km.toStringAsFixed(1)} km')),
+-                  Expanded(child: _stat(t('exercise.time'), _route == null ? '--' : '~$(_mins) min')),
++                  Expanded(child: _stat(t('exercise.time'), _route == null ? '--' : '~$_mins min')),
+                   Expanded(child: _stat(t('route.waypoints'), '${_way.length}/$_maxWaypoints')),
+                 ]),
+                 const SizedBox(height: 12),
