@@ -689,7 +689,7 @@ class _HealthScreenState extends State<HealthScreen> {
         // the award shelf - the History section is one visible tap.
         TapBounce(
           onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
-            builder: (_) => ExerciseHistoryScreen(exercise: widget.exercise, awards: widget.awards, i18n: widget.i18n),
+            builder: (_) => ExerciseHistoryScreen(exercise: widget.exercise, awards: widget.awards, i18n: widget.i18n, mapType: widget.health.settings.mapType),
           )),
           child: Padding(
             padding: const EdgeInsets.fromLTRB(18, 14, 10, 0),
@@ -752,7 +752,7 @@ class _HealthScreenState extends State<HealthScreen> {
   /// and fitted, Strava-style.
   Future<void> _openSession(BuildContext context, WorkoutRecord r) async {
     await Navigator.of(context).push(MaterialPageRoute<void>(
-      builder: (_) => _SessionDetailScreen(record: r, awards: widget.awards, i18n: widget.i18n),
+      builder: (_) => _SessionDetailScreen(record: r, awards: widget.awards, i18n: widget.i18n, mapType: widget.health.settings.mapType),
     ));
   }
 
@@ -967,10 +967,13 @@ class _AwardShelfCard extends StatelessWidget {
 /// The full exercise story, opened from the History card's header: every saved
 /// session (walk, run or ride), each with its own page, plus the award shelf.
 class ExerciseHistoryScreen extends StatelessWidget {
-  const ExerciseHistoryScreen({super.key, required this.exercise, required this.awards, required this.i18n});
+  const ExerciseHistoryScreen({super.key, required this.exercise, required this.awards, required this.i18n, this.mapType = 'standard'});
   final ExerciseController exercise;
   final AwardStore awards;
   final I18n i18n;
+
+  /// The base layer chosen on the map tab, so every session map wears the same look.
+  final String mapType;
 
   @override
   Widget build(BuildContext context) {
@@ -1028,7 +1031,7 @@ class ExerciseHistoryScreen extends StatelessWidget {
                   ),
                   trailing: Icon(Icons.chevron_right, size: 20, color: cs.onSurface.withValues(alpha: 0.4)),
                   onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
-                    builder: (_) => _SessionDetailScreen(record: hist[i], awards: awards, i18n: i18n),
+                    builder: (_) => _SessionDetailScreen(record: hist[i], awards: awards, i18n: i18n, mapType: mapType),
                   )),
                 ),
               ],
@@ -1042,10 +1045,13 @@ class ExerciseHistoryScreen extends StatelessWidget {
 /// One saved session, Strava-style: the big numbers up top, then the exact
 /// route on the map with its start and end pins, then the award shelf it feeds.
 class _SessionDetailScreen extends StatelessWidget {
-  const _SessionDetailScreen({required this.record, required this.awards, required this.i18n});
+  const _SessionDetailScreen({required this.record, required this.awards, required this.i18n, this.mapType = 'standard'});
   final WorkoutRecord record;
   final AwardStore awards;
   final I18n i18n;
+
+  /// The base layer chosen on the map tab, so the route map wears the same look.
+  final String mapType;
 
   @override
   Widget build(BuildContext context) {
@@ -1085,7 +1091,7 @@ class _SessionDetailScreen extends StatelessWidget {
           borderRadius: BorderRadius.circular(24),
           child: SizedBox(
             height: 280,
-            child: FlutterMapSheetMap(path: r.path, ends: true, mapType: widget.health.settings.mapType),
+            child: FlutterMapSheetMap(path: r.path, ends: true, mapType: mapType),
           ),
         ),
         const SizedBox(height: 16),

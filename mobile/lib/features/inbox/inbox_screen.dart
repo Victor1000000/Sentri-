@@ -148,7 +148,7 @@ class InboxScreen extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(20),
           onTap: () async {
-            await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => AlertDetailScreen(entry: e, api: api, i18n: i18n, police: police)));
+            await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => AlertDetailScreen(entry: e, api: api, i18n: i18n, police: police, settings: settings)));
             unawaited(inbox.refresh());
           },
           child: Padding(
@@ -262,11 +262,15 @@ class _TestAlertButtonState extends State<_TestAlertButton> {
 
 /// One message. For a live alert or share it shows the map and refreshes the position.
 class AlertDetailScreen extends StatefulWidget {
-  const AlertDetailScreen({super.key, required this.entry, required this.api, required this.i18n, required this.police});
+  const AlertDetailScreen({super.key, required this.entry, required this.api, required this.i18n, required this.police, this.settings});
   final Future<PoliceDirectory> police;
   final InboxEntry entry;
   final SentriApi api;
   final I18n i18n;
+
+  /// The person's choices, so the live alert map wears the base layer they chose
+  /// on the map tab (satellite, hybrid, night...). Null in tests.
+  final AppSettings? settings;
   @override
   State<AlertDetailScreen> createState() => _AlertDetailScreenState();
 }
@@ -350,7 +354,7 @@ class _AlertDetailScreenState extends State<AlertDetailScreen> {
                 key: ValueKey('${d.lat},${d.lon}'),
                 options: MapOptions(initialCenter: LatLng(d.lat!, d.lon!), initialZoom: 16, interactionOptions: const InteractionOptions(flags: InteractiveFlag.pinchZoom | InteractiveFlag.drag)),
                 children: [
-                  for (final url in sentriBaseLayers(settings?.mapType ?? 'standard').urls) TileLayer(urlTemplate: url, userAgentPackageName: 'ng.sentri.sentri'),
+                  for (final url in sentriBaseLayers(widget.settings?.mapType ?? 'standard').urls) TileLayer(urlTemplate: url, userAgentPackageName: 'ng.sentri.sentri'),
                   MarkerLayer(markers: [Marker(point: LatLng(d.lat!, d.lon!), width: 28, height: 28, child: Container(decoration: BoxDecoration(shape: BoxShape.circle, color: urgent ? Flat.danger : Brand.indigo, border: Border.all(color: Colors.white, width: 3))))]),
                 ],
               ),

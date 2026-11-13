@@ -703,3 +703,10 @@ Vic's round three. Two repeat complaints from v37/v38, both finally root-caused 
 - check-apk20: needle `server.arcgisonline.com` → `mt1.google.com`; added heart.recent /
   heart.trend_steady i18n needles and a classes.dex check for ScreenToggleDetector. No pubspec,
   workflow, or backend changes.
+- Build fix (the first release run failed compile): _SessionDetailScreen and ExerciseHistoryScreen
+  referenced `widget.health...` from a StatelessWidget scope and the alert-detail State referenced
+  a bare `settings` — all three now carry mapType/settings as proper constructor fields, passed
+  from their callers. And geolocator 13 removed the `timeout:` param on getCurrentPosition — the
+  route builder's fresh-position ask uses `locationSettings: LocationSettings(accuracy: high,
+  timeLimit: 8 s)` instead. Lesson unchanged: there is no local flutter analyze, so read every new
+  reference against the widget class that will actually compile it.

@@ -68,7 +68,9 @@ class _RouteBuilderState extends State<RouteBuilderScreen> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         unawaited(() async {
           try {
-            final p = await Geolocator.getCurrentPosition(timeout: const Duration(seconds: 8));
+            final p = await Geolocator.getCurrentPosition(
+              locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, timeLimit: Duration(seconds: 8)),
+            );
             if (!mounted) return;
             _map.move(LatLng(p.latitude, p.longitude), 16);
           } catch (_) {}
