@@ -269,6 +269,20 @@ diff --git a/backend/src/modules/auth/phone.ts b/backend/src/modules/auth/phone.
      if (!phone) throw new ContactError('One of the contact numbers is not valid');
      if (phone === ownPhone) throw new ContactError('You cannot add your own number as a contact');
      if (seen.has(phone)) throw new ContactError('Each contact must have a different number');
+diff --git a/backend/src/domain/types.ts b/backend/src/domain/types.ts
+--- a/backend/src/domain/types.ts
++++ b/backend/src/domain/types.ts
+@@ -1,7 +1,9 @@
+ // Core domain types and the ports (interfaces) the SOS engine depends on.
+ // Adapters (Postgres, Redis/BullMQ, FCM, Termii) implement these; tests use in-memory ones.
+ 
+-export type Locale = 'en' | 'ha' | 'yo' | 'ig' | 'pcm';
++// v40, global: French and Spanish joined the app's languages, so every place that
++// validates or stores a locale must accept them.
++export type Locale = 'en' | 'ha' | 'yo' | 'ig' | 'pcm' | 'fr' | 'es';
+ export type SosState = 'countdown' | 'active' | 'acknowledged' | 'cancelled' | 'expired';
+ export type TriggerType = 'floating' | 'volume' | 'shake' | 'power' | 'widget' | 'checkin';
+ export type MessageKind = 'sos' | 'duress' | 'offline' | 'low_battery' | 'test' | 'share_start' | 'share_stop' | 'health_alert';
 diff --git a/backend/test/auth.test.ts b/backend/test/auth.test.ts
 --- a/backend/test/auth.test.ts
 +++ b/backend/test/auth.test.ts
