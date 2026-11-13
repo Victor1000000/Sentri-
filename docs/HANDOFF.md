@@ -766,3 +766,14 @@ ten contacts, worldwide dial codes + emergency lines, French + Spanish.
   base64 TTF fragment in libapp.so.
 - Deferred to v41 (honest list for Vic): Life360-style inbox tabs + mailbox 3D, watch/wearable
   pairing UI, flight/train detection, avatar expansion, deep perf pass.
+- Build fix (the first release run failed compile): the poppins.dart assembler never closed the
+  BrandPoppins class before the top-level kPoppinsWeights const — bracecheck37 did not cover the
+  generated leaf, so it slipped through; the class brace is closed and poppins.dart (plus the new
+  backend/type leaves and the touched tests) joined the brace gate. The run before that had failed
+  the backend type check: LocaleSchema accepts fr/es but the domain Locale union and the
+  Record<Locale,...> alert-texts map did not — domain/types.ts widened, inbox/texts.ts gained
+  full fr/es alert rows. ALSO discovered on the way: the nearby_places_test 'shop' failure was
+  NOT new to v40 — the v39 release run carried the same "124 tests passed, 1 failed" (its run
+  still concluded success because the build step does not gate on the test step). kindLabel
+  deliberately passes shop values it has no friendlier word for straight through ('mall'), so
+  the test now expects 'mall' with a comment saying why. v40's run must gate clean.

@@ -29,7 +29,9 @@ void main() {
     final mall = places.firstWhere((p) => p.name == 'Ikeja City Mall');
     expect(mall.lat, 6.46);
     expect(mall.lon, 3.40);
-    expect(mall.kind, 'shop');
+    // kindLabel passes shop values it does not have a friendlier word for straight
+    // through ('mall'), which is by design - the UI words it, not the parser.
+    expect(mall.kind, 'mall');
     final gym = places.firstWhere((p) => p.name == 'Bodyline Gym');
     expect(gym.kind, 'gym');
     final hotel = places.firstWhere((p) => p.name == 'Guest Lodge');
