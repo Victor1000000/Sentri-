@@ -22,7 +22,8 @@ void main() {
     expect(names, contains('Ikeja City Mall')); // trimmed
     expect(names, contains('Bodyline Gym'));
     expect(names, contains('Guest Lodge'));
-    expect(names, contains('fuel')); // amenity without a name keeps the tag word
+    expect(names, isNot(contains('fuel')),
+        reason: 'an amenity with no name is not a destination - the list shows named places only');
     expect(names, isNot(contains('bench')),
         reason: 'benches, bins, parking and the like are not what a person is navigating to');
     final mall = places.firstWhere((p) => p.name == 'Ikeja City Mall');

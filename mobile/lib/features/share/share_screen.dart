@@ -7,6 +7,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../../core/i18n/i18n.dart';
 import '../../core/net/api.dart';
+import '../../core/settings.dart' show AppSettings;
 import '../../core/widgets/brand.dart';
 import '../../core/widgets/flat.dart';
 import '../health/health_screen.dart' show FlutterMapSheetMap;
@@ -32,11 +33,15 @@ String clockTime(DateTime d) {
 /// Both states open on a photo of real people, and under the picker sits the share history:
 /// every past share, when it ran and how many contacts saw it.
 class ShareScreen extends StatefulWidget {
-  const ShareScreen({super.key, required this.share, required this.api, required this.i18n, required this.people});
+  const ShareScreen({super.key, required this.share, required this.api, required this.i18n, required this.people, this.settings});
   final ShareController share;
   final SentriApi api;
   final I18n i18n;
   final ContactPeople people;
+
+  /// The person's choices, so the share story maps wear the base layer they chose
+  /// on the map tab (satellite, hybrid, night...). Null in tests.
+  final AppSettings? settings;
 
   @override
   State<ShareScreen> createState() => _ShareScreenState();
@@ -228,6 +233,7 @@ class _ShareScreenState extends State<ShareScreen> {
                     i18n: widget.i18n,
                     record: r,
                     track: widget.share.trackPoints(r.id),
+                    mapType: widget.settings?.mapType ?? 'standard',
                   ),
                 )),
                 child: Padding(
@@ -380,10 +386,13 @@ class _ShareScreenState extends State<ShareScreen> {
 /// recorded - where the person actually passed - fitted to the view with the
 /// start and end pinned, Strava-style.
 class _ShareDetailScreen extends StatelessWidget {
-  const _ShareDetailScreen({required this.i18n, required this.record, required this.track});
+  const _ShareDetailScreen({required this.i18n, required this.record, required this.track, this.mapType = 'standard'});
   final I18n i18n;
   final ShareRecord record;
   final Future<List<List<double>>> track;
+
+  /// The base layer chosen on the map tab.
+  final String mapType;
 
   @override
   Widget build(BuildContext context) {
@@ -418,6 +427,7 @@ class _ShareDetailScreen extends StatelessWidget {
                 return FlutterMapSheetMap(
                   path: [for (final p in pts) LatLng(p[0], p[1])],
                   ends: true,
+                  mapType: mapType,
                 );
               },
             ),

@@ -205,7 +205,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     child: _MessageBar(
                       inbox: widget.inbox,
                       i18n: widget.i18n,
-                      onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => InboxScreen(inbox: widget.inbox, api: widget.api, i18n: widget.i18n, police: widget.police))),
+                      onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => InboxScreen(inbox: widget.inbox, api: widget.api, i18n: widget.i18n, police: widget.police, settings: widget.settings))),
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -282,7 +282,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           label: t('share.title'),
                           icon: Icons.share_location_rounded,
                           live: widget.share.active != null,
-                          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ShareScreen(share: widget.share, api: widget.api, i18n: widget.i18n, people: widget.people))),
+                          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ShareScreen(share: widget.share, api: widget.api, i18n: widget.i18n, people: widget.people, settings: widget.settings))),
                         ),
                       ),
                       Expanded(

@@ -247,6 +247,10 @@ void main() {
 
     test('a 409 from a still-running alert does not brick sign-up: the list is kept on the phone and onboarding can continue', () async {
       final r = _rig();
+      // The contacts screen is where this happens: the person is on the contacts
+      // step when the server answers 409 (an alert from an earlier install is
+      // still running). The rig starts at the language step, so move it there first.
+      r.c.step = OnboardingStep.contacts;
       r.api.saveContactsError = ApiHttpError(409, 'sos_active');
       await r.c.submitContacts(['08031111111', '08032222222']);
       expect(r.c.errorKey, 'sos.contacts_busy');

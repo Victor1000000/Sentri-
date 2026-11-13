@@ -5,9 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
-import '../../core/config.dart';
 import '../../core/i18n/i18n.dart';
 import '../checkin/checkin_controller.dart';
+import '../map/map_screen.dart' show sentriBaseLayers;
 import 'awards.dart';
 import 'exercise_controller.dart';
 import 'route_builder.dart';
@@ -31,6 +31,7 @@ class WorkoutScreen extends StatefulWidget {
     required this.mode,
     required this.checkMinutes,
     this.planned,
+    this.mapType = 'standard',
   });
   final ExerciseController exercise;
   final CheckInController checkin;
@@ -38,6 +39,9 @@ class WorkoutScreen extends StatefulWidget {
   final ExerciseMode mode;
   final int checkMinutes; // 0 = no check-on-me for this session
   final PlannedRoute? planned;
+
+  /// The base layer chosen on the map tab, so the live session wears the same look.
+  final String mapType;
 
   @override
   State<WorkoutScreen> createState() => _WorkoutScreenState();
@@ -165,7 +169,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
                   mapController: _map,
                   options: MapOptions(initialCenter: here ?? const LatLng(9.0820, 7.4730), initialZoom: here == null ? 5.5 : 17),
                   children: [
-                    TileLayer(urlTemplate: AppConfig.tileUrl, userAgentPackageName: 'ng.sentri.sentri'),
+                    for (final url in sentriBaseLayers(widget.mapType).urls) TileLayer(urlTemplate: url, userAgentPackageName: 'ng.sentri.sentri'),
                     // The plan the person built: a dashed line the walked line grows along.
                     if (widget.planned != null)
                       PolylineLayer(polylines: [
@@ -189,7 +193,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> {
                           ),
                         ),
                       ]),
-                    const RichAttributionWidget(attributions: [TextSourceAttribution('© OpenStreetMap contributors'), TextSourceAttribution('© CARTO')]),
+                    RichAttributionWidget(attributions: [for (final a in sentriBaseLayers(widget.mapType).attributions) TextSourceAttribution(a)]),
                   ],
                 ),
               ),

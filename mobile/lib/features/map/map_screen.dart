@@ -52,21 +52,27 @@ bool _sameWord(String a, String b) => a.trim().toLowerCase() == b.trim().toLower
 
 // ---- base layers, Strava-style ----
 // Four honest, free base maps. Standard is the app's usual street map; Satellite
-// and Hybrid use Esri's World Imagery (Hybrid draws place names and borders on
-// top of the imagery); Night is CARTO's dark map, made for riding after dark.
-const _esriImageryUrl = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
-const _esriReferenceUrl = 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}';
-const _cartoNightUrl = 'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png';
+// and Hybrid use Google's worldwide imagery (it covers every country
+// deeply, unlike regional servers that grey out with "map data not yet available"
+// when you zoom in); Hybrid draws place names and roads on top of the imagery.
+// Night is CARTO's dark map, made for riding after dark; the layer key is the
+// same one the standard voyager tiles already use in AppConfig.tileUrl.
+const _cartoKey = 'cb1_50g5_1_3ee8841be5e9f8c4341efbe3';
+const _googleSatelliteUrl = 'https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}';
+const _googleHybridUrl = 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}';
+const _cartoNightUrl = 'https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png?key=$_cartoKey';
 
-/// The tile URLs and the attribution line each layer owes its maker.
-({List<String> urls, List<String> attributions}) _baseLayers(String type) => switch (type) {
+/// The tile URLs and the attribution line each layer owes its maker. Public so
+/// every map in the app (session route, share detail, contact alerts, route
+/// builder) can wear the layer the person chose on the map tab.
+({List<String> urls, List<String> attributions}) sentriBaseLayers(String type) => switch (type) {
       'satellite' => (
-          urls: const [_esriImageryUrl],
-          attributions: const ['© Esri, Maxar, Earthstar Geographics', '© OpenStreetMap contributors'],
+          urls: const [_googleSatelliteUrl],
+          attributions: const ['© Google', '© OpenStreetMap contributors'],
         ),
       'hybrid' => (
-          urls: const [_esriImageryUrl, _esriReferenceUrl],
-          attributions: const ['© Esri, Maxar, Earthstar Geographics', '© OpenStreetMap contributors'],
+          urls: const [_googleHybridUrl],
+          attributions: const ['© Google', '© OpenStreetMap contributors'],
         ),
       'night' => (
           urls: const [_cartoNightUrl],
@@ -1149,7 +1155,7 @@ class MapScreenState extends State<MapScreen> {
                 onLongPress: (_, pt) => unawaited(_onLongPress(pt)),
               ),
               children: [
-                for (final url in _baseLayers(_mapType).urls)
+                for (final url in sentriBaseLayers(_mapType).urls)
                   TileLayer(urlTemplate: url, userAgentPackageName: 'ng.sentri.sentri'),
                 if (f != null)
                   CircleLayer(circles: [
@@ -1230,7 +1236,7 @@ class MapScreenState extends State<MapScreen> {
                       child: const Icon(Icons.flag, size: 30, color: Color(0xFF6A5FF0), shadows: [Shadow(blurRadius: 6, color: Colors.white)]),
                     ),
                   ]),
-                RichAttributionWidget(attributions: [for (final a in _baseLayers(_mapType).attributions) TextSourceAttribution(a)]),
+                RichAttributionWidget(attributions: [for (final a in sentriBaseLayers(_mapType).attributions) TextSourceAttribution(a)]),
               ],
             ),
           ),

@@ -10,7 +10,7 @@ import 'heart_signal.dart';
 /// changes how much light reflects back - the camera turns that into a brightness wiggle,
 /// and the maths turns the wiggle into beats per minute.
 ///
-/// Deliberately patient and honest: it records about thirty seconds, and returns null
+/// Deliberately patient and honest: it records about fifteen seconds, and returns null
 /// (not a guess) whenever the wiggle is too weak or too messy to trust.
 ///
 /// v36 accuracy work: the camera's exposure and focus are LOCKED so an auto-exposure
@@ -21,7 +21,7 @@ import 'heart_signal.dart';
 /// And the answer must agree with itself: the take is scored in two halves, and a
 /// reading whose halves disagree is refused, not averaged.
 class HeartCamera {
-  static const secondsTarget = 30;
+  static const secondsTarget = 15;
 
   /// true after a run that never had a working camera or was not given permission -
   /// different advice on the screen than "the reading was not strong enough".

@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/config.dart';
 import '../../core/i18n/i18n.dart';
+import '../../core/settings.dart' show AppSettings, HeartTake;
 import '../../core/widgets/flat.dart';
 import '../checkin/checkin_controller.dart';
 import '../push/push_service.dart';
@@ -23,6 +24,7 @@ import 'exercise_controller.dart';
 import 'health_controller.dart';
 import 'route_builder.dart';
 import 'workout_screen.dart';
+import '../map/map_screen.dart' show sentriBaseLayers;
 
 /// The Health tab: heart-rate readings taken by the app itself - fingertip over the
 /// front camera, lit by the screen - drink-water reminders at the person's own pace
@@ -254,11 +256,82 @@ class _HealthScreenState extends State<HealthScreen> {
                 label: Text(t(h.cameraBpm == null ? 'health.measure' : 'health.measure_again'), style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600)),
               ),
             ),
+            // The readings the app itself has taken before, newest first, plus one
+            // honest line about where the rate is heading.
+            _heartHistory(context, cs),
           ],
         ]),
       ),
     );
   }
+
+  /// The recent self-taken readings as small chips, and a trend line: the average of
+  /// the newest three takes against the three before them (or the last two takes
+  /// while there are fewer than six). A lower resting rate reads as "better".
+  Widget _heartHistory(BuildContext context, ColorScheme cs) {
+    final takes = widget.health.settings.heartTakes;
+    if (takes.isEmpty) return const SizedBox.shrink();
+    String? trendKey;
+    double avg(List<HeartTake> l) => l.map((e) => e.bpm).reduce((a, b) => a + b) / l.length;
+    if (takes.length >= 6) {
+      final cur = avg(takes.sublist(takes.length - 3));
+      final prev = avg(takes.sublist(takes.length - 6, takes.length - 3));
+      if (cur <= prev - 2.5) {
+        trendKey = 'heart.trend_better';
+      } else if (cur >= prev + 2.5) {
+        trendKey = 'heart.trend_worse';
+      } else {
+        trendKey = 'heart.trend_steady';
+      }
+    } else if (takes.length >= 2) {
+      final d = takes.last.bpm - takes[takes.length - 2].bpm;
+      if (d <= -3) {
+        trendKey = 'heart.trend_better';
+      } else if (d >= 3) {
+        trendKey = 'heart.trend_worse';
+      } else {
+        trendKey = 'heart.trend_steady';
+      }
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(t('heart.recent'), style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, letterSpacing: 0.2)),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final h in takes.reversed.take(4))
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(color: cs.primary.withValues(alpha: 0.10), borderRadius: BorderRadius.circular(12)),
+                child: Column(children: [
+                  Text('${h.bpm}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, height: 1.05, fontFeatures: [FontFeature.tabularFigures()])),
+                  Text(_dayLabel(DateTime.fromMillisecondsSinceEpoch(h.atMs)), style: TextStyle(fontSize: 10.5, color: Flat.muted(context))),
+                ]),
+              ),
+          ],
+        ),
+        if (trendKey != null) ...[
+          const SizedBox(height: 10),
+          Row(children: [
+            Icon(
+              trendKey == 'heart.trend_better' ? Icons.trending_down : trendKey == 'heart.trend_worse' ? Icons.trending_up : Icons.trending_flat,
+              size: 18,
+              color: trendKey == 'heart.trend_better' ? const Color(0xFF2BB673) : trendKey == 'heart.trend_worse' ? cs.error : cs.primary,
+            ),
+            const SizedBox(width: 6),
+            Expanded(child: Text(t(trendKey), style: TextStyle(fontSize: 13, height: 1.35, color: Flat.muted(context)))),
+          ]),
+        ],
+      ]),
+    );
+  }
+
+  /// A compact "13/11 09:42" stamp for a reading chip.
+  String _dayLabel(DateTime d) =>
+      '${d.day}/${d.month} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
 
   Widget _measureArea(BuildContext context, ColorScheme cs) {
     final h = widget.health;
@@ -591,6 +664,7 @@ class _HealthScreenState extends State<HealthScreen> {
         mode: _mode,
         checkMinutes: mins,
         planned: _planned,
+        mapType: widget.health.settings.mapType,
       ),
     ));
     if (started == null) return; // discarded inside: nothing to celebrate
@@ -778,9 +852,13 @@ class _HealthScreenState extends State<HealthScreen> {
 /// line is visible at once. With [ends] it also drops a start pin and an end
 /// pin on the line, Strava-style. No live tracking - just the story.
 class FlutterMapSheetMap extends StatelessWidget {
-  const FlutterMapSheetMap({super.key, required this.path, this.ends = false});
+  const FlutterMapSheetMap({super.key, required this.path, this.ends = false, this.mapType = 'standard'});
   final List<LatLng> path;
   final bool ends;
+
+  /// The base layer the person chose on the map tab, so every map in the app wears
+  /// the same look (satellite, hybrid, night...).
+  final String mapType;
 
   @override
   Widget build(BuildContext context) {
@@ -795,7 +873,7 @@ class FlutterMapSheetMap extends StatelessWidget {
         ),
       ),
       children: [
-        TileLayer(urlTemplate: AppConfig.tileUrl, userAgentPackageName: 'ng.sentri.sentri'),
+        for (final url in sentriBaseLayers(mapType).urls) TileLayer(urlTemplate: url, userAgentPackageName: 'ng.sentri.sentri'),
         PolylineLayer(polylines: [
           // A pale casing under the line, same look as the map's live routes.
           Polyline(points: path, strokeWidth: 7, color: const Color(0x336A5FF0)),
@@ -822,7 +900,7 @@ class FlutterMapSheetMap extends StatelessWidget {
               ),
             ),
           ]),
-        const RichAttributionWidget(attributions: [TextSourceAttribution('© OpenStreetMap contributors'), TextSourceAttribution('© CARTO')]),
+        RichAttributionWidget(attributions: [for (final a in sentriBaseLayers(mapType).attributions) TextSourceAttribution(a)]),
       ],
     );
   }
@@ -1007,7 +1085,7 @@ class _SessionDetailScreen extends StatelessWidget {
           borderRadius: BorderRadius.circular(24),
           child: SizedBox(
             height: 280,
-            child: FlutterMapSheetMap(path: r.path, ends: true),
+            child: FlutterMapSheetMap(path: r.path, ends: true, mapType: widget.health.settings.mapType),
           ),
         ),
         const SizedBox(height: 16),

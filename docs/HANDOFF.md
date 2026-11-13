@@ -656,3 +656,50 @@ Vic tested v37: heart rate now WORKS. Two bugs reported, both root-caused and fi
 
 
 
+## 23. Version 39 (this patch) — engineer's notes
+
+Vic's round three. Two repeat complaints from v37/v38, both finally root-caused with evidence:
+
+- Night layer showed the "API KEY REQUIRED" watermark. map_screen.dart's hardcoded `_cartoNightUrl`
+  never carried Vic's CARTO key, while config.dart's voyager URL has had `?key=cb1_...` since Nov 3 —
+  that is why Standard always worked and Night never did. Night now uses the keyed dark_all URL
+  (verified: keyed dark tile = 6488 B of real tiles; unkeyed = 2394 B watermark).
+- Satellite/hybrid greyed out when zooming. Esri World Imagery serves an identical 2423-byte
+  "Map data not yet available" placeholder tile from ~z12 up at Vic's location (Abeokuta) — the
+  tiles were "there", just not real imagery. Switched both to Google's tile servers:
+  satellite = `mt1.google.com/vt/lyrs=s`, hybrid = `mt1.google.com/vt/lyrs=y` (real imagery z15-z19
+  worldwide, verified by tile probes). All four layers now come from one public top-level
+  `sentriBaseLayers(type)` in map_screen.dart, and the chosen layer now follows EVERY map in the
+  app: live workouts (WorkoutScreen takes `mapType`), session details and route plans
+  (FlutterMapSheetMap takes `mapType`), share stories (ShareScreen/`_ShareDetailScreen` take the
+  person's settings), and inbox alert mini-maps (InboxScreen takes `settings`; HomeScreen passes
+  it). HealthScreen reads `widget.health.settings` (public field).
+- Heart rate "broke again" after reinstall. Fresh install = no camera permission, and the camera
+  plugin never asks for it — the stream just fails silently, which reads as broken. The take now
+  explicitly requests `Permission.camera` first; a refusal lands on the existing clear no-camera
+  note. Countdown shortened 30 s → 15 s (HeartCamera.secondsTarget).
+- Heart history added: every successful self-take is stored on the phone (`heart.v1`, newest 60,
+  via AppSettings.addHeartTake). The heart card shows the recent ones as small chips and one honest
+  trend line — average of the newest 3 takes vs the 3 before them (or a last-2 delta under six
+  takes); lower reads as "better". Keys: heart.recent / heart.trend_better / heart.trend_steady /
+  heart.trend_worse (4 new x5 = 367 x5).
+- Power trigger now FOUR presses (was 3). ScreenToggleDetector.kt REQUIRED_TOGGLES 3 → 4, window
+  widened 3 s → 4 s so four comfortable presses fit; cooldown unchanged. Trigger text updated in
+  all 5 languages. Vic asked for this after setting the alert off by accident.
+- Route builder "still not working": Vic almost certainly tested the old v37 install (the v38
+  release fix is in v38's APK, but v37 was the last build he had used heavily). Defense in depth
+  anyway: when there is no last-known position, the builder now asks for a fresh
+  Geolocator.getCurrentPosition on open and moves the map to it — it no longer opens on a
+  whole-country view. Silent on refusal; taps always worked.
+- Splash: just the white mark (SentriMark size 112) on Brand.splash; wordmark removed.
+- Both failing CI tests fixed so the release run is clean: (1) test_onboarding.dart's 409 test
+  submits contacts while the rig still sits on the language step, but the server's 409 only
+  happens from the contacts step — the rig now walks there first (`r.c.step =
+  OnboardingStep.contacts`). (2) nearby_places_test.dart (NEW leaf) expected an unnamed fuel
+  amenity to keep the tag word as its name, but parseOverpass has always required a real
+  `name` tag (line: `if (name == null || trim().isEmpty) continue;`) — the test now expects the
+  unnamed node to be dropped, with a reason string. No app code changed for this one; the test
+  was asserting behavior the app never had.
+- check-apk20: needle `server.arcgisonline.com` → `mt1.google.com`; added heart.recent /
+  heart.trend_steady i18n needles and a classes.dex check for ScreenToggleDetector. No pubspec,
+  workflow, or backend changes.

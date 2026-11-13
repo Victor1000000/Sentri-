@@ -86,19 +86,15 @@ class SentriWordmark extends StatelessWidget {
       Text('Sentri', style: TextStyle(fontSize: size, fontWeight: FontWeight.w500, letterSpacing: -size * 0.035, height: 1, color: color, decoration: TextDecoration.none));
 }
 
-/// The indigo opening, built to the designed brand board: the neon-green mark beside the white
-/// wordmark, nothing between them and no ordinary decoration - just the two brand pieces.
+/// The indigo opening: just the mark, in white, centred - no wordmark, no
+/// decoration. Quiet and confident.
 class SplashView extends StatelessWidget {
   const SplashView({super.key});
   @override
   Widget build(BuildContext context) => const ColoredBox(
         color: Brand.splash,
         child: Center(
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            SentriMark(size: 60, color: Brand.mint),
-            SizedBox(width: 12),
-            SentriWordmark(size: 50, color: Colors.white),
-          ]),
+          child: SentriMark(size: 112, color: Colors.white),
         ),
       );
 }

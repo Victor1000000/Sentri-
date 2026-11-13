@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 
@@ -59,6 +60,19 @@ class _RouteBuilderState extends State<RouteBuilderScreen> {
         try {
           _map.move(widget.start!, 16);
         } catch (_) {}
+      });
+    } else {
+      // No last-known position: ask the phone for a fresh one, so the builder opens
+      // on the person's street instead of a whole-country view that looks broken.
+      // Silent on refusal - the map stays at the wide view and every tap still works.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(() async {
+          try {
+            final p = await Geolocator.getCurrentPosition(timeout: const Duration(seconds: 8));
+            if (!mounted) return;
+            _map.move(LatLng(p.latitude, p.longitude), 16);
+          } catch (_) {}
+        }());
       });
     }
   }

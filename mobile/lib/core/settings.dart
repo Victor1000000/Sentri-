@@ -5,6 +5,13 @@ import 'package:flutter/foundation.dart';
 import 'platform/native_bridge.dart';
 import 'storage/key_value_store.dart';
 
+/// One pulse reading the app itself took: when, and the beats per minute.
+class HeartTake {
+  const HeartTake({required this.atMs, required this.bpm});
+  final int atMs;
+  final int bpm;
+}
+
 /// User choices that persist between launches.
 class AppSettings extends ChangeNotifier {
   AppSettings(this._store);
@@ -30,6 +37,11 @@ class AppSettings extends ChangeNotifier {
   /// The map's base layer: 'standard', 'satellite', 'hybrid' or 'night'.
   String mapType = 'standard';
 
+  /// The pulse readings the app itself took, newest last, kept on this phone only.
+  /// The health screen shows the recent ones and whether the rate is settling down
+  /// or climbing.
+  List<HeartTake> heartTakes = const [];
+
   Future<void> load() async {
     final raw = await _store.read(_k);
     if (raw == null) return;
@@ -48,6 +60,27 @@ class AppSettings extends ChangeNotifier {
     theme = j['theme'] as String? ?? 'system';
     waterMinutes = j['water'] as int? ?? 0;
     mapType = j['mapType'] as String? ?? 'standard';
+    try {
+      final takes = jsonDecode((await _store.read('heart.v1')) ?? '[]') as List<dynamic>;
+      heartTakes = [
+        for (final e in takes)
+          if (e is Map<String, dynamic> && e['t'] is num && e['b'] is num) HeartTake(atMs: (e['t'] as num).toInt(), bpm: (e['b'] as num).toInt()),
+      ];
+    } catch (_) {
+      heartTakes = const [];
+    }
+  }
+
+  /// Records one pulse reading the app itself took. The newest 60 stay on the phone;
+  /// older ones fall off the list. Never throws: a history hiccup must not eat a reading.
+  Future<void> addHeartTake(DateTime at, int bpm) async {
+    final list = <HeartTake>[...heartTakes, HeartTake(atMs: at.millisecondsSinceEpoch, bpm: bpm)];
+    if (list.length > 60) list.removeRange(0, list.length - 60);
+    heartTakes = List.unmodifiable(list);
+    try {
+      await _store.write('heart.v1', jsonEncode([for (final h in heartTakes) {'t': h.atMs, 'b': h.bpm}]));
+    } catch (_) {}
+    notifyListeners();
   }
 
   Future<void> update({

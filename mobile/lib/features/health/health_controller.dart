@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter/widgets.dart';
 import 'package:health/health.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 
@@ -410,8 +411,14 @@ class HealthController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   /// One pulse reading taken by the app itself: fingertip over the front camera with the
-  /// bright screen lighting it, about thirty seconds, then the maths decides whether it
+  /// bright screen lighting it, about fifteen seconds, then the maths decides whether it
   /// can trust the numbers. No health app involved at any step.
+  ///
+  /// v39: the camera permission is asked for HERE, right before the take. A fresh
+  /// install (or a reinstall) starts with no camera permission, and the camera plugin
+  /// fails silently instead of asking - which looked like "the heart rate stopped
+  /// working" after an update. Asking first means the person sees the system dialog,
+  /// and a refusal gets its own clear note on the card.
   Future<void> measureWithCamera() async {
     if (measuring) return;
     measuring = true;
@@ -421,6 +428,19 @@ class HealthController extends ChangeNotifier with WidgetsBindingObserver {
     cameraBpm = null;
     measureLeft = HeartCamera.secondsTarget;
     notifyListeners();
+    try {
+      final st = await Permission.camera.request();
+      if (!st.isGranted) {
+        measuring = false;
+        measureLeft = 0;
+        noCamera = true; // the card's "no camera" advice, which names the permission
+        measureFailed = true;
+        notifyListeners();
+        return;
+      }
+    } catch (_) {
+      // No permission plugin on this platform: fall through and let the camera try.
+    }
     int? r;
     try {
       r = await _camera.measure(onTick: (s) {
@@ -444,6 +464,7 @@ class HealthController extends ChangeNotifier with WidgetsBindingObserver {
     cameraBpm = r;
     bpm = r;
     bpmAt = DateTime.now();
+    unawaited(settings.addHeartTake(bpmAt!, r)); // the history the card shows
     notifyListeners();
   }
 

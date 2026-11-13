@@ -6,13 +6,17 @@ import android.content.Intent
 import android.content.IntentFilter
 
 /**
- * BEST EFFORT "power button x3".
+ * BEST EFFORT "power button x4".
  *
  * Android does not let ordinary apps see the power button. What an app CAN see is the screen
- * turning off and on, which pressing the power button repeatedly causes. Three screen toggles
+ * turning off and on, which pressing the power button repeatedly causes. Four screen toggles
  * within [WINDOW_MS] is treated as the gesture. It is a heuristic: some phones (and Doze) delay
  * or swallow these broadcasts, and an unlock/lock sequence can look the same, so it is off by
  * default and described to the user as "may not work on every phone".
+ *
+ * v39: four presses instead of three - people were setting off the alert by accident (a pocket,
+ * an unlock-and-lock, a nervous triple-press). One more press costs nothing in an emergency and
+ * filters out the accidental sequences; the window widens a second to match.
  */
 class ScreenToggleDetector(private val onTrigger: () -> Unit) : BroadcastReceiver() {
     private val times = ArrayDeque<Long>()
@@ -46,8 +50,8 @@ class ScreenToggleDetector(private val onTrigger: () -> Unit) : BroadcastReceive
     }
 
     companion object {
-        private const val REQUIRED_TOGGLES = 3
-        private const val WINDOW_MS = 3_000L
+        private const val REQUIRED_TOGGLES = 4
+        private const val WINDOW_MS = 4_000L
         private const val COOLDOWN_MS = 8_000L
     }
 }
