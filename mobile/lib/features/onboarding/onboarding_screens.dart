@@ -408,9 +408,9 @@ class _ContactsStepState extends State<_ContactsStep> {
               padding: const EdgeInsets.only(bottom: 10),
               child: PillField(key: ObjectKey(_ctls[i]), controller: _ctls[i], focusNode: _focus[i], noAutofill: true, keyboardType: TextInputType.phone, inputFormatters: _phoneFormatters, hint: widget.i18n.t('contacts.phone_hint')),
             ),
-          // Only two numbers are needed at sign-up; the remaining slots (up to six in
+          // Only two numbers are needed at sign-up; the remaining slots (up to ten in
           // total) can stay empty now and be added later in the contacts tab.
-          if (_ctls.length < 6)
+          if (_ctls.length < 10)
             OutlinePill(
               onPressed: () => setState(_addBox),
               label: '+ ${widget.i18n.t('contacts.add')}',

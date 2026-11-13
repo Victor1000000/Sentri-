@@ -153,6 +153,14 @@ class HeartCamera {
     // The take must agree with ITSELF: score the first half and the second half
     // separately. Two halves that found different hearts mean the window carries
     // motion or light artefacts, not a pulse - refuse rather than average.
+    //
+    // v40: the tolerance scales with how long each half actually ran. With the
+    // 15-second take each half is only about six seconds, and two honest estimates
+    // of ONE steady heart can sit a resolution bin apart there (~10 bpm is 15% at
+    // 70 bpm) - the fixed 15% bar read healthy short takes as self-contradicting
+    // and refused them, which is why the 15 s countdown broke what 30 s fixed.
+    // Halves of nine seconds or more keep the tight 15% bar; shorter halves get
+    // the wider 30% one. The full-window read stays the primary answer either way.
     final half = samples.length ~/ 2;
     if (half >= 60) {
       final ya = detrend(smoothMedian3(samples.sublist(0, half)), (fps * 1.5).round().clamp(3, half));
@@ -161,7 +169,8 @@ class HeartCamera {
       final b = bpmFromSamples(yb, fps, minWiggle: 0.4);
       if (a != null && b != null) {
         final rel = (a - b).abs() / ((a + b) / 2);
-        if (rel > 0.15) return null; // the finger moved, or the light lied: no number
+        final tol = (half / fps) >= 9.0 ? 0.15 : 0.30;
+        if (rel > tol) return null; // the finger moved, or the light lied: no number
       }
     }
     return bpm.round().clamp(30, 220);

@@ -1,7 +1,9 @@
 // Core domain types and the ports (interfaces) the SOS engine depends on.
 // Adapters (Postgres, Redis/BullMQ, FCM, Termii) implement these; tests use in-memory ones.
 
-export type Locale = 'en' | 'ha' | 'yo' | 'ig' | 'pcm';
+// v40, global: French and Spanish joined the app's languages, so every place that
+// validates or stores a locale must accept them.
+export type Locale = 'en' | 'ha' | 'yo' | 'ig' | 'pcm' | 'fr' | 'es';
 export type SosState = 'countdown' | 'active' | 'acknowledged' | 'cancelled' | 'expired';
 export type TriggerType = 'floating' | 'volume' | 'shake' | 'power' | 'widget' | 'checkin';
 export type MessageKind = 'sos' | 'duress' | 'offline' | 'low_battery' | 'test' | 'share_start' | 'share_stop' | 'health_alert';

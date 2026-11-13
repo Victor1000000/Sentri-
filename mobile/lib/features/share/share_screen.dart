@@ -233,7 +233,7 @@ class _ShareScreenState extends State<ShareScreen> {
                     i18n: widget.i18n,
                     record: r,
                     track: widget.share.trackPoints(r.id),
-                    mapType: widget.settings?.mapType ?? 'standard',
+                    mapType: widget.settings?.mapType ?? 'hybrid',
                   ),
                 )),
                 child: Padding(
@@ -386,7 +386,7 @@ class _ShareScreenState extends State<ShareScreen> {
 /// recorded - where the person actually passed - fitted to the view with the
 /// start and end pinned, Strava-style.
 class _ShareDetailScreen extends StatelessWidget {
-  const _ShareDetailScreen({required this.i18n, required this.record, required this.track, this.mapType = 'standard'});
+  const _ShareDetailScreen({required this.i18n, required this.record, required this.track, this.mapType = 'hybrid'});
   final I18n i18n;
   final ShareRecord record;
   final Future<List<List<double>>> track;

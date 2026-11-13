@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/emergency.dart';
 import '../../core/i18n/i18n.dart';
 import '../photos/photo_police.dart';
 import 'police_directory.dart';
@@ -54,6 +56,10 @@ class _ParallaxListState extends State<_ParallaxList> {
     final cs = Theme.of(context).colorScheme;
     final dir = widget.dir;
     final mine = dir.forState(widget.state);
+    // v40, global: the emergency lines that actually answer where this phone is.
+    // The phone's own region (its locale/SIM) picks the country; when nothing is
+    // known the card stays out of the way.
+    final country = countryForLocale(Platform.localeName);
     return NotificationListener<ScrollNotification>(
       onNotification: (n) {
         if (n.metrics.axis == Axis.vertical && n.metrics.pixels != _offset) {
@@ -100,6 +106,42 @@ class _ParallaxListState extends State<_ParallaxList> {
             Text(t('police.your_state').toUpperCase(), style: Theme.of(context).textTheme.labelMedium?.copyWith(letterSpacing: 1.1, color: cs.outline)),
             const SizedBox(height: 8),
             Card(child: _CommandTile(mine, widget.i18n)),
+            const SizedBox(height: 20),
+          ],
+          // The world's lines for this phone's country: police, fire and ambulance,
+          // each one tappable, no copy-paste. Only shown when a country is known.
+          if (country != null) ...[
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    Text(country.flag, style: const TextStyle(fontSize: 20)),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text(t('emergency.title', {'name': country.name}), style: Theme.of(context).textTheme.titleMedium)),
+                  ]),
+                  const SizedBox(height: 6),
+                  for (final s in const [('emergency.police', 'police'), ('emergency.fire', 'fire'), ('emergency.ambulance', 'ambulance')])
+                    Row(children: [
+                      Expanded(child: Text(t(s.$1), style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600))),
+                      const SizedBox(width: 8),
+                      Text(switch (s.$2) { 'police' => country.police, 'fire' => country.fire, _ => country.ambulance },
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, fontFeatures: [FontFeature.tabularFigures()])),
+                      IconButton(
+                        tooltip: t('health.call'),
+                        visualDensity: VisualDensity.compact,
+                        icon: Icon(Icons.call, color: cs.primary),
+                        onPressed: () {
+                          final n = switch (s.$2) { 'police' => country.police, 'fire' => country.fire, _ => country.ambulance };
+                          unawaited(launchUrl(Uri(scheme: 'tel', path: n), mode: LaunchMode.externalApplication).catchError((_) => false));
+                        },
+                      ),
+                    ]),
+                  const SizedBox(height: 2),
+                  Text(t('emergency.note'), style: TextStyle(fontSize: 12.5, height: 1.35, color: cs.outline)),
+                ]),
+              ),
+            ),
             const SizedBox(height: 20),
           ],
           Text(t('police.note'), style: Theme.of(context).textTheme.bodyMedium),

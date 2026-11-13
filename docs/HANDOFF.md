@@ -137,9 +137,8 @@ JSON still satisfies `police_numbers_test.dart` and the data assertions in `poli
 - Free Render service sleeps after 15 min and wipes memory on restart. That caused "connection error after a while" and
   vanishing accounts. The app's old 8 s timeout made the first request after sleep always fail.
 - `apply-patch.yml` cannot push workflow files; uploaded `.txt` copies are ignored by GitHub until renamed to `.yml`.
-- Contact rule is 2 to 6 contacts (`MIN_CONTACTS`/`MAX_CONTACTS` in `backend/src/modules/auth/phone.ts`). Two are needed at sign-up;
-  the remaining four are added inside the app (up to the six cap). A "10 contacts" Pro tier needs
-  that changed and the app's contact screens too.
+- Contact rule is 2 to 10 contacts since v40 (`MIN_CONTACTS`/`MAX_CONTACTS` in `backend/src/modules/auth/phone.ts`). Two are
+  needed at sign-up; the remaining eight are added inside the app (up to the ten cap).
 - Production mode (`NODE_ENV=production`) refuses `SMS_PROVIDER=mock` and `OTP_DEV_ECHO`; both blueprints use `development`.
   Postgres storage works in either mode.
 - SOS alerts reach contacts in the app via push (FCM). `PUSH_PROVIDER` is not configured: without Firebase, contacts only see
@@ -710,3 +709,60 @@ Vic's round three. Two repeat complaints from v37/v38, both finally root-caused 
   route builder's fresh-position ask uses `locationSettings: LocationSettings(accuracy: high,
   timeLimit: 8 s)` instead. Lesson unchanged: there is no local flutter analyze, so read every new
   reference against the widget class that will actually compile it.
+
+## 24. Version 40 (this patch) — engineer's notes
+
+Vic's global round: heart rate fixed for real, hybrid default map, Poppins everywhere,
+ten contacts, worldwide dial codes + emergency lines, French + Spanish.
+
+- Heart rate STILL broken in v39 — root cause found at last, and it was the v39 change itself.
+  The 15 s take (Vic's ask, kept) leaves ~12.3 usable seconds after the ~2.7 s settle lead-in,
+  so the halves-agreement gate in heart_camera.dart scored two ~6 s halves. At 25 fps that is
+  ~150 samples per half: two honest estimates of ONE steady heart can honestly sit a resolution
+  bin apart there (~10 bpm ≈ 15% at 70 bpm), so the fixed 0.15 bar read healthy takes as
+  self-contradicting and returned null. v37 worked because 30 s halves were 14 s each.
+  FIX: the tolerance now scales with the half length — `(half/fps) >= 9 ? 0.15 : 0.30` — and
+  heart_signal.dart's `_windows` gained 10 s and 8 s slices (`[999999, 24, 16, 10, 8]`) so a
+  short take gets a second chance on its calmest stretch. Countdown STAYS 15 s; power trigger
+  stays 4 presses. heart_signal_test.dart stays green (30 s signals + tiny inputs never hit the
+  new short-half branch differently).
+- Default map layer = HYBRID everywhere: core_settings.dart field + load() fallback, map_screen
+  `_mapType`, FlutterMapSheetMap / ExerciseHistoryScreen / _SessionDetailScreen ctor defaults,
+  WorkoutScreen, _ShareDetailScreen + ShareScreen fallback, InboxScreen mini-map. Imagery with
+  street names on top, out of the box, no settings visit needed.
+- Poppins is the app typeface, delivered exactly like Inter: real TTFs (Regular/Medium/SemiBold/
+  Bold/ExtraBold, 400–800) fetched from google/fonts via the api.github.com contents API,
+  base64-encoded into a NEW core/poppins.dart leaf (~860 lines; kPoppinsWeights; BrandPoppins.
+  ensure() with the same silent-catch FontLoader pattern). main.dart is a NEW LEAF now — it
+  awaits BrandFonts.ensure() then BrandPoppins.ensure() before the first frame. theme.dart
+  fontFamily 'Inter' → 'Poppins' (Inter stays bundled as a harmless fallback). Offline first:
+  nothing fetched at runtime.
+- TEN emergency contacts (was 6): backend MAX_CONTACTS 6→10, core_phone.dart cap 6→10, contacts
+  screen + onboarding UI caps (list.length<10, _ctls.length<10), backend_auth_test mk(7)→mk(11)
+  plus a mk(10)-ok assertion, test_units.dart contact test reworked for 2–10 (11 contacts
+  rejected, 10 accepted). Doc comments updated everywhere.
+- Worldwide dial codes + emergency lines, NEW core/emergency.dart leaf: ~60 countries (iso,
+  dial code, English name, flag emoji, police/fire/ambulance), plus countryByIso /
+  countryByDial (longest-prefix) / dialCodeFromE164 / countryForLocale / dialCodeForLocale.
+  Onboarding's countryCode is now MUTABLE: submitPhone detects the dial code from the typed
+  number ('+44…' → '44') so later contacts normalize in the person's own country. The add-contact
+  sheet falls back to the phone's platform region (dialCodeForLocale(Platform.localeName)),
+  '234' last. Backend validateContacts infers the default dial code from the OWNER's own number
+  (defaultCountryCodeFromOwn, longest-prefix match over a DIAL_CODES set) — local-format contacts
+  belong to the owner's country, not to a hardcoded one. LocaleSchema gained 'fr','es'.
+- Police tab emergency-lines card: when countryForLocale(Platform.localeName) matches, police_
+  screen.dart shows a card with the country's flag + name and police/fire/ambulance rows, each
+  with a tappable call button (tel:); an honest note that lines can change and 112 works in many
+  countries. Card absent when the region is unknown — never blocks the Nigerian directory.
+- FRENCH and SPANISH as FULL translations: i18n.dart is a NEW LEAF (same content as main plus
+  AppLanguage fr/es rows), assets/i18n/fr.json + es.json are NEW leaves with all 372 keys
+  translated (AI-translated — flagged in the report). Five new emergency.* keys added to all
+  seven locales: emergency.title ({name}), emergency.police, emergency.fire, emergency.ambulance,
+  emergency.note. Parity: 372 x7, enforced by test_units.dart's SET test (fr/es must be complete
+  or CI fails).
+- test_units.dart contact test updated (see above); backend_auth_test.ts mk(n) bounds moved to
+  11/10. i18ncheck34 extended to 7 locales; check-apk20 i18n loop now en/ha/ig/pcm/yo/fr/es
+  (372 x7), emergency needles added, plus Poppins verification: 'Poppins' string + a 48-char
+  base64 TTF fragment in libapp.so.
+- Deferred to v41 (honest list for Vic): Life360-style inbox tabs + mailbox 3D, watch/wearable
+  pairing UI, flight/train detection, avatar expansion, deep perf pass.

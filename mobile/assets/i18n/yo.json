@@ -365,5 +365,10 @@
   "route.planned": "Ìpinnu ti dè",
   "map.layer_standard": "Àìlípo",
   "route.failed": "Ìyá ọ̀nà kò lè ya. Ríi dájú fún ìṣọ́kan kí o sì tún gbìyànjú.",
-  "map.layer_hybrid": "Àdàpọ̀"
+  "map.layer_hybrid": "Àdàpọ̀",
+  "emergency.title": "Àwọn líne pàjáwìrí ní {name}",
+  "emergency.police": "Ọlọ́pàá",
+  "emergency.fire": "Iṣẹ́ ìpamọ́ iná",
+  "emergency.ambulance": "Ọkọ̀ ìtọ́jú",
+  "emergency.note": "Àwọn líne osìlẹ̀ lè yí padà. 112 gbé ẹ̀tọ̀ pàjáwìrí dé orílẹ̀-èdè pọ̀."
 }

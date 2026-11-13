@@ -129,12 +129,12 @@ void main() {
       }
     });
 
-    test('contact list rules: 2 to 6, valid, distinct, not your own number', () {
+    test('contact list rules: 2 to 10, valid, distinct, not your own number', () {
       const own = '+2348000000000';
       expect(validateContactNumbers(['08031111111'], ownPhone: own).problem, ContactsProblem.tooFewOrMany);
       expect(
         validateContactNumbers(
-          ['08031111111', '08032222222', '08033333333', '08034444444', '08035555555', '08036666666', '08037777777'],
+          ['08031111111', '08032222222', '08033333333', '08034444444', '08035555555', '08036666666', '08037777777', '08038888888', '08039999999', '08031111112', '08032222223'],
           ownPhone: own,
         ).problem,
         ContactsProblem.tooFewOrMany,
@@ -145,10 +145,10 @@ void main() {
       expect(validateContactNumbers(['08031111111', '08032222222', '08000000000'], ownPhone: own).problem, ContactsProblem.ownNumber);
       expect(
         validateContactNumbers(
-          ['08031111111', '08032222222', '08033333333', '08034444444', '08035555555', '08036666666'],
+          ['08031111111', '08032222222', '08033333333', '08034444444', '08035555555', '08036666666', '08037777777', '08038888888', '08039999999', '08031111112'],
           ownPhone: own,
         ).phones,
-        hasLength(6),
+        hasLength(10),
       );
       expect(validateContactNumbers(['08031111111', ' ', '08032222222', '08033333333'], ownPhone: own).phones, hasLength(3));
     });

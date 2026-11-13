@@ -17,6 +17,10 @@ const supportedLanguages = <AppLanguage>[
   AppLanguage('yo', 'Yorùbá'),
   AppLanguage('ig', 'Igbo'),
   AppLanguage('pcm', 'Naijá (Pidgin)'),
+  // v40, global: French and Spanish ship as full translations - every key the
+  // English table carries is translated, and test_units.dart enforces that.
+  AppLanguage('fr', 'Français'),
+  AppLanguage('es', 'Español'),
 ];
 
 typedef AssetLoader = Future<String> Function(String path);

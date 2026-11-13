@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../core/emergency.dart';
 import '../../core/i18n/i18n.dart';
 import '../../core/net/api.dart';
 import '../../core/phone.dart';
@@ -14,7 +16,7 @@ import '../sos/guardian_badges.dart';
 /// Shows the people who get your alerts, and whether each one agreed to it. Each
 /// contact can be given a friendly name and one of twenty drawn "security team"
 /// characters (saved on this phone only). Two people come from sign-up; the rest,
-/// up to six in total, are added right here with the Add contact button.
+/// up to ten in total, are added right here with the Add contact button.
 class ContactsScreen extends StatefulWidget {
   const ContactsScreen({super.key, required this.api, required this.people, required this.i18n});
   final SentriApi api;
@@ -183,8 +185,8 @@ class _ContactsScreenState extends State<ContactsScreen> {
                 ),
               ),
               // Sign-up asked for two; the last slots stay open. The button disappears
-              // at the six cap, so there is no dead end to explain.
-              if (list.length < 6) ...[
+              // at the ten cap, so there is no dead end to explain.
+              if (list.length < 10) ...[
                 const SizedBox(height: 12),
                 OutlinedButton.icon(
                   style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(46)),
@@ -352,7 +354,11 @@ class _AddSheetState extends State<_AddSheet> {
   }
 
   Future<void> _save() async {
-    final p = normalizePhone(_phone.text);
+    // v40, global: local-format numbers (0803…, 020…) belong to the country this
+    // phone is in, not to one hardcoded dial code. The phone's own region decides;
+    // a number typed with its + code ignores all of this.
+    final dial = dialCodeForLocale(Platform.localeName) ?? '234';
+    final p = normalizePhone(_phone.text, countryCode: dial);
     // One message covers every "no": not a number, already on the list, or the
     // person's own number (the server checks that one for us).
     if (p == null || widget.saved.any((c) => c.phone == p)) {

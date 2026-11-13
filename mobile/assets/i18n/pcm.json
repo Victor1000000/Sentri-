@@ -365,5 +365,10 @@
   "route.planned": "Planned",
   "map.layer_standard": "Normal",
   "route.failed": "The route no fit draw. Check your internet and try am again.",
-  "map.layer_hybrid": "Mixed"
+  "map.layer_hybrid": "Mixed",
+  "emergency.title": "Emergency lines for {name}",
+  "emergency.police": "Police",
+  "emergency.fire": "Fire service",
+  "emergency.ambulance": "Ambulance",
+  "emergency.note": "Official lines fit change. 112 dey reach emergency service for plenty countries."
 }

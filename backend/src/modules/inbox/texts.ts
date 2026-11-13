@@ -4,7 +4,8 @@ import type { InboxKind } from './types.js';
 /**
  * Alert wording, shown inside the app and as the notification text. Not SMS, so accents are fine.
  * ha / yo / ig / pcm are working drafts: have native speakers review them before launch, especially
- * "do not call" in the duress text.
+ * "do not call" in the duress text. fr / es (v40) are working drafts too - machine-translated,
+ * to be reviewed by native speakers before launch.
  * {n} is the sender's name, or a neutral word when they did not give one.
  */
 const T: Record<Locale, Record<InboxKind, string>> & Record<Locale, { someone: string }> = {
@@ -62,6 +63,30 @@ const T: Record<Locale, Record<InboxKind, string>> & Record<Locale, { someone: s
     share_start: '{n} na-ekekọrịta ebe ọ nọ gị. Meghee Sentri iji soro ya.',
     share_stop: '{n} akwụsịla ịkekọrịta ebe ọ nọ.',
     health_alert: 'Aka obi {n} elielo nke ọma maka nke ọzọ. Meghee Sentri lelee ya ma hụ ụlọ ọgwụ dị ya nso.',
+  },
+  // v40, global: French and Spanish, machine-drafted like the others. Every string
+  // keeps the {n} name placeholder; the duress line keeps its "do NOT call" warning.
+  fr: {
+    someone: 'Quelqu’un',
+    sos: '{n} a besoin d’aide tout de suite. Ouvre Sentri pour voir où la personne est et appeler la police près d’elle.',
+    duress: '{n} est peut-être en danger et sous la contrainte. NE l’appelle PAS. Ouvre Sentri pour appeler la police près d’elle.',
+    offline: 'Le téléphone de {n} s’est éteint pendant une alerte. Ouvre Sentri pour le dernier endroit.',
+    low_battery: 'La batterie du téléphone de {n} est presque vide. Ouvre Sentri pour le dernier endroit.',
+    test: '{n} a envoyé une alerte test. Rien à faire. Une vraie alerte ressemble à ceci.',
+    share_start: '{n} partage sa position avec toi. Ouvre Sentri pour suivre en direct.',
+    share_stop: '{n} a arrêté de partager sa position avec toi.',
+    health_alert: 'La fréquence cardiaque de {n} a monté de façon inhabituelle, plus d’une fois. Ouvre Sentri pour prendre des nouvelles et voir les hôpitaux près d’elle.',
+  },
+  es: {
+    someone: 'Alguien',
+    sos: '{n} necesita ayuda urgente. Abre Sentri para ver dónde está y llamar a la policía más cercana.',
+    duress: '{n} puede estar en peligro y bajo presión. NO la llames. Abre Sentri para llamar a la policía cercana.',
+    offline: 'El teléfono de {n} se quedó sin conexión durante una alerta. Abre Sentri para ver el último lugar.',
+    low_battery: 'La batería del teléfono de {n} está casi muerta. Abre Sentri para ver el último lugar.',
+    test: '{n} envió una alerta de prueba. Nada que hacer. Una alerta real se ve así.',
+    share_start: '{n} está compartiendo su ubicación contigo. Abre Sentri para seguirla.',
+    share_stop: '{n} dejó de compartir su ubicación contigo.',
+    health_alert: 'La frecuencia cardíaca de {n} subió de forma inusual, más de una vez. Abre Sentri para comprobar cómo está y ver los hospitales cercanos.',
   },
 };
 

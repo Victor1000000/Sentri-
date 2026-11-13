@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/emergency.dart';
 import '../../core/crypto/device_keys.dart';
 import '../../core/i18n/i18n.dart';
 import '../../core/net/api.dart';
@@ -44,7 +45,11 @@ class OnboardingController extends ChangeNotifier {
   final ContactStore contacts;
   final AppSettings settings;
   final NativeBridge bridge;
-  final String countryCode;
+
+  /// The dial code local-format numbers belong to ('234' for 0803…). v40: not
+  /// final - the first phone the person types tells us their country, and from
+  /// then on their contacts normalize with THEIR dial code, not a hardcoded one.
+  String countryCode;
   final String platform;
 
   /// How links are opened. Replaced in tests.
@@ -153,6 +158,11 @@ class OnboardingController extends ChangeNotifier {
       devCode = r.devCode;
       telegramUrl = r.telegramUrl;
       phone = p;
+      // v40, global: remember the dial code the person's own number starts with
+      // ('+44…' → '44'), so contacts typed later in local format (0803…, 020…)
+      // belong to THEIR country instead of a hardcoded Nigerian one.
+      final dc = dialCodeFromE164(p);
+      if (dc != null) countryCode = dc;
       // Remember it: if the server later forgets the session, the phone step starts filled in.
       await settings.update(lastPhone: p);
       resendAt = DateTime.now().add(const Duration(seconds: 30));

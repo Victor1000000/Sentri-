@@ -365,5 +365,10 @@
   "route.planned": "Atụpụtala",
   "map.layer_standard": "Otu okwu",
   "route.failed": "E nweghị ike ise ụzọ ahụ. Lelee intanetị gị ma nwalee ọzọ.",
-  "map.layer_hybrid": "Mkpuchi"
+  "map.layer_hybrid": "Mkpuchi",
+  "emergency.title": "Ahịrị mberede na {name}",
+  "emergency.police": "Ndị uwe ojii",
+  "emergency.fire": "Ọrụ ọkụgbara",
+  "emergency.ambulance": "Ụgbọ mberede",
+  "emergency.note": "Ahịrị gọọmentị nwere ike ịgbanwe. 112 na-eru ọrụ mberede n'ọtụtụ mba."
 }

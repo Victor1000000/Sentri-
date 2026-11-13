@@ -365,5 +365,10 @@
   "route.planned": "An shirya",
   "map.layer_standard": "Na al'ada",
   "route.failed": "Ba a iya zana hanyar ba. Ka duba yanar gono ka sake gwadawa.",
-  "map.layer_hybrid": "Haɗakke"
+  "map.layer_hybrid": "Haɗakke",
+  "emergency.title": "Layukan gaggawa a {name}",
+  "emergency.police": "'Yan sanda",
+  "emergency.fire": "Sashen kashe gobara",
+  "emergency.ambulance": "Motar gaggawa",
+  "emergency.note": "Layukan hukuma na iya canzawa. 112 tana kaiwa ga sabis na gaggawa a kasashe da yawa."
 }

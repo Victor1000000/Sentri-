@@ -354,7 +354,7 @@ class _AlertDetailScreenState extends State<AlertDetailScreen> {
                 key: ValueKey('${d.lat},${d.lon}'),
                 options: MapOptions(initialCenter: LatLng(d.lat!, d.lon!), initialZoom: 16, interactionOptions: const InteractionOptions(flags: InteractiveFlag.pinchZoom | InteractiveFlag.drag)),
                 children: [
-                  for (final url in sentriBaseLayers(widget.settings?.mapType ?? 'standard').urls) TileLayer(urlTemplate: url, userAgentPackageName: 'ng.sentri.sentri'),
+                  for (final url in sentriBaseLayers(widget.settings?.mapType ?? 'hybrid').urls) TileLayer(urlTemplate: url, userAgentPackageName: 'ng.sentri.sentri'),
                   MarkerLayer(markers: [Marker(point: LatLng(d.lat!, d.lon!), width: 28, height: 28, child: Container(decoration: BoxDecoration(shape: BoxShape.circle, color: urgent ? Flat.danger : Brand.indigo, border: Border.all(color: Colors.white, width: 3))))]),
                 ],
               ),

@@ -31,7 +31,7 @@ class WorkoutScreen extends StatefulWidget {
     required this.mode,
     required this.checkMinutes,
     this.planned,
-    this.mapType = 'standard',
+    this.mapType = 'hybrid',
   });
   final ExerciseController exercise;
   final CheckInController checkin;

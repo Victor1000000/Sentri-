@@ -74,12 +74,13 @@ describe('phone numbers and contacts', () => {
     for (const s of ['', 'abc', '0803123', '+23480312345678', '123']) expect(normalizePhone(s), s).toBeNull();
   });
 
-  it('requires 2 to 6 distinct contacts, none being the user', () => {
+  it('requires 2 to 10 distinct contacts, none being the user', () => {
     const own = '+2348000000000';
     const mk = (n: number) => Array.from({ length: n }, (_, i) => ({ phone: `080311111${10 + i}` }));
     expect(() => validateContacts(mk(1), own)).toThrow(ContactError);
-    expect(() => validateContacts(mk(7), own)).toThrow(ContactError);
+    expect(() => validateContacts(mk(11), own)).toThrow(ContactError);
     expect(validateContacts(mk(2), own)).toHaveLength(2);
+    expect(validateContacts(mk(10), own)).toHaveLength(10);
     expect(() => validateContacts([...mk(2), { phone: '08000000000' }], own)).toThrow(/own number/);
     expect(() => validateContacts([...mk(2), { phone: '0803111111 0' }], own)).toThrow(/different/);
     expect(() => validateContacts([...mk(2), { phone: 'nope' }], own)).toThrow(/not valid/);

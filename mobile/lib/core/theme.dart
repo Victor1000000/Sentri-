@@ -94,12 +94,12 @@ ThemeData sentriTheme(Brightness b) {
     error: dark ? SentriColors.alarmDark : SentriColors.alarm,
     tertiary: dark ? SentriColors.safeDark : SentriColors.safe,
   );
-  // Inter everywhere: the calm, grid-like letterforms Google Maps and Uber use, so every screen
-  // reads as one family. The face is bundled inside the app (see core/fonts.dart), so the very
-  // first launch - even offline - already paints with the brand font. Nothing is fetched from
-  // the network any more, so no more serif fallback on first open.
+  // Poppins everywhere (v40): the rounded, confident geometric face that reads well at
+  // every size this app uses - numbers, labels, body. The face is bundled inside the app
+  // (see core/poppins.dart), so the very first launch - even offline - already paints
+  // with the brand font. Inter stays bundled as a harmless fallback; nothing is fetched.
   final text = (dark ? ThemeData.dark() : ThemeData.light()).textTheme.apply(
-        fontFamily: 'Inter',
+        fontFamily: 'Poppins',
         bodyColor: base.onSurface,
         displayColor: base.onSurface,
       );

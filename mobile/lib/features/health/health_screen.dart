@@ -852,7 +852,7 @@ class _HealthScreenState extends State<HealthScreen> {
 /// line is visible at once. With [ends] it also drops a start pin and an end
 /// pin on the line, Strava-style. No live tracking - just the story.
 class FlutterMapSheetMap extends StatelessWidget {
-  const FlutterMapSheetMap({super.key, required this.path, this.ends = false, this.mapType = 'standard'});
+  const FlutterMapSheetMap({super.key, required this.path, this.ends = false, this.mapType = 'hybrid'});
   final List<LatLng> path;
   final bool ends;
 
@@ -967,7 +967,7 @@ class _AwardShelfCard extends StatelessWidget {
 /// The full exercise story, opened from the History card's header: every saved
 /// session (walk, run or ride), each with its own page, plus the award shelf.
 class ExerciseHistoryScreen extends StatelessWidget {
-  const ExerciseHistoryScreen({super.key, required this.exercise, required this.awards, required this.i18n, this.mapType = 'standard'});
+  const ExerciseHistoryScreen({super.key, required this.exercise, required this.awards, required this.i18n, this.mapType = 'hybrid'});
   final ExerciseController exercise;
   final AwardStore awards;
   final I18n i18n;
@@ -1045,7 +1045,7 @@ class ExerciseHistoryScreen extends StatelessWidget {
 /// One saved session, Strava-style: the big numbers up top, then the exact
 /// route on the map with its start and end pins, then the award shelf it feeds.
 class _SessionDetailScreen extends StatelessWidget {
-  const _SessionDetailScreen({required this.record, required this.awards, required this.i18n, this.mapType = 'standard'});
+  const _SessionDetailScreen({required this.record, required this.awards, required this.i18n, this.mapType = 'hybrid'});
   final WorkoutRecord record;
   final AwardStore awards;
   final I18n i18n;

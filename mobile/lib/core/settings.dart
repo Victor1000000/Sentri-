@@ -35,7 +35,9 @@ class AppSettings extends ChangeNotifier {
   int waterMinutes = 0;
 
   /// The map's base layer: 'standard', 'satellite', 'hybrid' or 'night'.
-  String mapType = 'standard';
+  /// v40: the default is hybrid - imagery with street names on top, which is
+  /// what the person expects from a map app, without touching anything.
+  String mapType = 'hybrid';
 
   /// The pulse readings the app itself took, newest last, kept on this phone only.
   /// The health screen shows the recent ones and whether the rate is settling down
@@ -59,7 +61,7 @@ class AppSettings extends ChangeNotifier {
     language = j['lang'] as String? ?? 'en';
     theme = j['theme'] as String? ?? 'system';
     waterMinutes = j['water'] as int? ?? 0;
-    mapType = j['mapType'] as String? ?? 'standard';
+    mapType = j['mapType'] as String? ?? 'hybrid';
     try {
       final takes = jsonDecode((await _store.read('heart.v1')) ?? '[]') as List<dynamic>;
       heartTakes = [

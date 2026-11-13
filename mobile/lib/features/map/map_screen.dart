@@ -135,7 +135,7 @@ class MapScreenState extends State<MapScreen> {
 
   /// The chosen base layer, remembered between launches in the settings.
   /// Without a settings object (tests) the map just stays Standard.
-  String get _mapType => widget.settings?.mapType ?? 'standard';
+  String get _mapType => widget.settings?.mapType ?? 'hybrid';
 
   /// Switches the base layer, remembers the choice, repaints the map.
   void _setMapType(String type) {

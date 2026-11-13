@@ -89,7 +89,12 @@ double? bpmFromSamples(
   return null;
 }
 
-const _windows = <double>[999999.0, 24.0, 16.0];
+// The windows a take is scored in, newest-last: the whole take first, then the
+// more recent slices, where the finger press has usually settled most. v40 adds
+// the 10 s and 8 s slices so a short take (the 15-second countdown leaves about
+// twelve usable seconds) still gets a second chance on its calmest stretch
+// instead of one all-or-nothing read.
+const _windows = <double>[999999.0, 24.0, 16.0, 10.0, 8.0];
 
 /// How far two estimators may disagree (relative to either rate) and still be called
 /// the same beat.

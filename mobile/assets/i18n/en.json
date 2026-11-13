@@ -365,5 +365,10 @@
   "route.planned": "Planned",
   "map.layer_standard": "Standard",
   "route.failed": "The route could not be drawn. Check your internet and try again.",
-  "map.layer_hybrid": "Hybrid"
+  "map.layer_hybrid": "Hybrid",
+  "emergency.title": "Emergency lines in {name}",
+  "emergency.police": "Police",
+  "emergency.fire": "Fire service",
+  "emergency.ambulance": "Ambulance",
+  "emergency.note": "Official lines can change. 112 reaches emergency services in many countries."
 }

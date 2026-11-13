@@ -21,7 +21,7 @@ String? normalizePhone(String input, {String countryCode = '234'}) {
 
 enum ContactsProblem { tooFewOrMany, invalid, duplicate, ownNumber }
 
-/// Validates the contact list: 2-6 distinct valid numbers, none the user's own.
+/// Validates the contact list: 2-10 distinct valid numbers, none the user's own.
 /// Two are enough at sign-up; the remaining slots are filled in the app later.
 /// Returns the normalised numbers, or the problem found.
 ({List<String>? phones, ContactsProblem? problem}) validateContactNumbers(
@@ -30,7 +30,7 @@ enum ContactsProblem { tooFewOrMany, invalid, duplicate, ownNumber }
   String countryCode = '234',
 }) {
   final entered = raw.where((r) => r.trim().isNotEmpty).toList();
-  if (entered.length < 2 || entered.length > 6) return (phones: null, problem: ContactsProblem.tooFewOrMany);
+  if (entered.length < 2 || entered.length > 10) return (phones: null, problem: ContactsProblem.tooFewOrMany);
   final out = <String>[];
   for (final r in entered) {
     final p = normalizePhone(r, countryCode: countryCode);
