@@ -1,3 +1,7 @@
+// Phone-number helpers. v43: also the country search for the sign-up picker -
+// the picker's list and filter live here so they can be unit-tested.
+import 'emergency.dart';
+
 /// Normalises a phone number to E.164 (same rules as the backend). Nigerian local format
 /// (0803 123 4567) becomes +234803... Returns null if it is not plausibly a phone number.
 String? normalizePhone(String input, {String countryCode = '234'}) {
@@ -40,4 +44,27 @@ enum ContactsProblem { tooFewOrMany, invalid, duplicate, ownNumber }
     out.add(p);
   }
   return (phones: out, problem: null);
+}
+
+/// The countries for the sign-up picker, filtered by what the person typed
+/// (v43). An empty query returns every country, alphabetically; a query matches
+/// a country's English name (prefix matches first, then anywhere), its dial
+/// code (with or without the plus), or its ISO code. Pure and list-only, so
+/// the picker's filtering can be unit-tested without a widget tree.
+List<SentriCountry> searchCountries(String query) {
+  final all = [...sentriCountries]..sort((a, b) => a.name.compareTo(b.name));
+  final q = query.trim().toLowerCase();
+  if (q.isEmpty) return all;
+  final dq = q.startsWith('+') ? q.substring(1) : q;
+  final prefix = <SentriCountry>[];
+  final rest = <SentriCountry>[];
+  for (final c in all) {
+    final name = c.name.toLowerCase();
+    if (name.startsWith(q)) {
+      prefix.add(c);
+    } else if (name.contains(q) || (dq.isNotEmpty && c.dial == dq) || c.iso == q) {
+      rest.add(c);
+    }
+  }
+  return [...prefix, ...rest];
 }

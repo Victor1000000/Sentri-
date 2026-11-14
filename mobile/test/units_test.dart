@@ -3,12 +3,15 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sentri/core/i18n/i18n.dart';
+import 'package:sentri/core/emergency.dart';
 import 'package:sentri/core/net/api.dart';
 import 'package:sentri/core/phone.dart';
+import 'package:sentri/core/platform/native_bridge.dart';
 import 'package:sentri/core/storage/key_value_store.dart';
 import 'package:sentri/features/battery/battery.dart';
 import 'package:sentri/features/battery/low_battery_alerter.dart';
 import 'package:sentri/features/location/location.dart';
+import 'package:sentri/features/location/travel_data.dart';
 import 'package:sentri/features/sos/local_pin_vault.dart';
 import 'package:sentri/features/sos/sos_controller.dart';
 import 'package:sentri/features/triggers/shake_detector.dart';
@@ -347,6 +350,119 @@ void main() {
       expect(i.t('no.such.key'), 'no.such.key');
       await i.setLanguage('xx'); // unknown language
       expect(i.code, 'en');
+    });
+  });
+
+  group('country search (v43 picker)', () {
+    test('an empty query lists every country, alphabetically', () {
+      final all = searchCountries('');
+      expect(all.length, greaterThan(40));
+      final names = all.map((c) => c.name).toList();
+      final sorted = [...names]..sort();
+      expect(names, sorted);
+      // No duplicates: each dial code appears once.
+      expect(all.map((c) => '${c.iso}${c.dial}').toSet().length, all.length);
+    });
+
+    test('matches a country name as a prefix first, then anywhere', () {
+      final q = searchCountries('nig');
+      expect(q.first.name, anyOf('Nigeria', 'Niger'));
+      expect(q.map((c) => c.name.toLowerCase()).every((n) => n.contains('nig')), isTrue);
+      // A dial code searches too, with or without the plus.
+      expect(searchCountries('+234').first.dial, '234');
+      expect(searchCountries('234').first.dial, '234');
+    });
+
+    test('nothing matches nonsense', () {
+      expect(searchCountries('zzzqqq'), isEmpty);
+    });
+  });
+
+  group('power presses (v44 picker)', () {
+    test('the count stays inside 3..6 and reaches the channel map clamped', () {
+      expect(const TriggerSettings().clampedPresses, 4);
+      expect(const TriggerSettings(presses: 3).clampedPresses, 3);
+      expect(const TriggerSettings(presses: 5).clampedPresses, 5);
+      expect(const TriggerSettings(presses: 6).clampedPresses, 6);
+      expect(const TriggerSettings(presses: 2).clampedPresses, 3);
+      expect(const TriggerSettings(presses: 9).clampedPresses, 6);
+      expect(const TriggerSettings(presses: 6).toMap()['presses'], 6);
+      expect(const TriggerSettings(presses: 1).toMap()['presses'], 3);
+    });
+
+    test('copyWith keeps the chosen count while flipping a switch', () {
+      final t = const TriggerSettings(presses: 3).copyWith(power: true);
+      expect(t.power, isTrue);
+      expect(t.clampedPresses, 3);
+      expect(t.copyWith(presses: 6).clampedPresses, 6);
+    });
+  });
+
+  group('travel live data (v44 cards)', () {
+    const lat = 6.45, lon = 6.45;
+
+    test('haversine gives sane distances', () {
+      // Two points about one degree of latitude apart: ~111 km.
+      expect(haversineM(6.0, 6.0, 7.0, 6.0), inInclusiveRange(110000, 112000));
+      expect(haversineM(6.0, 6.0, 6.0, 6.0), 0);
+    });
+
+    test('overhead flights: airborne rows only, nearest first, bad bodies safe', () {
+      const body = '{"states":['
+          '["abc123","AAL123 ","Denmark",null,0,4.62,6.55,9000.0,false,240.0,90,null,null,null,"7400",false,"adsb"],'
+          '["gnd1","GND1","Nigeria",null,0,6.45,6.50,0,true,0,0,null,null,null,null,false,"adsb"]'
+          ']}';
+      final out = parseOverheadFlights(body, lat, lon);
+      expect(out.length, 1);
+      expect(out.first.callsign, 'AAL123');
+      expect(out.first.country, 'Denmark');
+      expect(out.first.altitudeM, 9000);
+      expect(out.first.speedKmh, closeTo(240 * 3.6, 0.1));
+      expect(out.first.distanceM, greaterThan(100000));
+      expect(parseOverheadFlights('not json', lat, lon), isEmpty);
+      expect(parseOverheadFlights('{"time":1}', lat, lon), isEmpty);
+    });
+
+    test('nearby quakes: radius filter and unusable rows skipped', () {
+      const body = '{"features":['
+          '{"properties":{"mag":4.2,"place":"10 km NE of Test"},"geometry":{"coordinates":[4.5,6.6,10.0]}},'
+          '{"properties":{"mag":5.0,"place":"Far away"},"geometry":{"coordinates":[1.0,7.0,12.0]}},'
+          '{"properties":{"mag":null,"place":"No mag"},"geometry":{"coordinates":[6.0,6.0,5.0]}}'
+          ']}';
+      final out = parseNearbyQuakes(body, lat, lon);
+      expect(out.length, 1);
+      expect(out.first.magnitude, 4.2);
+      expect(out.first.place, contains('Test'));
+      expect(out.first.depthKm, 10.0);
+      expect(out.first.distanceM, lessThan(500000));
+      expect(parseNearbyQuakes('[]', lat, lon), isEmpty);
+    });
+
+    test('weather: reads the current block, refuses a broken one', () {
+      const body = '{"current":{"temperature_2m":27.4,"wind_speed_10m":11.2,"precipitation":0.3,"weather_code":3}}';
+      final w = parseWeather(body);
+      expect(w, isNotNull);
+      expect(w!.tempC, closeTo(27.4, 0.001));
+      expect(w.windKmh, closeTo(11.2, 0.001));
+      expect(w.precipMm, closeTo(0.3, 0.001));
+      expect(w.code, 3);
+      expect(parseWeather('{}'), isNull);
+      expect(parseWeather('oops'), isNull);
+    });
+
+    test('cameras: nearest first, tags carried through, bad bodies safe', () {
+      const body = '{"elements":['
+          '{"type":"node","id":1,"lat":6.452,"lon":6.451,"tags":{"man_made":"surveillance","surveillance:type":"ALPR","name":"Toll gate"}},'
+          '{"type":"node","id":2,"lat":6.46,"lon":6.47,"tags":{"man_made":"surveillance"}}'
+          ']}';
+      final out = parseCameras(body, lat, lon);
+      expect(out.length, 2);
+      expect(out.first.name, 'Toll gate');
+      expect(out.first.kind, 'ALPR');
+      expect(out.first.distanceM, lessThan(out.last.distanceM));
+      expect(out.last.kind, 'fixed');
+      expect(out.last.name, isEmpty);
+      expect(parseCameras('{"elements":"x"}', lat, lon), isEmpty);
     });
   });
 }

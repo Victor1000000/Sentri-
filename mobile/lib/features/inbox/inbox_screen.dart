@@ -71,9 +71,9 @@ String _ago(DateTime d, String Function(String, [Map<String, String>]) t) {
     };
 
 /// The four tabs of the message section, the way the reference apps do it:
-/// everything in one feed, only the urgent things, the honest "no offers"
-/// card, and everyday safety tips.
-enum _InboxTab { all, alerts, offers, tips }
+/// everything in one feed, only the urgent things, and the everyday tips on
+/// getting the most out of Sentri.
+enum _InboxTab { all, alerts, tips }
 
 /// The icon that matches a travel mode name (v41).
 IconData _travelIcon(String mode) => switch (mode) {
@@ -122,7 +122,6 @@ class _InboxScreenState extends State<InboxScreen> {
             switch (_tab) {
               _InboxTab.all => _allPage(context, d),
               _InboxTab.alerts => _alertsPage(context, d),
-              _InboxTab.offers => _offersPage(context),
               _InboxTab.tips => _tipsPage(context),
             },
             const SizedBox(height: 22),
@@ -191,7 +190,6 @@ class _InboxScreenState extends State<InboxScreen> {
       child: Row(children: [
         seg(_InboxTab.all, t('inbox.tab_all')),
         seg(_InboxTab.alerts, t('inbox.tab_alerts'), badge: alertsCount),
-        seg(_InboxTab.offers, t('inbox.tab_offers')),
         seg(_InboxTab.tips, t('inbox.tab_tips')),
       ]),
     );
@@ -245,36 +243,16 @@ class _InboxScreenState extends State<InboxScreen> {
     return Column(children: [for (final e in alerts) _tile(context, e)]);
   }
 
-  /// The Offers tab is honest, the way the reference apps never are: no fake
-  /// deals, no ads to sell your attention. One card that says so, and points
-  /// the person at the one thing worth doing - inviting their people.
-  Widget _offersPage(BuildContext context) {
-    final t = widget.i18n.t;
-    return Column(children: [
-      Card(
-        child: Padding(
-          padding: const EdgeInsets.all(18),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              Image.memory(f3dmailboxBytes, width: 46, height: 46, filterQuality: FilterQuality.high),
-              const SizedBox(width: 12),
-              Expanded(child: Text(t('offers.title'), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700))),
-            ]),
-            const SizedBox(height: 12),
-            Text(t('offers.body'), style: TextStyle(fontSize: 14.5, height: 1.5, color: Flat.muted(context))),
-            const SizedBox(height: 12),
-            Text(t('offers.cta'), style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600, color: Brand.indigoHi)),
-          ]),
-        ),
-      ),
-    ]);
-  }
-
-  /// Everyday safety tips - short, concrete, and readable in one glance.
+  /// The Offers tab is gone entirely (v43): nothing in a safety app should be
+  /// selling anything. The Messages tab is All / Alerts / Tips.
+  ///
+  /// Everyday tips - short, concrete, and readable in one glance. Six now:
+  /// the first five teach the best way to use Sentri itself, and the sixth
+  /// rounds out everyday safety.
   Widget _tipsPage(BuildContext context) {
     final t = widget.i18n.t;
-    final icons = [Icons.shield_outlined, Icons.lock_outline, Icons.phone_in_talk_outlined, Icons.directions_walk, Icons.battery_charging_full];
-    const keys = ['tips.tip1', 'tips.tip2', 'tips.tip3', 'tips.tip4', 'tips.tip5'];
+    final icons = [Icons.shield_outlined, Icons.lock_outline, Icons.phone_in_talk_outlined, Icons.directions_walk, Icons.battery_charging_full, Icons.water_drop_outlined];
+    const keys = ['tips.tip1', 'tips.tip2', 'tips.tip3', 'tips.tip4', 'tips.tip5', 'tips.tip6'];
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text(t('tips.title'), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
       const SizedBox(height: 10),

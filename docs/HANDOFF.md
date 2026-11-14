@@ -1022,4 +1022,171 @@ values. This shipped broken in v41 too; fixed in v42.
   marks, matching the file's existing NFC/NFD convention).
 
 
+## 27. Version 43 (this patch) — engineer's notes
+
+Vic's round six, six asks: heart rate STILL fails ("not strong enough"), water
+reminder fires exactly ONCE, map glitches on layer switch, an auto-scrolling
+world police/fire gallery on the Police tab, a Life360-style country picker in
+sign-up, Offers removed from Messages entirely + tips rewritten to Sentri-usage,
+and a Travel screen polish. Learned from v42: every value JSON went through a
+DATA file (i18n43-values.json) read by an ASCII-only script, so no double
+encoding can happen by construction.
+
+- WATER (the big one): root cause of "fires once, then silence" is Transsion
+  XOS/HiOS-style power managers pruning the plugin's pre-laid chain of 48
+  one-shot alarms to its first link. Fix = NATIVE self-perpetuating chain:
+  WaterReminderReceiver.kt (NEW LEAF, two top-level classes - WaterReminderReceiver
+  + WaterBootReceiver). Each alarm firing shows the notification AND re-arms the
+  next alarm itself (setExactAndAllowWhileIdle when allowed, else setWindow,
+  SecurityException-guarded); pace/words/nextAt live in prefs file 'sentri_water';
+  notification id 7201, channel 'sentri_health', icon ic_stat_sentri. A start
+  whose pace AND words match a live chain with a future next alarm is a no-op
+  (the Health tab re-arms on every open - blindly rescheduling would starve
+  reminders for frequent openers). WaterBootReceiver re-seeds after
+  BOOT_COMPLETED / MY_PACKAGE_REPLACED. Both receivers registered in the
+  manifest leaf; MainActivity.kt (NEW LEAF) registers MethodChannel
+  'ng.sentri/water' (schedule/cancel/status) in configureFlutterEngine - safe on
+  the shared engine because re-registration replaces the handler.
+  push_service.dart goes native-first: schedule invokes 'schedule' and retires
+  the legacy chain (helper _retireLegacyWaterChain, ids 7300..7347 + 7201);
+  minutes<=0 invokes 'cancel' + retires; MissingPluginException (or any other
+  native error) falls through to the UNCHANGED plugin-chain code, which stays as
+  the fallback for non-Android platforms. waterReminderStatus asks native
+  'status' first (minutes>0 -> ok / noPermission by the notifications flag), and
+  falls back to the old pending-chain check.
+- MAP GLITCH: the TileLayer had no key, so Flutter reused its state across a
+  layer switch and stale tiles of the previous style lingered as pale
+  rectangles. map_screen.dart now keys it `ValueKey('base-$_mapType')`.
+- POLICE WORLD GALLERY: police_screen.dart gains _WorldGallery - an
+  auto-scrolling PageView (viewportFraction 0.86, 3.2 s timer, pauses on the
+  user's drag and resumes 4 s after it settles, glides back to slide 1 at the
+  end, animated dots) showing ALL TWELVE photos with captions
+  `$flag $place · Police/Fire service` + the license credit line the licenses
+  require. photo_police_world.dart gained WorldGalleryItem + worldGalleryItems
+  (12 entries) + worldGalleryPhoto(key) accessor. Header label is the NEW key
+  police.gallery_note. Shown for EVERY country (it is a world tour, not the
+  person's region); Nigeria keeps its NPF banner + directory above it.
+- SIGN-UP COUNTRY PICKER: _PhoneStep gains a country row (flag emoji + dial +
+  name + chevron, styled like PillField) opening a modal bottom sheet: search
+  field, Recommended countries (locale country first, then us/it/in/br/gb/kr/
+  mx/de), then the full alphabetical list (_CountryRow rows). Pick sets
+  widget.c.countryCode = dial (mutable field, v40) so local-format numbers
+  normalize with the chosen country. Pure filtering is
+  core_phone.searchCountries(query) (core_phone.dart now imports emergency.dart)
+  - 3 new tests in test_units.dart (empty=all sorted alphabetical; 'nig'
+  prefixes first + '+234'/'234' dial match; nonsense = empty). Expected mobile
+  tests: 139 HONESTLY (136 + 3).
+- MESSAGES: _InboxTab.offers enum value, its seg, switch case and _offersPage
+  are GONE (All / Alerts / Tips). tips.tip1..tip5 values rewritten to
+  Sentri-usage tips (keys kept: location share, cancel PIN, duress PIN, Police
+  tab one-tap dial, battery/power-bank); tips.tip6 NEW (water reminder repeats
+  at your pace). 6 icon row in _tipsPage.
+- TRAVEL: the plain icon circle became a _SpeedRing CustomPaint (0-140 km/h
+  arc, icon + km/h inside), plus travel.auto_hint ("detected automatically...
+  nothing to set, nothing shared") and travel.updated {t} with clockTime from
+  share_screen.dart (shown when a fix arrived). Chips + honest note card kept.
+- HEART: measure() is patient now - after the 30 s window fails the analysis,
+  the stream keeps flowing and _analyze() re-runs every 5 s, up to +20 s,
+  before refusing (slow settle / late lock no longer wastes the whole take);
+  analysis extracted into _analyze() (settle skip via _lockAt field). NEW live
+  quality hint: rolling mean of the last 48 frame means - <35 ->
+  heart.cover_hint, >235 -> heart.light_hint (bright empty screen = finger not
+  over the lens), null = fine; health_controller.heartHint surfaces it and the
+  measure panel swaps its static tip for the hint, bolded. _spectralBpm noise
+  floor relaxed 3.0 -> 2.4 (dark themes carry weaker spectral lines; the
+  two-half agreement check still guards). No heart-maths unit tests exist, so
+  tuning is free. secondsTarget stays 30.
+- i18n: 418 - 4 (offers.title/body/cta, inbox.tab_offers) + 9 (tips.tip6,
+  country.search, country.recommended, country.all, police.gallery_note,
+  travel.auto_hint, travel.updated, heart.cover_hint, heart.light_hint)
+  = 423 keys x 19 tables, applied by i18n43.ps1 (removes/replaces/splices after
+  anchors: tips.tip6 after tips.tip5, police.gallery_note after
+  police.world_note, travel.auto_hint/updated after travel.stream_failed,
+  heart.* after health.measure_tip, country.* after phone.invalid). All 19
+  verified 423 + travel.updated carries {t}. Values in i18n43-values.json
+  (UTF-8 data file; script ASCII-only - the v42 mojibake lesson, structural
+  this time).
+- Gates: fix-lf22 (LF normalization), bracecheck37 (+WaterReminderReceiver.kt,
+  MainActivity.kt, AndroidManifest.xml), linecheck33, checklf-i18n42,
+  i18ncheck42. check-apk20 updated: i18n 423 x19 with the 9 new keys as
+  needles; en.json must NOT contain "inbox.tab_offers"/"offers.title" and MUST
+  contain "tips.tip6"; .so needles drop offers.title (with an explicit
+  gone-check) and add ng.sentri/water, tips.tip6, country.*, police.gallery_
+  note, travel.auto_hint/updated, heart.cover_hint/light_hint,
+  worldGalleryPhoto; dex needles add WaterReminderReceiver + WaterBootReceiver
+  (manifest-referenced classes survive R8, like MainActivity/ProtectionService);
+  binary manifest must carry both receiver names in UTF-16LE.
+
+§27b. v44 (power presses + travel live cards) - design and shipped bits
+
+v44a. User-set power-button press count (3..6)
+- Dart: TriggerSettings (native_bridge.dart, NOW A LEAF) gains `presses = 4`
+  with `clampedPresses` getter (manual clamp - int.clamp returns num on this
+  SDK, so a getter returning int needs the if/else form, NOT `.clamp`). toMap
+  sends 'presses' as clampedPresses; copyWith extended; NativeBridge interface
+  unchanged (startProtection already takes the whole settings object).
+- core_settings.dart leaf: load reads j['presses'] (default 4), update writes
+  'presses' = clampedPresses.
+- Kotlin leaves: Prefs.kt + SentriEngine.kt + ProtectionService.kt copied from
+  main and edited. Prefs.Triggers gains `powerPresses = 4` (default param keeps
+  every existing call site compiling), save putInt "presses" coerced 3..6,
+  load getInt coerced 3..6. SentriEngine.startProtection reads
+  `call.argument<Int>("presses") ?: 4` coerced 3..6 into Prefs.Triggers.
+  ProtectionService passes `ScreenToggleDetector(presses = p.powerPresses) { ... }`
+  (named arg + trailing lambda is valid Kotlin). ScreenToggleDetector.kt
+  (existing leaf): constructor gains `presses: Int = 4`, instance field
+  `required = presses.coerceIn(3, 6)` replaces the REQUIRED_TOGGLES const;
+  window/cooldown untouched.
+- UI: home_screen.dart _ShortcutsPage shows, only while the power switch is
+  ON, a Wrap of four tappable pills (3/4/5/6) with triggers.presses values
+  ({n} placeholder filled by replaceFirst) and the triggers.presses_hint line
+  above; each tap = _setTriggers(tr.copyWith(presses: n)).
+- i18n: +2 keys (triggers.presses "{n} presses", triggers.presses_hint) and
+  VALUE rewrites of triggers.power ("Press the power button to raise the
+  alert") + triggers.power_note (mentions "as many presses as you set below")
+  in all 19 tables.
+
+v44b. Travel live cards (free public data, no keys, honest failure states)
+- New leaf travel_data.dart (pure parsing, no I/O): haversineM, OverheadFlight
+  + parseOverheadFlights (OpenSky states/all bbox; rows positional, skips
+  on-ground/malformed; nearest first, limit 6), NearbyQuake +
+  parseNearbyQuakes (USGS geojson, maxradiuskm filter, skips no-mag rows),
+  WeatherNow + parseWeather (Open-Meteo `current` block; null on breakage),
+  SafetyCamera + parseCameras (Overpass nodes man_made=surveillance, nearest
+  first). Every parser returns empty/null on a broken body - never throws.
+- travel_screen.dart: state fields per card (data + _failed flag), one fetch
+  each kicked from the first GPS fix (_startLive, guarded by _liveStarted),
+  a shared _refresh() re-runs all four on the newest fix, and a _pending
+  counter drives `_liveDone` so spinners stop when every feed answered.
+  Sources: Open-Meteo (temp/wind/precip/weather_code), OpenSky
+  (bbox +-0.75 deg, ~80 km), USGS (500 km, minmagnitude 2.5, last 7 days),
+  Overpass (around:3000 m). Cards in Sentri style: shared _liveCard shell
+  (icon + title + refresh arrow), weather row with big temp + wind/precip,
+  flights list (callsign/country/distance), quake list (place/depth/M/d km),
+  camera list (name/kind/d m; nearest <150 m drawn in the alert colour) and
+  a Live view card - a small flutter_map (OSM tiles, InteractiveFlag.none)
+  centred on the phone with a my_location marker + travel.live_note.
+  Empty-or-failed cards show travel.none_nearby ("... may be quiet or out of
+  reach. Tap refresh to try again.") - nothing invented.
+- Tests (test_units.dart, +6 -> 145 expected, counted honestly): power presses
+  group (clamp 3..6 + toMap carries clamped + copyWith keeps) and travel live
+  data group (haversine ~111 km per degree, flights airborne-only/nearest/
+  bad-body-safe, quakes radius filter + no-mag skip, weather read/refuse,
+  cameras nearest-first + tags). Imports added: native_bridge, travel_data.
+- i18n: 423 + 10 = 433 keys x 19 (triggers.presses/hint after
+  triggers.data_saver; travel.flights..refresh after travel.auto_hint),
+  applied by i18n44.ps1 + i18n44-values.json (ASCII script, UTF-8 data -
+  same v43 pattern). All 19 verified 433 + triggers.presses carries {n}.
+- check-apk20: header/needles updated to 433; i18n + .so needle lists gained
+  triggers.presses(_hint) + travel.flights/weather/emerg/cameras/live_view/
+  live_note/none_nearby/refresh; the old `'"triggers.power": "Press the power
+  button 4 times"'` needle replaced by the new en text + presses_hint check.
+- build-patch20 $files registered: native_bridge.dart, travel_data.dart,
+  Prefs.kt, SentriEngine.kt, ProtectionService.kt (MainActivity.kt was v43).
+- bracecheck37 file list extended with all five new leaves +
+  ScreenToggleDetector.kt; gates re-run after the v44 edits (the v43 gate run
+  predated them). Expected CI mobile tests: 139 + 6 = 145.
+
+
+
 

@@ -387,9 +387,14 @@ class _HealthScreenState extends State<HealthScreen> {
             ),
             const SizedBox(height: 12),
             Text(
-              t('health.measure_tip'),
+              h.heartHint == null ? t('health.measure_tip') : t(h.heartHint!),
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 13.5, height: 1.45, color: Colors.black.withValues(alpha: 0.78)),
+              style: TextStyle(
+                fontSize: 13.5,
+                height: 1.45,
+                color: Colors.black.withValues(alpha: 0.78),
+                fontWeight: h.heartHint == null ? FontWeight.w400 : FontWeight.w700,
+              ),
             ),
           ]),
         ),

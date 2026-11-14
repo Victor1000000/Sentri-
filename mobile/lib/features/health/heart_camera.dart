@@ -10,8 +10,10 @@ import 'heart_signal.dart';
 /// changes how much light reflects back - the camera turns that into a brightness wiggle,
 /// and the maths turns the wiggle into beats per minute.
 ///
-/// Deliberately patient and honest: it records about thirty seconds, and returns null
-/// (not a guess) whenever the wiggle is too weak or too messy to trust.
+/// Deliberately patient and honest: it records about thirty seconds - and, v43,
+/// can extend itself up to twenty more in 5-second arms when the signal is slow
+/// to settle - and returns null (not a guess) whenever the wiggle is too weak or
+/// too messy to trust.
 ///
 /// v36 accuracy work: the camera's exposure and focus are LOCKED so an auto-exposure
 /// that keeps hunting cannot draw its own slow brightness waves - fake pulses. v37
@@ -35,10 +37,26 @@ class HeartCamera {
   /// stream never delivered anything - different advice than a weak pulse.
   int frames = 0;
 
+  /// v43 live quality hint, updated while the stream runs: when the centre of
+  /// the frame is too DARK the fingertip is not covering the camera properly
+  /// ('heart.cover_hint'), when it is SATURATED the finger is not over the lens
+  /// at all and the bright screen is blazing straight in ('heart.light_hint').
+  /// Null means the light looks right. The screen swaps its static tip for this
+  /// while it is showing, so the person can fix the press mid-take instead of
+  /// waiting out a doomed thirty seconds and getting "not strong enough".
+  String? qualityHint;
+
+  /// The last few frame means, for the rolling luminance behind [qualityHint].
+  final _recent = <double>[];
+
   final _samples = <double>[];
   final _times = <double>[];
   final _sw = Stopwatch();
   CameraController? _controller;
+
+  /// When the exposure lock landed, in [Stopwatch] seconds - [analysis] skips
+  /// everything before it plus a settling margin.
+  double _lockAt = 0.0;
 
   /// How many seconds the reading still needs - surfaced so the screen can count down.
   int secondsLeft = 0;
@@ -53,6 +71,8 @@ class HeartCamera {
     await _close();
     _samples.clear();
     _times.clear();
+    _recent.clear();
+    qualityHint = null;
     _sw
       ..reset()
       ..start();
@@ -112,28 +132,50 @@ class HeartCamera {
     try {
       await ctrl.setFocusMode(FocusMode.locked);
     } catch (_) {}
+    _lockAt = lockAt;
 
-    final wait = _measureFrames();
-    final total = secondsTarget;
-    while (_sw.elapsed < Duration(seconds: total)) {
-      await Future<void>.delayed(const Duration(milliseconds: 400));
-      final left = total - _sw.elapsed.inSeconds;
-      secondsLeft = left < 0 ? 0 : left;
-      onTick?.call(secondsLeft);
-      if (_sw.elapsed >= Duration(seconds: total)) break;
+    // v43: the take is PATIENT now. The 30-second window runs first; if the maths
+    // still finds nothing trustworthy, the stream keeps flowing and the analysis
+    // re-runs every 5 seconds - up to 20 extra seconds - before giving up. A slow
+    // finger settle, a late lock, or a wobbly start no longer wastes a whole take:
+    // the newest, most settled stretch usually turns the answer up in one or two
+    // extra arms. Only a stream that stays unusable after the extension refuses.
+    var total = secondsTarget;
+    int? bpm;
+    while (true) {
+      // The stream-settle watcher runs CONCURRENTLY with the window (as in every
+      // version before): by analysis time it has long since confirmed the buffer
+      // caught up, so it adds no extra delay - it only guards the very first arm.
+      final wait = _measureFrames();
+      while (_sw.elapsed < Duration(seconds: total)) {
+        await Future<void>.delayed(const Duration(milliseconds: 400));
+        final left = total - _sw.elapsed.inSeconds;
+        secondsLeft = left < 0 ? 0 : left;
+        onTick?.call(secondsLeft);
+        if (_sw.elapsed >= Duration(seconds: total)) break;
+      }
+      await wait;
+      bpm = _analyze();
+      if (bpm != null) break;
+      if (total >= secondsTarget + 20) break;
+      total += 5; // one more arm, analysed in 5 seconds
     }
-    await wait;
 
     try {
       await ctrl.stopImageStream();
     } catch (_) {}
     await _close();
+    return bpm;
+  }
 
+  /// The full analysis, run over everything recorded so far. Safe to call again
+  /// after more frames have arrived (the v43 auto-extend does exactly that).
+  int? _analyze() {
     // Skip the settling lead-in: the finger press settling, plus the auto-exposure
     // adapting to the fingertip before the lock, plus a short margin after the lock
     // (a lock can itself shift the frame for a moment). Analysis runs only on the
     // locked, settled stream.
-    final settle = (lockAt + 0.7 > 2.0) ? lockAt + 0.7 : 2.0;
+    final settle = (_lockAt + 0.7 > 2.0) ? _lockAt + 0.7 : 2.0;
     var i0 = 0;
     while (i0 < _times.length && _times[i0] < settle) {
       i0++;
@@ -229,9 +271,24 @@ class HeartCamera {
       }
     }
     if (cnt == 0) return;
-    _samples.add(sum / cnt);
+    final mean = sum / cnt;
+    _samples.add(mean);
     _times.add(_sw.elapsedMicroseconds / 1e6);
     frames = _samples.length;
+    // v43: the rolling luminance behind the live hint. The last ~48 frame means
+    // (a couple of seconds) decide it, so a short slip of the finger shows up
+    // quickly and a fixed press clears the warning quickly too. YUV luminance
+    // runs 0-255: a finger properly over the lens on a lit screen sits mid-range
+    // with a steady wiggle; bright empty screen floods past ~235, a bad press
+    // starves below ~35.
+    _recent.add(mean);
+    if (_recent.length > 48) _recent.removeRange(0, _recent.length - 48);
+    var m = 0.0;
+    for (final v in _recent) {
+      m += v;
+    }
+    m /= _recent.length;
+    qualityHint = m < 35 ? 'heart.cover_hint' : (m > 235 ? 'heart.light_hint' : null);
   }
 
   /// Waits until the sample buffer stops growing for a beat (the stream has caught up),

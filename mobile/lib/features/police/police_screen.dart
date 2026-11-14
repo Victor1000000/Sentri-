@@ -233,6 +233,16 @@ class _ParallaxListState extends State<_ParallaxList> {
             ],
             const SizedBox(height: 20),
           ],
+          // v43: the world reel - every police and firefighter photo in the
+          // library, from eight regions and four fire services, sliding past
+          // on its own like a screensaver. A gentle timer advances the reel
+          // every few seconds; a drag by the person pauses it for a moment.
+          // Shown for every country: the photos are a tour of the world's
+          // forces, not this country's own.
+          Text(t('police.gallery_note').toUpperCase(), style: Theme.of(context).textTheme.labelMedium?.copyWith(letterSpacing: 1.1, color: cs.outline)),
+          const SizedBox(height: 10),
+          _WorldGallery(widget.i18n),
+          const SizedBox(height: 20),
           if (ngLayout) ...[
             Text(t('police.note'), style: Theme.of(context).textTheme.bodyMedium),
             const SizedBox(height: 16),
@@ -318,5 +328,160 @@ class _CommandTile extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+/// The world gallery (v43): an auto-scrolling reel of the police and
+/// firefighter photos from around the world, the way a photo wall glides past.
+///
+/// How it stays pleasant instead of annoying:
+/// * the timer advances one slide every 3.2 seconds and stops the moment the
+///   person's own finger starts a drag, resuming a few seconds after the drag
+///   settles, so it never fights the hand that feeds it;
+/// * the reel walks forward slide by slide and, at the end, glides back to the
+///   first - a tour that starts over, not a slide deck that stops;
+/// * the photos decode once (the photo file caches) and the captions reuse the
+///   words the emergency card already teaches: "Police" / "Fire service".
+class _WorldGallery extends StatefulWidget {
+  const _WorldGallery(this.i18n);
+  final I18n i18n;
+
+  @override
+  State<_WorldGallery> createState() => _WorldGalleryState();
+}
+
+class _WorldGalleryState extends State<_WorldGallery> {
+  late final PageController _pc = PageController(viewportFraction: 0.86);
+  Timer? _auto;
+  Timer? _resume;
+  bool _dragging = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _auto = Timer.periodic(const Duration(milliseconds: 3200), (_) => _advance());
+  }
+
+  @override
+  void dispose() {
+    _auto?.cancel();
+    _resume?.cancel();
+    _pc.dispose();
+    super.dispose();
+  }
+
+  void _advance() {
+    if (!mounted || _dragging || !_pc.hasClients) return;
+    final page = (_pc.page ?? 0).round();
+    if (page >= worldGalleryItems.length - 1) {
+      // End of the reel: glide back to the start and begin the tour again.
+      _pc.animateToPage(0, duration: const Duration(milliseconds: 900), curve: Curves.easeInOutCubic);
+    } else {
+      _pc.animateToPage(page + 1, duration: const Duration(milliseconds: 560), curve: Curves.easeOutCubic);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final t = widget.i18n.t;
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      NotificationListener<ScrollNotification>(
+        onNotification: (n) {
+          // A hand on the reel pauses the timer; a settled hand hands
+          // control back after a short grace period.
+          if (n is ScrollStartNotification && n.dragDetails != null) {
+            _dragging = true;
+            _resume?.cancel();
+          } else if (n is ScrollEndNotification) {
+            _resume?.cancel();
+            _resume = Timer(const Duration(seconds: 4), () {
+              if (mounted) setState(() => _dragging = false);
+            });
+          }
+          return false;
+        },
+        child: SizedBox(
+          height: 186,
+          child: PageView.builder(
+            controller: _pc,
+            itemCount: worldGalleryItems.length,
+            itemBuilder: (context, i) {
+              final item = worldGalleryItems[i];
+              final bytes = worldGalleryPhoto(item.key);
+              final kindLabel = t(item.kind == 'police' ? 'emergency.police' : 'emergency.fire');
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(22),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      if (bytes != null) Image.memory(bytes, fit: BoxFit.cover, gaplessPlayback: true),
+                      Align(
+                        alignment: Alignment.bottomCenter,
+                        child: Container(
+                          decoration: const BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.bottomCenter,
+                              end: Alignment.topCenter,
+                              colors: [Color(0x8C000000), Color(0x00000000)],
+                            ),
+                          ),
+                        ),
+                      ),
+                      Align(
+                        alignment: Alignment.bottomLeft,
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '${item.flag} ${item.place} · $kindLabel',
+                                style: const TextStyle(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.w700, shadows: [Shadow(color: Color(0x99000000), blurRadius: 8, offset: Offset(0, 1))]),
+                              ),
+                              Text(
+                                item.credit,
+                                style: const TextStyle(color: Color(0xCCFFFFFF), fontSize: 9.5, shadows: [Shadow(color: Color(0x99000000), blurRadius: 6, offset: Offset(0, 1))]),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+      const SizedBox(height: 10),
+      // The dots: rebuilt from the controller's own scroll animation.
+      AnimatedBuilder(
+        animation: _pc,
+        builder: (context, _) {
+          final page = (_pc.page ?? 0).round().clamp(0, worldGalleryItems.length - 1);
+          return Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              for (var i = 0; i < worldGalleryItems.length; i++)
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 220),
+                  margin: const EdgeInsets.symmetric(horizontal: 3),
+                  height: 7,
+                  width: i == page ? 18 : 7,
+                  decoration: BoxDecoration(
+                    color: i == page ? cs.primary : cs.outline.withValues(alpha: 0.4),
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                ),
+            ],
+          );
+        },
+      ),
+    ]);
   }
 }

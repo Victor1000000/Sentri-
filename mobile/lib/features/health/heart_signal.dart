@@ -367,9 +367,15 @@ double? _spectralBpm(
   if (bestK < 0 || bestMag <= 0) return null;
   // The line must stand above the band's noise floor: the median magnitude of the
   // band, computed away from the peak's own skirts (plus or minus 2 bins).
+  //
+  // v43: the bar comes down 3.0 -> 2.4. Real fingertip pulses on darker themes and
+  // dimmer screens carry a weaker spectral line, and the old bar read healthy
+  // takes as "no pulse". The other guards still hold the line: the two-half
+  // agreement check, the autocorrelation/peak clustering, and the wiggle floor
+  // all have to agree before a number is believed.
   final floorSorted = List<double>.of(band)..sort();
   final noise = floorSorted[floorSorted.length ~/ 2];
-  if (noise <= 0 || bestMag / noise < 3.0) return null;
+  if (noise <= 0 || bestMag / noise < 2.4) return null;
 
   // Parabolic refinement: the true line sits between bins.
   double kF = bestK.toDouble();

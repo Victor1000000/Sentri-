@@ -159,6 +159,11 @@ class HealthController extends ChangeNotifier with WidgetsBindingObserver {
   final HeartCamera _camera = HeartCamera();
   bool measuring = false;
   int measureLeft = 0;
+
+  /// v43: the live press-quality hint from the camera (heart.cover_hint /
+  /// heart.light_hint), shown on the measure panel while a take is running;
+  /// null means the light looks right and the static tip stays.
+  String? heartHint;
   int? cameraBpm;
   bool measureFailed = false;
   bool noCamera = false;
@@ -425,6 +430,7 @@ class HealthController extends ChangeNotifier with WidgetsBindingObserver {
     measureFailed = false;
     measureNofeed = false;
     noCamera = false;
+    heartHint = null;
     cameraBpm = null;
     measureLeft = HeartCamera.secondsTarget;
     notifyListeners();
@@ -445,6 +451,7 @@ class HealthController extends ChangeNotifier with WidgetsBindingObserver {
     try {
       r = await _camera.measure(onTick: (s) {
         measureLeft = s;
+        heartHint = _camera.qualityHint;
         notifyListeners();
       });
     } catch (_) {

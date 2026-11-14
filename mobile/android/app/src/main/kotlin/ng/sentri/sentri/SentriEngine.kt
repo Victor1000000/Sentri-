@@ -1,6 +1,5 @@
 package ng.sentri.sentri
 
-import android.Manifest
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -83,6 +82,7 @@ object SentriEngine {
                             power = call.argument<Boolean>("power") ?: false,
                             floating = call.argument<Boolean>("floating") ?: true,
                             shakeSensitivity = call.argument<Double>("shakeSensitivity") ?: 1.0,
+                            powerPresses = (call.argument<Int>("presses") ?: 4).coerceIn(3, 6),
                         ),
                     )
                     ProtectionService.start(app)

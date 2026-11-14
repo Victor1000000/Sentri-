@@ -13,6 +13,7 @@ object Prefs {
         val power: Boolean,
         val floating: Boolean,
         val shakeSensitivity: Double,
+        val powerPresses: Int = 4,
     )
 
     fun save(ctx: Context, t: Triggers) {
@@ -23,6 +24,7 @@ object Prefs {
             .putBoolean("power", t.power)
             .putBoolean("floating", t.floating)
             .putFloat("sens", t.shakeSensitivity.toFloat())
+            .putInt("presses", t.powerPresses.coerceIn(3, 6))
             .apply()
     }
 
@@ -35,6 +37,7 @@ object Prefs {
             power = p.getBoolean("power", false),
             floating = p.getBoolean("floating", true),
             shakeSensitivity = p.getFloat("sens", 1.0f).toDouble(),
+            powerPresses = p.getInt("presses", 4).coerceIn(3, 6),
         )
     }
 }

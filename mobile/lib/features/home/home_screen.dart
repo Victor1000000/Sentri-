@@ -678,6 +678,42 @@ class _ShortcutsPage extends StatelessWidget {
                           value: tr.power,
                           onChanged: (v) => unawaited(home._setTriggers(tr.copyWith(power: v))),
                         ),
+                        // v44: the person picks their own press count, so the alert only
+                        // goes off on the number of presses they chose.
+                        if (tr.power)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 2, 16, 12),
+                            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Text(t('triggers.presses_hint'), style: TextStyle(fontSize: 12, height: 1.3, color: cs.onSurface.withValues(alpha: 0.55))),
+                              const SizedBox(height: 8),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  for (final n in const [3, 4, 5, 6])
+                                    InkWell(
+                                      borderRadius: BorderRadius.circular(20),
+                                      onTap: () => unawaited(home._setTriggers(tr.copyWith(presses: n))),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+                                        decoration: BoxDecoration(
+                                          color: tr.presses == n ? cs.primary : cs.primary.withValues(alpha: 0.10),
+                                          borderRadius: BorderRadius.circular(20),
+                                        ),
+                                        child: Text(
+                                          t('triggers.presses').replaceFirst('{n}', '$n'),
+                                          style: TextStyle(
+                                            fontSize: 13.5,
+                                            fontWeight: FontWeight.w800,
+                                            color: tr.presses == n ? cs.onPrimary : cs.primary,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ]),
+                          ),
                         SwitchListTile(title: Text(t('triggers.floating')), value: tr.floating, onChanged: (v) => unawaited(home._setTriggers(tr.copyWith(floating: v)))),
                       ],
                       SwitchListTile(title: Text(t('triggers.data_saver')), value: s.dataSaver, onChanged: (v) => unawaited(s.update(dataSaver: v))),

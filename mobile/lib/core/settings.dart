@@ -54,6 +54,7 @@ class AppSettings extends ChangeNotifier {
       power: j['power'] as bool? ?? false,
       floating: j['floating'] as bool? ?? true,
       shakeSensitivity: (j['sens'] as num?)?.toDouble() ?? 1.0,
+      presses: j['presses'] as int? ?? 4,
     );
     dataSaver = j['dataSaver'] as bool? ?? false;
     lastPhone = j['lastPhone'] as String? ?? '';
@@ -111,6 +112,7 @@ class AppSettings extends ChangeNotifier {
         'power': this.triggers.power,
         'floating': this.triggers.floating,
         'sens': this.triggers.shakeSensitivity,
+        'presses': this.triggers.clampedPresses,
         'dataSaver': this.dataSaver,
         'lastPhone': this.lastPhone,
         'onboarded': this.onboarded,

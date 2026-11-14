@@ -2,12 +2,14 @@ import 'dart:async';
 import 'dart:io' show Platform;
 import 'dart:math' as math;
 import 'dart:typed_data' show Uint8List;
+import 'dart:ui' show FontFeature;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/emergency.dart';
 import '../../core/i18n/i18n.dart';
+import '../../core/phone.dart';
 import '../../core/widgets/brand.dart';
 import '../../core/widgets/flat.dart';
 import 'floating3d.dart';
@@ -136,6 +138,12 @@ class _PhoneStep extends StatefulWidget {
 class _PhoneStepState extends State<_PhoneStep> {
   final _ctl = TextEditingController();
 
+  /// The country whose dial code local-format numbers belong to, picked
+  /// Life360-style (v43): a row of flag + code + name that opens a searchable
+  /// sheet of every country Sentri knows. Picking one immediately moves the
+  /// controller's dial code, so the number is normalised with THEIR country.
+  late SentriCountry _country = countryByDial(widget.c.countryCode) ?? countryForLocale(Platform.localeName) ?? sentriCountries.first;
+
   @override
   void initState() {
     super.initState();
@@ -147,6 +155,100 @@ class _PhoneStepState extends State<_PhoneStep> {
   void dispose() {
     _ctl.dispose();
     super.dispose();
+  }
+
+  /// The searchable country sheet, Life360-style: a search field, the
+  /// recommended countries (the phone's own region first, then the world's
+  /// biggest dial codes), and finally the complete alphabetical list. Pure
+  /// filtering lives in [searchCountries] so it can be unit-tested.
+  Future<void> _pickCountry() async {
+    final t = widget.i18n.t;
+    final localeCountry = countryForLocale(Platform.localeName);
+    final recommended = <SentriCountry>[if (localeCountry != null) localeCountry];
+    for (final iso in const ['us', 'it', 'in', 'br', 'gb', 'kr', 'mx', 'de']) {
+      if (countryByIso(iso) case final c?) {
+        if (!recommended.any((r) => r.iso == c.iso)) recommended.add(c);
+      }
+    }
+    final picked = await showModalBottomSheet<SentriCountry>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        var query = '';
+        return StatefulBuilder(
+          builder: (sheetContext, setSheet) {
+            final cs = Theme.of(sheetContext).colorScheme;
+            final results = searchCountries(query);
+            final showRecommended = query.trim().isEmpty;
+            final list = showRecommended
+                ? [
+                    ...results.where((c) => recommended.any((r) => r.iso == c.iso)),
+                    if (results.any((c) => !recommended.any((r) => r.iso == c.iso)))
+                      ...results.where((c) => !recommended.any((r) => r.iso == c.iso)),
+                  ]
+                : results;
+            return Padding(
+              padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(sheetContext).bottom),
+              child: Container(
+                constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.82),
+                decoration: BoxDecoration(
+                  color: cs.surface,
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+                ),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                    child: TextField(
+                      autofocus: true,
+                      onChanged: (v) => setSheet(() => query = v),
+                      decoration: InputDecoration(
+                        prefixIcon: const Icon(Icons.search_rounded),
+                        hintText: t('country.search'),
+                        isDense: true,
+                        filled: true,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(30), borderSide: BorderSide.none),
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: ListView(
+                      padding: const EdgeInsets.fromLTRB(8, 4, 8, 24),
+                      children: [
+                        if (showRecommended) ...[
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+                            child: Text(t('country.recommended').toUpperCase(), style: Theme.of(sheetContext).textTheme.labelMedium?.copyWith(letterSpacing: 1.1, color: cs.outline)),
+                          ),
+                          for (final c in recommended.where((r) => list.any((l) => l.iso == r.iso))) _CountryRow(c, onPick: (c2) => Navigator.of(sheetContext).pop(c2)),
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 16, 16, 6),
+                            child: Text(t('country.all').toUpperCase(), style: Theme.of(sheetContext).textTheme.labelMedium?.copyWith(letterSpacing: 1.1, color: cs.outline)),
+                          ),
+                          for (final c in list.where((c) => !recommended.any((r) => r.iso == c.iso))) _CountryRow(c, onPick: (c2) => Navigator.of(sheetContext).pop(c2)),
+                        ] else
+                          for (final c in list) _CountryRow(c, onPick: (c2) => Navigator.of(sheetContext).pop(c2)),
+                        if (list.isEmpty && !showRecommended)
+                          Padding(
+                            padding: const EdgeInsets.all(24),
+                            child: Center(child: Icon(Icons.search_off_rounded, size: 40, color: cs.outline)),
+                          ),
+                      ],
+                    ),
+                  ),
+                ]),
+              ),
+            );
+          },
+        );
+      },
+    );
+    if (picked == null) return;
+    setState(() {
+      _country = picked;
+      widget.c.countryCode = picked.dial;
+    });
   }
 
   @override
@@ -168,6 +270,30 @@ class _PhoneStepState extends State<_PhoneStep> {
               boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 14, offset: const Offset(0, 6))],
             ),
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              // The country row, Life360-style: flag, dial code, name, chevron.
+              // One tap opens the searchable country sheet below.
+              InkWell(
+                onTap: widget.c.busy ? null : _pickCountry,
+                borderRadius: BorderRadius.circular(30),
+                child: Container(
+                  height: 54,
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  decoration: BoxDecoration(
+                    color: (Theme.of(context).brightness == Brightness.dark ? Colors.white.withValues(alpha: 0.08) : Colors.white.withValues(alpha: 0.5)),
+                    borderRadius: BorderRadius.circular(30),
+                    border: Border.all(color: Theme.of(context).colorScheme.onSurface, width: 2.5),
+                  ),
+                  child: Row(children: [
+                    Text(_country.flag, style: const TextStyle(fontSize: 22)),
+                    const SizedBox(width: 12),
+                    Text('+${_country.dial}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, fontFeatures: [FontFeature.tabularFigures()])),
+                    const SizedBox(width: 10),
+                    Expanded(child: Text(_country.name, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                    Icon(Icons.keyboard_arrow_down_rounded, size: 26, color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6)),
+                  ]),
+                ),
+              ),
+              const SizedBox(height: 14),
               PillField(
                 controller: _ctl,
                 label: widget.i18n.t('phone.title'),
@@ -508,4 +634,28 @@ class _PermissionsStep extends StatelessWidget {
           PillButton(onPressed: () => unawaited(c.finish()), label: i18n.t('perm.finish')),
         ],
       );
+}
+
+/// One line of the country sheet: flag, name, dial code (v43). Tapping picks it.
+class _CountryRow extends StatelessWidget {
+  const _CountryRow(this.c, {required this.onPick});
+  final SentriCountry c;
+  final ValueChanged<SentriCountry> onPick;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return InkWell(
+      onTap: () => onPick(c),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(children: [
+          Text(c.flag, style: const TextStyle(fontSize: 24)),
+          const SizedBox(width: 14),
+          Expanded(child: Text(c.name, style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w600))),
+          Text('+${c.dial}', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: cs.onSurface.withValues(alpha: 0.65), fontFeatures: const [FontFeature.tabularFigures()])),
+        ]),
+      ),
+    );
+  }
 }

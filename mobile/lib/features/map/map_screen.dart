@@ -1221,8 +1221,17 @@ class MapScreenState extends State<MapScreen> {
                 onLongPress: (_, pt) => unawaited(_onLongPress(pt)),
               ),
               children: [
+                // v43: the TileLayer is keyed per map style. Without the key, Flutter
+                // reused the same TileLayer state across a style switch, so patches of
+                // the previous style's tiles lingered over the new one as pale
+                // rectangles until every zoom level had been re-fetched. A fresh state
+                // per style starts each look with clean, correctly-styled tiles.
                 for (final url in sentriBaseLayers(_mapType).urls)
-                  TileLayer(urlTemplate: url, userAgentPackageName: 'ng.sentri.sentri'),
+                  TileLayer(
+                    key: ValueKey('base-$_mapType'),
+                    urlTemplate: url,
+                    userAgentPackageName: 'ng.sentri.sentri',
+                  ),
                 // v42: the night layer wears the night-vision heat - every point
                 // this phone has actually stood at while the map is open (and the
                 // running share's trail) glows as a soft green-to-yellow blob,

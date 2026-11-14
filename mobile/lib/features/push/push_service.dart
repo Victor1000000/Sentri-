@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart' show PlatformException;
+import 'package:flutter/services.dart' show MethodChannel, MissingPluginException, PlatformException;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:timezone/data/latest_all.dart' as tzdata;
@@ -58,6 +58,12 @@ int _idFor(Map<String, dynamic> data) => ((data['inboxId'] ?? data['sosId'] ?? d
 const _waterId = 7201;
 const _healthNoteId = 7202;
 
+/// v43: the channel into the NATIVE water alarm chain (WaterReminderReceiver on
+/// Android). A receiver the system itself wakes, which re-arms the next alarm before
+/// returning, cannot be pruned by battery managers that used to cut the plugin's
+/// pre-laid chain down to its first link.
+const _waterNative = MethodChannel('ng.sentri/water');
+
 /// The honest state of the drink-water reminder on this phone, as the app can verify it:
 /// * [off] - the person has not chosen a pace (or chose "off").
 /// * [ok] - the reminder really is scheduled and the phone allows notifications.
@@ -67,12 +73,24 @@ const _healthNoteId = 7202;
 enum WaterStatus { off, ok, noPermission, notScheduled }
 
 /// Checks what actually became of the reminder on this phone instead of assuming it
-/// works: is the notification permission granted, and is at least one link of the
-/// reminder's alarm CHAIN still among the phone's pending scheduled notifications.
-/// The chain is a batch of independent one-shot alarms the app lays down itself (see
-/// [scheduleWaterReminder]), so "still pending" means the phone really has the alarms.
+/// works: is the notification permission granted, and is the reminder (native alarm
+/// or a link of the plugin chain) still among the phone's pending scheduled alarms.
+/// v43: asks the NATIVE receiver first; the plugin-chain check below remains as the
+/// fallback for older installs and non-Android platforms.
 Future<WaterStatus> waterReminderStatus(int minutes) async {
   if (minutes <= 0) return WaterStatus.off;
+  try {
+    final m = await _waterNative.invokeMapMethod<String, dynamic>('status');
+    if (m != null && ((m['minutes'] as num?) ?? 0) > 0) {
+      // The native receiver still holds the pace and its next alarm.
+      return m['notifications'] == true ? WaterStatus.ok : WaterStatus.noPermission;
+    }
+  } on MissingPluginException {
+    // No native receiver in this build - fall back to the plugin chain below.
+  } catch (_) {
+    // A failed native readback falls through to the plugin check rather than
+    // reporting a state nobody verified.
+  }
   await _ensureLocal();
   try {
     final android = _local.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
@@ -148,7 +166,42 @@ Future<void> _ensureLocal() async {
   }
 }
 
+/// Cancels every link of the plugin-based water chain (and the v36 repeating
+/// schedule), so the native alarm chain can run alone without double reminders.
+Future<void> _retireLegacyWaterChain() async {
+  await _ensureLocal();
+  try {
+    for (var id = _waterChainFirst; id <= _waterChainLast; id++) {
+      await _local.cancel(id);
+    }
+    await _local.cancel(_waterId);
+  } catch (_) {}
+}
+
 Future<void> scheduleWaterReminder(int minutes, String title, String body) async {
+  // v43, native-first: the self-perpetuating native alarm chain is the primary
+  // scheduler - one alarm the system wakes a receiver for, which shows the
+  // notification and re-arms the NEXT alarm itself. Battery managers that used to
+  // prune the pre-laid plugin chain to its first link cannot touch this. The plugin
+  // chain below remains as the fallback for builds without the native receiver.
+  try {
+    if (minutes <= 0) {
+      await _waterNative.invokeMethod('cancel');
+      await _retireLegacyWaterChain();
+      return;
+    }
+    await _waterNative.invokeMethod('schedule', {'minutes': minutes, 'title': title, 'body': body});
+    // Native scheduling took over: retire the old plugin links so two systems do
+    // not ring at the same pace twice.
+    await _retireLegacyWaterChain();
+    return;
+  } on MissingPluginException {
+    // No native receiver in this build (older Android side, or a non-Android
+    // platform): the plugin chain below is the scheduler.
+  } catch (_) {
+    // The native channel threw - fall through to the plugin chain so the habit
+    // still has a working scheduler somewhere.
+  }
   await _ensureLocal();
   const details = NotificationDetails(
     android: AndroidNotificationDetails(

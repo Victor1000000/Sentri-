@@ -39755,3 +39755,53 @@ Uint8List? firePhotoForCountry(String iso) => switch (_policeRegionFor(iso)) {
       'mena' || 'south_asia' || 'east_asia' => _photo('fire_asia', _fireAsiaB64),
       _ => null,
     };
+
+// ---- the v43 world gallery: every photo in the file, in one auto-scrolling reel ----
+
+/// One slide of the Police tab's world gallery: which photo, whose flag, the
+/// place it was taken (a proper noun - not translated), whether the force is
+/// police or fire (the caption reuses t('emergency.police') / t('emergency.fire')),
+/// and the photo credit, which the free licenses on Wikimedia Commons require
+/// the app to name.
+class WorldGalleryItem {
+  const WorldGalleryItem(this.key, this.flag, this.place, this.kind, this.credit);
+  final String key; // _photo cache key
+  final String flag; // regional-indicator emoji
+  final String place; // 'Nigeria', 'London', 'Kuala Lumpur' ...
+  final String kind; // 'police' | 'fire'
+  final String credit; // photographer + license, as the license requires
+}
+
+/// All twelve photos in the file, in a pleasing world-tour order: Africa's
+/// police first, then fire, onward through the regions.
+const worldGalleryItems = <WorldGalleryItem>[
+  WorldGalleryItem('police_west_africa', '🇳🇬', 'Nigeria', 'police', 'AMISOM Public Information · CC0'),
+  WorldGalleryItem('police_east_africa', '🇰🇪', 'Kenya', 'police', 'Emily Onyango · CC BY-SA 4.0'),
+  WorldGalleryItem('police_south_africa', '🇿🇦', 'Cape Town', 'police', 'Discott · CC BY-SA 4.0'),
+  WorldGalleryItem('fire_africa', '🇿🇦', 'South Africa', 'fire', 'StevenTerblanche · CC BY-SA 4.0'),
+  WorldGalleryItem('police_europe', '🇬🇧', 'London', 'police', 'Niels Broekzitter · CC BY 2.0'),
+  WorldGalleryItem('fire_europe', '🇩🇪', 'Hebertshausen', 'fire', 'User:Mattes · CC BY-SA 3.0'),
+  WorldGalleryItem('police_americas', '🇺🇸', 'New York', 'police', 'Ludovic Bertron · CC BY 2.0'),
+  WorldGalleryItem('fire_americas', '🇺🇸', 'New York', 'fire', 'cisc1970 · CC BY 2.0'),
+  WorldGalleryItem('police_mena', '🇦🇪', 'Dubai', 'police', 'dubaidon · CC BY 2.0'),
+  WorldGalleryItem('police_south_asia', '🇮🇳', 'Delhi', 'police', 'Vrlobo888 · Public domain'),
+  WorldGalleryItem('police_east_asia', '🇲🇾', 'Kuala Lumpur', 'police', 'CEphoto, Uwe Aranas · CC BY-SA 3.0'),
+  WorldGalleryItem('fire_asia', '🇸🇬', 'Singapore', 'fire', 'ZKang123 · CC BY-SA 4.0'),
+];
+
+/// The bytes for one gallery item's photo key, or null if the key is unknown.
+Uint8List? worldGalleryPhoto(String key) => switch (key) {
+      'police_west_africa' => _photo('police_west_africa', _policeWestAfricaB64),
+      'police_east_africa' => _photo('police_east_africa', _policeEastAfricaB64),
+      'police_south_africa' => _photo('police_south_africa', _policeSouthAfricaB64),
+      'police_europe' => _photo('police_europe', _policeEuropeB64),
+      'police_americas' => _photo('police_americas', _policeAmericasB64),
+      'police_mena' => _photo('police_mena', _policeMenaB64),
+      'police_south_asia' => _photo('police_south_asia', _policeSouthAsiaB64),
+      'police_east_asia' => _photo('police_east_asia', _policeEastAsiaB64),
+      'fire_europe' => _photo('fire_europe', _fireEuropeB64),
+      'fire_americas' => _photo('fire_americas', _fireAmericasB64),
+      'fire_africa' => _photo('fire_africa', _fireAfricaB64),
+      'fire_asia' => _photo('fire_asia', _fireAsiaB64),
+      _ => null,
+    };

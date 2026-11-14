@@ -10,24 +10,38 @@ class TriggerSettings {
     this.power = false,
     this.floating = true,
     this.shakeSensitivity = 1.0,
+    this.presses = 4,
   });
   final bool shake;
   final bool volume;
 
-  /// Screen on/off x3 heuristic. Best effort; off by default because it can misfire.
+  /// Screen on/off heuristic. Best effort; off by default because it can misfire.
   final bool power;
   final bool floating;
 
   /// 0.5 (harder to trigger) .. 1.5 (easier).
   final double shakeSensitivity;
 
-  TriggerSettings copyWith({bool? shake, bool? volume, bool? power, bool? floating, double? shakeSensitivity}) =>
+  /// v44: how many power-button presses the alert waits for. The person picks
+  /// their own number (3..6) so they stay conscious of when the alert goes off;
+  /// anything outside the range is clamped on the way through.
+  final int presses;
+
+  int get clampedPresses {
+    final p = presses;
+    if (p < 3) return 3;
+    if (p > 6) return 6;
+    return p;
+  }
+
+  TriggerSettings copyWith({bool? shake, bool? volume, bool? power, bool? floating, double? shakeSensitivity, int? presses}) =>
       TriggerSettings(
         shake: shake ?? this.shake,
         volume: volume ?? this.volume,
         power: power ?? this.power,
         floating: floating ?? this.floating,
         shakeSensitivity: shakeSensitivity ?? this.shakeSensitivity,
+        presses: presses ?? this.presses,
       );
 
   Map<String, Object> toMap() => {
@@ -36,6 +50,7 @@ class TriggerSettings {
         'power': power,
         'floating': floating,
         'shakeSensitivity': shakeSensitivity,
+        'presses': clampedPresses,
       };
 }
 

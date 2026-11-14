@@ -128,6 +128,23 @@
             </intent-filter>
         </receiver>
 
+        <!-- v43: the drink-water reminder as a native self-perpetuating alarm: each
+             firing shows the notification and re-arms the NEXT one itself, so battery
+             managers that prune a pre-laid chain of scheduled notifications cannot
+             silence the pace after the first reminder. WaterBootReceiver re-seeds the
+             chain after a reboot or an app update. -->
+        <receiver
+            android:name=".WaterReminderReceiver"
+            android:exported="false" />
+        <receiver
+            android:name=".WaterBootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
