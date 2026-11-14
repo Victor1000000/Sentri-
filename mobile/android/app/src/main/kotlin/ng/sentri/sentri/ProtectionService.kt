@@ -85,7 +85,7 @@ class ProtectionService : Service() {
         power?.unregister(this); power = null
         // v44: the press count is the person's own choice (3..6), so the alert only goes off on
         // the number of presses they decided on.
-        if (p.power) power = ScreenToggleDetector(presses = p.powerPresses) { TriggerDispatcher.fire(this, "power") }.also { it.register(this) }
+        if (p.power) power = ScreenToggleDetector(onTrigger = { TriggerDispatcher.fire(this, "power") }, presses = p.powerPresses).also { it.register(this) }
 
         if (p.floating) {
             if (floating == null) floating = FloatingButton(this)
