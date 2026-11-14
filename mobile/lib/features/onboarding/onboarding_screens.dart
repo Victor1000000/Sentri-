@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:math' as math;
 import 'dart:typed_data' show Uint8List;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../core/emergency.dart';
 import '../../core/i18n/i18n.dart';
 import '../../core/widgets/brand.dart';
 import '../../core/widgets/flat.dart';
@@ -64,6 +66,9 @@ class OnboardingFlow extends StatelessWidget {
                 children: [
                   SentriTopBar(
                     i18n: i18n,
+                    // v41: before the number is typed, the device's own region
+                    // picks the language set; the sign-up number takes over later.
+                    countryIso: countryForLocale(Platform.localeName)?.iso,
                     onLanguage: (code) async {
                       await i18n.setLanguage(code);
                       await c.settings.update(language: code);

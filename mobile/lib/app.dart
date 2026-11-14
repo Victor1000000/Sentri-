@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
 
+import 'core/emergency.dart';
 import 'core/theme.dart';
 import 'core/widgets/brand.dart'; // SplashView lives here
 import 'core/widgets/flat.dart';
@@ -103,7 +105,7 @@ class _RootState extends State<_Root> {
               return Stack(
                 children: [
                   _Tabs(services: s),
-                  if (s.sos.phase != SosPhase.idle) Positioned.fill(child: SosScreen(sos: s.sos, i18n: s.i18n, police: s.police)),
+                  if (s.sos.phase != SosPhase.idle) Positioned.fill(child: SosScreen(sos: s.sos, i18n: s.i18n, police: s.police, country: _myCountry(s))),
                 ],
               );
             },
@@ -115,6 +117,15 @@ class _RootState extends State<_Root> {
   }
 }
 
+
+/// The person's own country, resolved from the phone number they signed up
+/// with: a US number means US emergency lines everywhere in the app, a
+/// Nigerian number keeps the NPF layout (v41). Falls back to the device's
+/// own region when the number is unknown.
+SentriCountry? _myCountry(AppServices s) {
+  final e164 = s.settings.lastPhone;
+  return countryByDial(dialCodeFromE164(e164) ?? '') ?? countryForLocale(Platform.localeName);
+}
 
 /// Home, Map, Health and Police. The pages stay built inside an IndexedStack, so directions, pins and
 /// route voice plans survive a switch to Home and back.
@@ -156,7 +167,7 @@ class _TabsState extends State<_Tabs> {
       index: _tab,
       children: [
         HomeScreen(sos: s.sos, settings: s.settings, i18n: s.i18n, bridge: s.bridge, api: s.api, inbox: s.inbox, share: s.share, checkin: s.checkin, police: s.police, people: s.people, profile: s.profile, exercise: s.exercise),
-        MapScreen(key: _mapKey, location: s.location, api: s.api, i18n: s.i18n, placeLookup: const DevicePlaceLookup(), onPlace: (p) => _state = p?.state, police: _directoryFuture, settings: s.settings),
+        MapScreen(key: _mapKey, location: s.location, api: s.api, i18n: s.i18n, placeLookup: const DevicePlaceLookup(), onPlace: (p) => _state = p?.state, police: _directoryFuture, settings: s.settings, share: s.share),
         HealthScreen(
           health: s.health,
           i18n: s.i18n,
@@ -170,7 +181,7 @@ class _TabsState extends State<_Tabs> {
             setState(() => _tab = 1);
           },
         ),
-        PoliceScreen(directory: _directory, i18n: s.i18n, currentState: _state),
+        PoliceScreen(directory: _directory, i18n: s.i18n, currentState: _state, country: _myCountry(s)),
       ],
     );
     return Scaffold(

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../core/emergency.dart';
 import '../../core/i18n/i18n.dart';
 import '../../core/widgets/flat.dart';
 import '../police/police_call_card.dart';
@@ -20,10 +21,13 @@ import 'sos_controller.dart';
 /// bigger and bolder here, white on the alarm disc, with the countdown circling
 /// it. The contacts card and the cancel PIN sit below like every other flat page.
 class SosScreen extends StatefulWidget {
-  const SosScreen({super.key, required this.sos, required this.i18n, required this.police});
+  const SosScreen({super.key, required this.sos, required this.i18n, required this.police, this.country});
   final SosController sos;
   final I18n i18n;
   final Future<PoliceDirectory> police;
+
+  /// The person's own country, so the police card dials the right lines (v41).
+  final SentriCountry? country;
 
   @override
   State<SosScreen> createState() => _SosScreenState();
@@ -167,8 +171,12 @@ class _SosScreenState extends State<SosScreen> {
                     child: Column(children: [
                       // Honest about what the app does: it alerts your contacts, and you reach the police by calling.
                       Text(t('sos.police_note'), textAlign: TextAlign.center, style: text.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
+                      // v41: the position keeps flowing after a contact responds,
+                      // so say so - it is why "I'm safe" (not just the ring) ends it.
+                      const SizedBox(height: 4),
+                      Text(t('sos.share_until_safe'), textAlign: TextAlign.center, style: text.bodySmall?.copyWith(color: Flat.muted(context))),
                       const SizedBox(height: 10),
-                      PoliceCallCard(directory: widget.police, i18n: widget.i18n, lat: widget.sos.lastGeo?.lat, lon: widget.sos.lastGeo?.lon),
+                      PoliceCallCard(directory: widget.police, i18n: widget.i18n, lat: widget.sos.lastGeo?.lat, lon: widget.sos.lastGeo?.lon, country: widget.country),
                     ]),
                   ),
                 ],

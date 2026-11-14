@@ -13,7 +13,18 @@ export interface ShareRouteDeps {
 }
 
 const Id = z.string().min(1).max(64);
-const Geo = z.object({ lat: z.number().min(-90).max(90), lon: z.number().min(-180).max(180), accuracyM: z.number().min(0).max(100_000).optional() });
+const Geo = z.object({
+  lat: z.number().min(-90).max(90),
+  lon: z.number().min(-180).max(180),
+  accuracyM: z.number().min(0).max(100_000).optional(),
+  // v41: the share's recent breadcrumb trail (thinned by the phone, at most 120
+  // points) and the travel mode read off it. Optional extras inside the same PUT.
+  path: z
+    .array(z.object({ lat: z.number().min(-90).max(90), lon: z.number().min(-180).max(180) }))
+    .max(120)
+    .optional(),
+  mode: z.enum(['still', 'walk', 'run', 'ride', 'drive', 'train', 'flight']).optional(),
+});
 
 export function registerShareRoutes(app: FastifyInstance, d: ShareRouteDeps): void {
   const gate = async (req: FastifyRequest, l = d.limiter): Promise<string | null> => {

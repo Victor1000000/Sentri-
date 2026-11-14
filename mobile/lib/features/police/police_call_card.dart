@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/emergency.dart';
 import '../../core/i18n/i18n.dart';
 import '../../core/widgets/flat.dart';
 import '../../core/widgets/glass.dart';
@@ -15,16 +16,24 @@ import 'police_directory.dart';
 ///
 /// The state lines come from a public list that the police have not confirmed, and the card says so. 112 is
 /// the official national emergency number.
+///
+/// v41, global: outside Nigeria the card dials THAT country's police, fire and ambulance
+/// lines instead - never the Nigerian command list. The app shell hands in the person's own
+/// country, resolved from the number they signed up with.
 class PoliceCallCard extends StatefulWidget {
-  const PoliceCallCard({super.key, required this.directory, required this.i18n, this.lat, this.lon, this.forContact = false});
+  const PoliceCallCard({super.key, required this.directory, required this.i18n, this.lat, this.lon, this.forContact = false, this.country});
   final Future<PoliceDirectory> directory;
   final I18n i18n;
-  /// Null until the first position fix: the card then offers 112 only.
+  /// Null until the first position fix: the card then offers the national number only.
   final double? lat;
   final double? lon;
 
   /// Wording for a contact looking at someone else's alert: "near them".
   final bool forContact;
+
+  /// The person's own country (v41). Nigeria - or an unknown country - keeps the
+  /// 112 + NPF command card.
+  final SentriCountry? country;
 
   @override
   State<PoliceCallCard> createState() => _PoliceCallCardState();
@@ -41,7 +50,8 @@ class _PoliceCallCardState extends State<PoliceCallCard> {
 
   @override
   Widget build(BuildContext context) {
-    final t = widget.i18n.t;
+    final country = widget.country;
+    if (country != null && country.iso != 'ng') return _worldCard(context, country);
     return FutureBuilder<PoliceDirectory>(
       future: widget.directory,
       builder: (context, snap) {
@@ -60,38 +70,79 @@ class _PoliceCallCardState extends State<PoliceCallCard> {
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: Text(widget.forContact ? t('police.near_them') : t('police.near_you'), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700, letterSpacing: -0.2)),
+                child: Text(widget.forContact ? widget.i18n.t('police.near_them') : widget.i18n.t('police.near_you'), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700, letterSpacing: -0.2)),
               ),
             ]),
             const SizedBox(height: 14),
-            _DialButton(label: t('police.call_112'), big: true, onTap: () => unawaited(_dial('112'))),
+            _DialButton(label: widget.i18n.t('police.call_112'), big: true, onTap: () => unawaited(_dial('112'))),
             if (near != null) ...[
               const SizedBox(height: 14),
-              Text('${near.primary.command.state} · ${t('police.command')}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+              Text('${near.primary.command.state} · ${widget.i18n.t('police.command')}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
               const SizedBox(height: 8),
-              for (final l in near.primary.command.lines.take(3)) Padding(padding: const EdgeInsets.only(bottom: 8), child: _DialButton(label: t('police.call', {'n': prettyLine(l)}), onTap: () => unawaited(_dial(l)))),
-              Text(t('police.approx'), style: TextStyle(fontSize: 12, height: 1.4, color: Flat.muted(context))),
+              for (final l in near.primary.command.lines.take(3)) Padding(padding: const EdgeInsets.only(bottom: 8), child: _DialButton(label: widget.i18n.t('police.call', {'n': prettyLine(l)}), onTap: () => unawaited(_dial(l)))),
+              Text(widget.i18n.t('police.approx'), style: TextStyle(fontSize: 12, height: 1.4, color: Flat.muted(context))),
               if (near.nearby.isNotEmpty) ...[
                 const SizedBox(height: 6),
                 TextButton(
                   style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(0, 32), alignment: Alignment.centerLeft),
                   onPressed: () => setState(() => _more = !_more),
-                  child: Text(_more ? t('police.hide_nearby') : t('police.also_near')),
+                  child: Text(_more ? widget.i18n.t('police.hide_nearby') : widget.i18n.t('police.also_near')),
                 ),
                 if (_more)
                   for (final n in near.nearby) ...[
-                    Padding(padding: const EdgeInsets.only(top: 6, bottom: 6), child: Text('${n.command.state} · ${t('police.km', {'n': '${n.km}'})}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600))),
-                    for (final l in n.command.lines.take(2)) Padding(padding: const EdgeInsets.only(bottom: 8), child: _DialButton(label: t('police.call', {'n': prettyLine(l)}), onTap: () => unawaited(_dial(l)))),
+                    Padding(padding: const EdgeInsets.only(top: 6, bottom: 6), child: Text('${n.command.state} · ${widget.i18n.t('police.km', {'n': '${n.km}'})}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600))),
+                    for (final l in n.command.lines.take(2)) Padding(padding: const EdgeInsets.only(bottom: 8), child: _DialButton(label: widget.i18n.t('police.call', {'n': prettyLine(l)}), onTap: () => unawaited(_dial(l)))),
                   ],
               ],
             ] else if (snap.connectionState == ConnectionState.done) ...[
               const SizedBox(height: 10),
-              Text(widget.lat == null ? t('police.waiting') : t('police.none_found'), style: TextStyle(fontSize: 13, color: Flat.muted(context))),
+              Text(widget.lat == null ? widget.i18n.t('police.waiting') : widget.i18n.t('police.none_found'), style: TextStyle(fontSize: 13, color: Flat.muted(context))),
             ],
             if (_error != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(_error!, style: const TextStyle(fontSize: 13, color: Flat.danger))),
           ]),
         );
       },
+    );
+  }
+
+  /// The worldwide card: that country's police, fire and ambulance lines, each
+  /// one tap away. No Nigerian numbers, no command list (v41).
+  Widget _worldCard(BuildContext context, SentriCountry country) {
+    final t = widget.i18n.t;
+    String label(String serviceKey, String n) => t('police.call_service', {'n': n, 'service': t(serviceKey)});
+    return Glass(
+      radius: 22,
+      padding: const EdgeInsets.all(16),
+      tint: Flat.danger,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(shape: BoxShape.circle, color: Flat.danger.withValues(alpha: 0.14)),
+            child: const Icon(Icons.emergency_outlined, size: 19, color: Flat.danger),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Row(children: [
+              Flexible(
+                child: Text(widget.forContact ? t('police.near_them') : t('police.near_you'), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700, letterSpacing: -0.2)),
+              ),
+              const SizedBox(width: 6),
+              Text(country.flag, style: const TextStyle(fontSize: 16)),
+            ]),
+          ),
+        ]),
+        const SizedBox(height: 14),
+        _DialButton(label: label('emergency.police', country.police), big: true, onTap: () => unawaited(_dial(country.police))),
+        const SizedBox(height: 10),
+        _DialButton(label: label('emergency.fire', country.fire), onTap: () => unawaited(_dial(country.fire))),
+        const SizedBox(height: 8),
+        _DialButton(label: label('emergency.ambulance', country.ambulance), onTap: () => unawaited(_dial(country.ambulance))),
+        const SizedBox(height: 12),
+        Text(t('police.world_note', {'name': country.name}), style: TextStyle(fontSize: 12, height: 1.4, color: Flat.muted(context))),
+        if (_error != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(_error!, style: const TextStyle(fontSize: 13, color: Flat.danger))),
+      ]),
     );
   }
 }

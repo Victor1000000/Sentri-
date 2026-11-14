@@ -56,7 +56,7 @@ class InboxList {
 }
 
 class InboxDetail {
-  const InboxDetail({required this.entry, required this.state, this.lat, this.lon, this.geoAt, this.callPhone, required this.canRespond});
+  const InboxDetail({required this.entry, required this.state, this.lat, this.lon, this.geoAt, this.path = const [], this.mode, this.callPhone, required this.canRespond});
   final InboxEntry entry;
 
   /// active | responding | ended
@@ -65,18 +65,40 @@ class InboxDetail {
   final double? lon;
   final DateTime? geoAt;
 
+  /// The breadcrumb trail of a live share, oldest first - [[lat, lon], ...] (v41).
+  /// Empty for alerts and for shares started before this version.
+  final List<List<double>> path;
+
+  /// How the person is travelling, as the name of a TravelMode: 'still' | 'walk' |
+  /// 'run' | 'ride' | 'drive' | 'train' | 'flight'. Null when unknown (v41).
+  final String? mode;
+
   /// Absent for a duress alert on purpose: a call could put the person at risk.
   final String? callPhone;
   final bool canRespond;
 
   factory InboxDetail.fromJson(Map<String, dynamic> j) {
     final g = j['geo'];
+    // A live share can carry its recent trail and the travel mode read off it.
+    final rawPath = g is Map ? g['path'] : null;
+    final pts = <List<double>>[];
+    if (rawPath is List) {
+      for (final p in rawPath) {
+        if (pts.length >= 200) break; // the same cap the sender uses
+        if (p is List && p.length >= 2 && p[0] is num && p[1] is num) {
+          pts.add([(p[0] as num).toDouble(), (p[1] as num).toDouble()]);
+        }
+      }
+    }
+    final rawMode = g is Map && g['mode'] is String ? g['mode'] as String : null;
     return InboxDetail(
       entry: InboxEntry.fromJson(j),
       state: _s(j['state'], 'ended'),
       lat: g is Map && g['lat'] is num ? (g['lat'] as num).toDouble() : null,
       lon: g is Map && g['lon'] is num ? (g['lon'] as num).toDouble() : null,
       geoAt: g is Map ? _ms(g['at']) : null,
+      path: pts,
+      mode: const {'still', 'walk', 'run', 'ride', 'drive', 'train', 'flight'}.contains(rawMode) ? rawMode : null,
       callPhone: j['callPhone'] is String ? j['callPhone'] as String : null,
       canRespond: j['canRespond'] == true,
     );

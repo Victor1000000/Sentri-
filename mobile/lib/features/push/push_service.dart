@@ -286,6 +286,50 @@ Future<void> cancelAlertNotification(String inboxId) {
   return _local.cancel(inboxId.hashCode & 0x7fffffff);
 }
 
+// ---- watches (v41) ----
+// A paired Wear OS watch mirrors the phone's notifications automatically - that
+// is Android, not an app feature. So the Watches screen has no pairing code of
+// its own to get wrong: it explains this, and rings one harmless test ping so
+// the person can watch it arrive on their wrist and know the pipe works.
+
+/// A harmless test notification, sent from the Watches screen. Seeing it
+/// mirror onto the paired watch proves the alert path reaches the wrist.
+const _watchNoteId = 424242;
+
+Future<void> showWatchTestNote(String title, String body) async {
+  try {
+    final android = _local.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+    await android?.createNotificationChannel(
+      const AndroidNotificationDetails(
+        'sentri_watch',
+        'Watches',
+        channelDescription: 'The test ping from the Watches screen, so you can see it arrive on your paired watch.',
+        importance: Importance.defaultImportance,
+        priority: Priority.defaultPriority,
+      ),
+    );
+    final enabled = await android?.areNotificationsEnabled() ?? true;
+    if (enabled == false) return;
+    await _local.show(
+      _watchNoteId,
+      title,
+      body,
+      const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'sentri_watch',
+          'Watches',
+          channelDescription: 'The test ping from the Watches screen, so you can see it arrive on your paired watch.',
+          importance: Importance.defaultImportance,
+          priority: Priority.defaultPriority,
+        ),
+        iOS: DarwinNotificationDetails(interruptionLevel: InterruptionLevel.active),
+      ),
+    );
+  } catch (_) {
+    // A test ping must never break anything.
+  }
+}
+
 // ---- an alert does not ring once and die: it nags until someone deals with it ----
 // Some phone makers strip the system "insistent" flag, so the sound and vibration stop
 // after one round. This app does not trust that: while an emergency alert is live and

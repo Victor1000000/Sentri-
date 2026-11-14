@@ -14,11 +14,19 @@ String _dialable(String l) => '+${l.replaceAll(RegExp(r'[^0-9]'), '')}'.replaceF
 /// Lists every state command with its public lines. Numbers are selectable so they can be copied
 /// — and now they can be dialled right there: one tap on the green call button beside a line,
 /// no copy-paste needed. Shows the command for the user's current state first, when known.
+///
+/// v41, global: the person's own country decides the tab. Nigeria keeps the full NPF
+/// command directory; every other country shows only the emergency lines that actually
+/// answer there - never Nigerian police numbers.
 class PoliceScreen extends StatelessWidget {
-  const PoliceScreen({super.key, required this.directory, required this.i18n, this.currentState});
+  const PoliceScreen({super.key, required this.directory, required this.i18n, this.currentState, this.country});
   final PoliceDirectory? directory;
   final I18n i18n;
   final String? currentState;
+
+  /// The person's own country, resolved by the app shell from the phone number they
+  /// signed up with (v41). Null falls back to the device's region on the phone.
+  final SentriCountry? country;
 
   @override
   Widget build(BuildContext context) {
@@ -28,7 +36,7 @@ class PoliceScreen extends StatelessWidget {
       appBar: AppBar(title: Text(t('tabs.police'))),
       body: dir == null
           ? const Center(child: CircularProgressIndicator())
-          : _ParallaxList(dir: dir, i18n: i18n, state: currentState),
+          : _ParallaxList(dir: dir, i18n: i18n, state: currentState, country: country),
     );
   }
 }
@@ -39,10 +47,13 @@ class PoliceScreen extends StatelessWidget {
 /// state are handed over as widget fields, so nothing nullable is ever captured
 /// inside this object's closures.
 class _ParallaxList extends StatefulWidget {
-  const _ParallaxList({required this.dir, required this.i18n, this.state});
+  const _ParallaxList({required this.dir, required this.i18n, this.state, this.country});
   final PoliceDirectory dir;
   final I18n i18n;
   final String? state;
+
+  /// The person's own country (v41) - overrides the device's region.
+  final SentriCountry? country;
   @override
   State<_ParallaxList> createState() => _ParallaxListState();
 }
@@ -56,10 +67,12 @@ class _ParallaxListState extends State<_ParallaxList> {
     final cs = Theme.of(context).colorScheme;
     final dir = widget.dir;
     final mine = dir.forState(widget.state);
-    // v40, global: the emergency lines that actually answer where this phone is.
-    // The phone's own region (its locale/SIM) picks the country; when nothing is
-    // known the card stays out of the way.
-    final country = countryForLocale(Platform.localeName);
+    // v41, global: the person's own country first - the number they signed up
+    // with decides, not the phone's SIM - falling back to the device's region.
+    // Nigeria is the one country with its own full command directory; for every
+    // other country the emergency-lines card is the whole tab.
+    final country = widget.country ?? countryForLocale(Platform.localeName);
+    final ngLayout = country == null || country.iso == 'ng';
     return NotificationListener<ScrollNotification>(
       onNotification: (n) {
         if (n.metrics.axis == Axis.vertical && n.metrics.pixels != _offset) {
@@ -72,36 +85,41 @@ class _ParallaxListState extends State<_ParallaxList> {
         physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
         children: [
-          // The tab opens on a real officer's face, not on a form: a Nigerian
-          // police banner that slides gently as the page scrolls (parallax).
-          ClipRRect(
-            borderRadius: BorderRadius.circular(24),
-            child: SizedBox(
-              height: 150,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  Transform.translate(
-                    offset: Offset(0, (-_offset * 0.35).clamp(-60.0, 60.0)),
-                    child: Image.memory(photoPoliceBytes, fit: BoxFit.cover, gaplessPlayback: true),
-                  ),
-                  Align(
-                    alignment: Alignment.bottomCenter,
-                    child: Container(
-                      decoration: const BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.bottomCenter,
-                          end: Alignment.topCenter,
-                          colors: [Color(0x66000000), Color(0x00000000)],
+          // The NPF banner and directory are Nigeria's own: shown for Nigeria
+          // (and when the country is simply unknown). Everywhere else the tab
+          // is the world card only (v41).
+          if (ngLayout) ...[
+            // The tab opens on a real officer's face, not on a form: a Nigerian
+            // police banner that slides gently as the page scrolls (parallax).
+            ClipRRect(
+              borderRadius: BorderRadius.circular(24),
+              child: SizedBox(
+                height: 150,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Transform.translate(
+                      offset: Offset(0, (-_offset * 0.35).clamp(-60.0, 60.0)),
+                      child: Image.memory(photoPoliceBytes, fit: BoxFit.cover, gaplessPlayback: true),
+                    ),
+                    Align(
+                      alignment: Alignment.bottomCenter,
+                      child: Container(
+                        decoration: const BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.bottomCenter,
+                            end: Alignment.topCenter,
+                            colors: [Color(0x66000000), Color(0x00000000)],
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
-          const SizedBox(height: 18),
+            const SizedBox(height: 18),
+          ],
           if (mine != null) ...[
             Text(t('police.your_state').toUpperCase(), style: Theme.of(context).textTheme.labelMedium?.copyWith(letterSpacing: 1.1, color: cs.outline)),
             const SizedBox(height: 8),
@@ -144,20 +162,25 @@ class _ParallaxListState extends State<_ParallaxList> {
             ),
             const SizedBox(height: 20),
           ],
-          Text(t('police.note'), style: Theme.of(context).textTheme.bodyMedium),
-          const SizedBox(height: 16),
-          Text(t('police.all').toUpperCase(), style: Theme.of(context).textTheme.labelMedium?.copyWith(letterSpacing: 1.1, color: cs.outline)),
-          const SizedBox(height: 8),
-          Card(
-            child: Column(
-              children: [
-                for (var i = 0; i < dir.commands.length; i++) ...[
-                  if (i > 0) const Divider(height: 1),
-                  _CommandTile(dir.commands[i], widget.i18n),
+          if (ngLayout) ...[
+            Text(t('police.note'), style: Theme.of(context).textTheme.bodyMedium),
+            const SizedBox(height: 16),
+            Text(t('police.all').toUpperCase(), style: Theme.of(context).textTheme.labelMedium?.copyWith(letterSpacing: 1.1, color: cs.outline)),
+            const SizedBox(height: 8),
+            Card(
+              child: Column(
+                children: [
+                  for (var i = 0; i < dir.commands.length; i++) ...[
+                    if (i > 0) const Divider(height: 1),
+                    _CommandTile(dir.commands[i], widget.i18n),
+                  ],
                 ],
-              ],
+              ),
             ),
-          ),
+          ] else ...[
+            const SizedBox(height: 16),
+            Text(t('police.global_note'), style: TextStyle(fontSize: 13, height: 1.45, color: cs.outline)),
+          ],
         ],
       ),
     );

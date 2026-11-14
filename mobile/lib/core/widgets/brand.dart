@@ -121,11 +121,16 @@ class SentriBackground extends StatelessWidget {
 
 /// Logo top-left, round translate button top-right. Tapping it opens the language sheet.
 class SentriTopBar extends StatelessWidget {
-  const SentriTopBar({super.key, required this.i18n, required this.onLanguage, this.onLogoTap, this.compact = false});
+  const SentriTopBar({super.key, required this.i18n, required this.onLanguage, this.onLogoTap, this.compact = false, this.countryIso});
   final bool compact;
   final I18n i18n;
   final Future<void> Function(String code) onLanguage;
   final VoidCallback? onLogoTap;
+
+  /// The person's country (v41): the language sheet then offers the languages
+  /// of that region instead of every language the app ships. Null keeps the
+  /// full list.
+  final String? countryIso;
 
   @override
   Widget build(BuildContext context) {
@@ -161,7 +166,7 @@ class SentriTopBar extends StatelessWidget {
               shape: CircleBorder(side: BorderSide(color: (dark ? Colors.white : Colors.black).withValues(alpha: dark ? 0.25 : 0.12))),
               child: InkWell(
                 customBorder: const CircleBorder(),
-                onTap: () => unawaited(showLanguageSheet(context, i18n, onLanguage)),
+                onTap: () => unawaited(showLanguageSheet(context, i18n, onLanguage, countryIso: countryIso)),
                 // On the quiet disc the icon always takes the ink colour of its mode,
                 // so the language switcher stays easy to find in light and dark.
                 child: SizedBox(width: compact ? 38 : 46, height: compact ? 38 : 46, child: Icon(Icons.translate, color: dark ? Colors.white : Colors.black, size: compact ? 20 : 24)),
@@ -175,7 +180,10 @@ class SentriTopBar extends StatelessWidget {
   }
 }
 
-Future<void> showLanguageSheet(BuildContext context, I18n i18n, Future<void> Function(String) onPick) {
+Future<void> showLanguageSheet(BuildContext context, I18n i18n, Future<void> Function(String) onPick, {String? countryIso}) {
+  // v41: per country. A Nigerian number sees the Nigerian languages; a French
+  // number sees French; everyone keeps their current language on the list.
+  final langs = countryIso == null ? supportedLanguages : languagesForCountry(countryIso, current: i18n.code);
   return showModalBottomSheet<void>(
     context: context,
     showDragHandle: true,
@@ -192,7 +200,7 @@ Future<void> showLanguageSheet(BuildContext context, I18n i18n, Future<void> Fun
           Text(i18n.t('lang.title'), style: Theme.of(ctx).textTheme.titleMedium),
           const SizedBox(height: 12),
 
-          for (final l in supportedLanguages)
+          for (final l in langs)
             Padding(
               padding: const EdgeInsets.only(bottom: 10),
               child: _LangOption(

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import Fastify from 'fastify';
+import { z } from 'zod';
 import { FixedWindowLimiter } from '../src/lib/rate-limit.js';
 import { createPinPair } from '../src/lib/pin.js';
 import { MemoryInbox } from '../src/modules/inbox/memory-inbox.js';
@@ -63,13 +64,15 @@ describe('live location sharing', () => {
   it('the contact follows the latest position while sharing, and nobody else can update it', async () => {
     const r = await rig();
     const s = (await r.svc.start('u1', ['c1'], { lat: 1, lon: 1, at: 1 })) as { id: string };
-    expect(await r.svc.update('u1', s.id, { lat: 6.6, lon: 3.4, at: 2 })).toBe(true);
+    expect(await r.svc.update('u1', s.id, { lat: 6.6, lon: 3.4, path: [{ lat: 6.5, lon: 3.3 }], mode: 'walk', at: 2 })).toBe(true);
     expect(await r.svc.update('uc1', s.id, { lat: 0, lon: 0, at: 3 })).toBe(false);
     const item = (await r.inboxSvc.list('uc1')).items[0]!;
     expect(item.live).toBe(true);
     const d = (await r.inboxSvc.open('uc1', item.id))!;
     expect(d.state).toBe('active');
-    expect(d.geo).toMatchObject({ lat: 6.6, lon: 3.4 });
+    // v41: the breadcrumb trail and travel mode ride inside geo, so the contact's
+    // map can draw the path the person took.
+    expect(d.geo).toMatchObject({ lat: 6.6, lon: 3.4, path: [{ lat: 6.5, lon: 3.3 }], mode: 'walk' });
     expect(d.canRespond).toBe(false);
     expect(await r.inboxSvc.respond('uc1', item.id)).toBe('not_allowed');
   });
@@ -160,6 +163,14 @@ describe('live location sharing', () => {
   it('the history route returns each past share once', async () => {
     const r = await rig();
     const a = Fastify();
+    // The production app maps a schema refusal to 400 (app.ts setErrorHandler); the
+    // bare rig needs the same mapping now that the share geo schema refuses junk (v41).
+    a.setErrorHandler((err, _req, reply) => {
+      if (err instanceof z.ZodError) return reply.code(400).send({ error: 'bad_request' });
+      const e = err as { statusCode?: number };
+      if (e.statusCode && e.statusCode < 500) return reply.code(e.statusCode).send({ error: 'bad_request' });
+      return reply.code(500).send({ error: 'internal' });
+    });
     registerShareRoutes(a, {
       service: r.svc,
       authenticate: async (req) => (req.headers['x-user'] as string | undefined) ?? null,
@@ -191,6 +202,14 @@ describe('share routes', () => {
   async function app() {
     const r = await rig();
     const a = Fastify();
+    // The production app maps a schema refusal to 400 (app.ts setErrorHandler); the
+    // bare rig needs the same mapping now that the share geo schema refuses junk (v41).
+    a.setErrorHandler((err, _req, reply) => {
+      if (err instanceof z.ZodError) return reply.code(400).send({ error: 'bad_request' });
+      const e = err as { statusCode?: number };
+      if (e.statusCode && e.statusCode < 500) return reply.code(e.statusCode).send({ error: 'bad_request' });
+      return reply.code(500).send({ error: 'internal' });
+    });
     registerShareRoutes(a, {
       service: r.svc,
       authenticate: async (req) => (req.headers['x-user'] as string | undefined) ?? null,
@@ -213,6 +232,9 @@ describe('share routes', () => {
     expect(st.statusCode).toBe(201);
     const { id } = st.json();
     expect((await a.inject({ method: 'PUT', url: `/v1/shares/${id}/location`, headers: h, payload: { lat: 6.6, lon: 3.4 } })).statusCode).toBe(204);
+    // v41: the trail and travel mode are accepted extras; junk is refused.
+    expect((await a.inject({ method: 'PUT', url: `/v1/shares/${id}/location`, headers: h, payload: { lat: 6.6, lon: 3.4, path: [{ lat: 6.5, lon: 3.3 }], mode: 'train' } })).statusCode).toBe(204);
+    expect((await a.inject({ method: 'PUT', url: `/v1/shares/${id}/location`, headers: h, payload: { lat: 6.6, lon: 3.4, mode: 'hovercraft' } })).statusCode).toBe(400);
     expect((await a.inject({ method: 'GET', url: '/v1/shares', headers: h })).json().shares).toHaveLength(1);
     expect((await a.inject({ method: 'DELETE', url: `/v1/shares/${id}`, headers: h })).statusCode).toBe(204);
     expect((await a.inject({ method: 'DELETE', url: `/v1/shares/${id}`, headers: h })).statusCode).toBe(404);

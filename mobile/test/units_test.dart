@@ -186,6 +186,86 @@ void main() {
     });
   });
 
+  group('travel mode (v41)', () {
+    test('classifySpeed puts the bands where a phone can honestly tell them apart', () {
+      expect(classifySpeed(0), TravelMode.still);
+      expect(classifySpeed(0.4), TravelMode.still);
+      expect(classifySpeed(1.2), TravelMode.walk);
+      expect(classifySpeed(2.5), TravelMode.walk);
+      expect(classifySpeed(4), TravelMode.run);
+      expect(classifySpeed(8), TravelMode.ride);
+      expect(classifySpeed(25), TravelMode.drive); // 90 km/h
+      expect(classifySpeed(60), TravelMode.train);
+      expect(classifySpeed(200), TravelMode.flight); // only airspeed reads as flight
+    });
+
+    test('metresBetween is a haversine over known ground', () {
+      // Lagos island to the mainland, roughly 6.45N 3.40E -> 6.50N 3.40E: about 6.1 km.
+      final d = metresBetween(6.45, 3.40, 6.50, 3.40);
+      expect(d, greaterThan(5400));
+      expect(d, lessThan(6600));
+      // A degree of latitude is close enough to 111 km anywhere.
+      expect(metresBetween(0, 0, 1, 0), closeTo(111_195, 300));
+      // Zero distance for the same point, whatever the order.
+      expect(metresBetween(6.5, 3.4, 6.5, 3.4), 0);
+      expect(metresBetween(6.5, 3.4, 6.45, 3.40), d);
+    });
+
+    GeoFix fix(double lat, double lon, double acc, DateTime at) => GeoFix(lat: lat, lon: lon, accuracyM: acc, at: at);
+
+    test('speedBetween divides distance by time and refuses junk', () {
+      final a = fix(6.45, 3.40, 10, DateTime.utc(2026, 10, 13, 12, 0, 0));
+      final b = fix(6.451, 3.40, 10, DateTime.utc(2026, 10, 13, 12, 0, 15));
+      // ~111 m over 15 s is ~7.4 m/s: a runner / easy cyclist.
+      final v = speedBetween(a, b)!;
+      expect(v, greaterThan(6));
+      expect(v, lessThan(9));
+      // Too rough to trust: either fix coarse -> no speed.
+      expect(speedBetween(fix(6.45, 3.40, 80, a.at), b), isNull);
+      expect(speedBetween(a, fix(6.45, 3.40, 80, b.at)), isNull);
+      // No honest time gap -> no speed.
+      expect(speedBetween(a, fix(6.451, 3.40, 10, a.at)), isNull);
+      // Time running backwards -> no speed.
+      expect(speedBetween(b, a), isNull);
+    });
+
+    test('the watcher needs three agreeing readings before it flips', () {
+      final w = TravelWatcher();
+      expect(w.mode, TravelMode.still);
+      w.feed(1.5); // walk
+      expect(w.mode, TravelMode.still); // one reading changes nothing
+      w.feed(1.6);
+      expect(w.mode, TravelMode.still); // two readings change nothing
+      w.feed(1.4);
+      expect(w.mode, TravelMode.walk); // three agreeing readings flip it
+      // One noisy fix must not flip the chip back.
+      w.feed(30);
+      expect(w.mode, TravelMode.walk);
+      w.feed(28);
+      expect(w.mode, TravelMode.walk);
+      w.feed(29);
+      expect(w.mode, TravelMode.drive);
+      // Sliding window: a stray third sample does not stick.
+      w.reset();
+      w.feed(1.5);
+      w.feed(1.5);
+      w.feed(30); // pushes walk out of the window
+      w.feed(1.5);
+      w.feed(1.5);
+      w.feed(1.5);
+      expect(w.mode, TravelMode.walk);
+    });
+
+    test('travelModeFromName round-trips the wire names and refuses junk', () {
+      for (final m in TravelMode.values) {
+        expect(travelModeFromName(m.name), m);
+      }
+      expect(travelModeFromName(null), isNull);
+      expect(travelModeFromName('hovercraft'), isNull);
+      expect(travelModeFromName(''), isNull);
+    });
+  });
+
   group('translations', () {
     Future<I18n> load(String code) async {
       final i = I18n(loader: (p) => File(p).readAsString());

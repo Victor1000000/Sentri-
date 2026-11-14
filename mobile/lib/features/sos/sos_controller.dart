@@ -65,6 +65,10 @@ bool _no() => false;
 ///
 ///   idle -> countdown (5 s, PIN pad) -> active -> acknowledged
 ///
+/// Tracking (position fixes sent to the server) runs through BOTH the active and the
+/// acknowledged phase since v41: when a contact responds, the alert screen changes but
+/// the person's path keeps updating until the alert is cancelled or they tap "I'm safe".
+///
 /// The alert is started on the server immediately (the server runs the same 5 s window), so if the
 /// phone is taken or dies a moment later, the alert still goes out. If the server can't be reached,
 /// the alert is kept on the phone and retried every few seconds (and at once when a connection
@@ -204,6 +208,11 @@ class SosController extends ChangeNotifier {
 
   // ---- tracking ----
 
+  /// Tracking runs while the alert is live AND while it is acknowledged: since v41 the
+  /// position keeps flowing after a contact responds, so they can follow the person
+  /// until the alert is cancelled or the person taps "I'm safe". Only idle stops it.
+  bool get _tracking => _s == SosPhase.active || _s == SosPhase.acknowledged;
+
   Future<int> _batteryLevel() async {
     try {
       return await battery.level();
@@ -214,15 +223,15 @@ class SosController extends ChangeNotifier {
 
   Future<void> _scheduleTrack(int epoch) async {
     final level = await _batteryLevel();
-    if (epoch != _epoch || _s != SosPhase.active) return;
+    if (epoch != _epoch || !_tracking) return;
     final plan = locationPlan(batteryPct: level, dataSaver: dataSaver());
     _trackTimer = timers.once(plan.interval, () => unawaited(_trackTick(epoch, plan)));
   }
 
   Future<void> _trackTick(int epoch, LocationPlan plan) async {
-    if (epoch != _epoch || _s != SosPhase.active) return;
+    if (epoch != _epoch || !_tracking) return;
     final fix = await location.fix(highAccuracy: plan.highAccuracy, timeout: config.fixTimeout);
-    if (epoch != _epoch || _s != SosPhase.active) return;
+    if (epoch != _epoch || !_tracking) return;
     if (fix != null) _lastGeo = fix;
 
     final id = _sosIds[epoch];
@@ -237,8 +246,10 @@ class SosController extends ChangeNotifier {
           notifyListeners();
         }
         if (state == 'acknowledged') {
+          // The screen moves to "a contact is with you" - but the tracker keeps
+          // going (v41): the tick below reschedules as normal, and the position
+          // keeps updating until dismiss() or a cancel PIN resets everything.
           _onAcknowledged();
-          return;
         }
       } on ApiUnreachable {
         if (epoch != _epoch) return;
@@ -263,7 +274,7 @@ class SosController extends ChangeNotifier {
   }
 
   void _onAcknowledged() {
-    _cancelTimers();
+    if (_s == SosPhase.acknowledged) return; // the tick runs on: no churn per update
     _waiting = false;
     _s = SosPhase.acknowledged;
     notifyListeners();
@@ -286,7 +297,7 @@ class SosController extends ChangeNotifier {
       _startRetryTimer?.cancel();
       _startFuture = _tryStart(epoch);
     }
-    if (_s == SosPhase.active) {
+    if (_s == SosPhase.active || _s == SosPhase.acknowledged) {
       _trackTimer?.cancel();
       unawaited(_trackTick(epoch, locationPlan(batteryPct: 50, dataSaver: dataSaver())));
     }

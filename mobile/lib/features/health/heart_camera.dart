@@ -10,7 +10,7 @@ import 'heart_signal.dart';
 /// changes how much light reflects back - the camera turns that into a brightness wiggle,
 /// and the maths turns the wiggle into beats per minute.
 ///
-/// Deliberately patient and honest: it records about fifteen seconds, and returns null
+/// Deliberately patient and honest: it records about twenty seconds, and returns null
 /// (not a guess) whenever the wiggle is too weak or too messy to trust.
 ///
 /// v36 accuracy work: the camera's exposure and focus are LOCKED so an auto-exposure
@@ -21,7 +21,7 @@ import 'heart_signal.dart';
 /// And the answer must agree with itself: the take is scored in two halves, and a
 /// reading whose halves disagree is refused, not averaged.
 class HeartCamera {
-  static const secondsTarget = 15;
+  static const secondsTarget = 20;
 
   /// true after a run that never had a working camera or was not given permission -
   /// different advice on the screen than "the reading was not strong enough".
@@ -148,19 +148,24 @@ class HeartCamera {
     // A gentler wiggle floor than the maths default: on dark themes and dim screens the
     // pulse is fainter in camera counts, and demanding more here read "no pulse" on
     // healthy fingers. The agreement checks still rule out junk.
-    final bpm = bpmFromSamples(ys, fps, minWiggle: 0.4);
-    if (bpm == null) return null;
-    // The take must agree with ITSELF: score the first half and the second half
+    var bpm = bpmFromSamples(ys, fps, minWiggle: 0.4);
+    // The take should agree with ITSELF: score the first half and the second half
     // separately. Two halves that found different hearts mean the window carries
-    // motion or light artefacts, not a pulse - refuse rather than average.
+    // motion or light artefacts, not a pulse.
     //
-    // v40: the tolerance scales with how long each half actually ran. With the
-    // 15-second take each half is only about six seconds, and two honest estimates
-    // of ONE steady heart can sit a resolution bin apart there (~10 bpm is 15% at
-    // 70 bpm) - the fixed 15% bar read healthy short takes as self-contradicting
+    // v40: the tolerance scales with how long each half actually ran. With a
+    // twenty-second take each half is only about eight or nine seconds, and two honest
+    // estimates of ONE steady heart can sit a resolution bin apart there (~10 bpm is
+    // 15% at 70 bpm) - the fixed 15% bar read healthy short takes as self-contradicting
     // and refused them, which is why the 15 s countdown broke what 30 s fixed.
     // Halves of nine seconds or more keep the tight 15% bar; shorter halves get
     // the wider 30% one. The full-window read stays the primary answer either way.
+    //
+    // v41: when the halves still disagree, refuse to give up. The SECOND half is the
+    // most settled stretch of the take - the finger has been pressed longest there and
+    // the exposure lock has long since bedded in - so if the newest half on its own
+    // carries a confident pulse, that reading is accepted instead of throwing the whole
+    // measurement away. Only a second half with nothing trustworthy in it refuses.
     final half = samples.length ~/ 2;
     if (half >= 60) {
       final ya = detrend(smoothMedian3(samples.sublist(0, half)), (fps * 1.5).round().clamp(3, half));
@@ -170,9 +175,16 @@ class HeartCamera {
       if (a != null && b != null) {
         final rel = (a - b).abs() / ((a + b) / 2);
         final tol = (half / fps) >= 9.0 ? 0.15 : 0.30;
-        if (rel > tol) return null; // the finger moved, or the light lied: no number
+        if (rel > tol) {
+          // The halves disagree: fall back to the newest half alone (the most
+          // settled stretch), and accept its confident reading. The primary full
+          // window stays the answer whenever the halves do agree.
+          final newest = bpmFromSamples(yb, fps, minWiggle: 0.4);
+          if (bpm == null || newest != null) bpm = newest;
+        }
       }
     }
+    if (bpm == null) return null;
     return bpm.round().clamp(30, 220);
   }
 

@@ -24,7 +24,8 @@ export interface InboxEntry {
 
 export interface InboxDetail extends InboxEntry {
   state: 'active' | 'responding' | 'ended';
-  geo: { lat: number; lon: number; at: number } | null;
+  /** v41: a live share also carries its breadcrumb trail and travel mode inside geo. */
+  geo: { lat: number; lon: number; at: number; path?: { lat: number; lon: number }[]; mode?: string } | null;
   /** Not offered for a duress alert: the person may be under watch, and a call could put them at risk. */
   callPhone: string | null;
   canRespond: boolean;
@@ -145,14 +146,14 @@ export class InboxService {
     if (!i) return null;
     await this.inbox.markRead(userId, id, this.o.clock());
     const state = await this.live(i);
-    let geo = i.geo ?? null;
+    let geo: { lat: number; lon: number; at: number; path?: { lat: number; lon: number }[]; mode?: string } | null = i.geo ?? null;
     if (i.sosId && state !== 'ended') {
       const v = await this.engine.alertView(i.sosId);
       if (v !== 'invalid' && v !== 'ended' && v.geo) geo = v.geo;
     }
     if (i.kind === 'share_start' && i.shareId && state !== 'ended' && this.o.shares) {
       const g = (await this.o.shares.get(i.shareId))?.lastGeo;
-      if (g) geo = { lat: g.lat, lon: g.lon, at: g.at };
+      if (g) geo = { lat: g.lat, lon: g.lon, at: g.at, path: g.path, mode: g.mode };
     }
     const callPhone = i.kind === 'share_stop' ? null : i.kind === 'duress' ? null : await this.inbox.phoneOf(i.fromUserId);
     return {

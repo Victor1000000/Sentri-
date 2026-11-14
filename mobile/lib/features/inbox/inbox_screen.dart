@@ -70,8 +70,24 @@ String _ago(DateTime d, String Function(String, [Map<String, String>]) t) {
       ),
     };
 
+/// The four tabs of the message section, the way the reference apps do it:
+/// everything in one feed, only the urgent things, the honest "no offers"
+/// card, and everyday safety tips.
+enum _InboxTab { all, alerts, offers, tips }
+
+/// The icon that matches a travel mode name (v41).
+IconData _travelIcon(String mode) => switch (mode) {
+      'walk' => Icons.directions_walk,
+      'run' => Icons.directions_run,
+      'ride' => Icons.pedal_bike,
+      'drive' => Icons.directions_car,
+      'train' => Icons.train,
+      'flight' => Icons.flight,
+      _ => Icons.my_location,
+    };
+
 /// Everything people sent you inside Sentri. Alerts only ever arrive here and as a push: never as a text.
-class InboxScreen extends StatelessWidget {
+class InboxScreen extends StatefulWidget {
   const InboxScreen({super.key, required this.inbox, required this.api, required this.i18n, required this.police, this.settings});
   final Future<PoliceDirectory> police;
   final InboxController inbox;
@@ -83,57 +99,204 @@ class InboxScreen extends StatelessWidget {
   final AppSettings? settings;
 
   @override
+  State<InboxScreen> createState() => _InboxScreenState();
+}
+
+class _InboxScreenState extends State<InboxScreen> {
+  _InboxTab _tab = _InboxTab.all;
+
+  @override
   Widget build(BuildContext context) {
-    final t = i18n.t;
+    final t = widget.i18n.t;
     return ListenableBuilder(
-      listenable: inbox,
+      listenable: widget.inbox,
       builder: (context, _) {
+        final inbox = widget.inbox;
         final d = inbox.data;
         return FlatPage(
           title: t('inbox.title'),
           onRefresh: inbox.refresh,
           children: [
-            if (d.invites.isNotEmpty) ...[
-              FlatGroup(header: t('inbox.invites'), children: [
-                for (final i in d.invites)
-                  Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(t('inbox.invite_text', {'n': i.fromName ?? t('inbox.someone')}), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
-                      const SizedBox(height: 12),
-                      Row(children: [
-                        Expanded(child: FlatButton(label: t('inbox.decline'), quiet: true, danger: true, onPressed: () => unawaited(inbox.decide(i, accept: false)))),
-                        const SizedBox(width: 10),
-                        Expanded(child: FlatButton(label: t('inbox.accept'), onPressed: () => unawaited(inbox.decide(i, accept: true)))),
-                      ]),
-                    ]),
-                  ),
-              ]),
-              const SizedBox(height: 22),
-            ],
-            if (d.items.isEmpty && !inbox.loading)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 40),
-                // The empty mailbox wears the 3D bell, so even "nothing yet"
-                // carries the app's character.
-                child: Column(children: [
-                  Image.memory(f3dbellBytes, width: 84, height: 84, filterQuality: FilterQuality.high),
-                  const SizedBox(height: 12),
-                  Text(inbox.failed ? (inbox.failedAuth ? t('inbox.need_signin') : t('inbox.failed')) : t('inbox.none'), textAlign: TextAlign.center, style: TextStyle(fontSize: 15, color: Flat.muted(context))),
-                ]),
-              )
-            else
-              // One rounded card per message, like the activity-feed reference:
-              // roomy discs, a time chip, a live chip - sleek, not a flat list.
-              Column(children: [for (final e in d.items) _tile(context, e)]),
+            _segmented(context, d),
+            const SizedBox(height: 14),
+            switch (_tab) {
+              _InboxTab.all => _allPage(context, d),
+              _InboxTab.alerts => _alertsPage(context, d),
+              _InboxTab.offers => _offersPage(context),
+              _InboxTab.tips => _tipsPage(context),
+            },
             const SizedBox(height: 22),
             Text(t('inbox.scam_note'), style: TextStyle(fontSize: 13, height: 1.45, color: Flat.muted(context))),
             const SizedBox(height: 18),
-            _TestAlertButton(api: api, i18n: i18n),
+            _TestAlertButton(api: widget.api, i18n: widget.i18n),
           ],
         );
       },
     );
+  }
+
+  /// True for everything the Alerts tab shows: the urgent kinds plus the
+  /// low-battery and health notes worth catching early.
+  static bool _isAlert(InboxEntry e) => e.urgent || e.kind == 'health_alert' || e.kind == 'low_battery';
+
+  /// The segmented pill bar: All / Alerts / Offers / Tips, with a small badge
+  /// on Alerts when urgent things are waiting. Tappable in one place each -
+  /// the reference apps' messaging tab, in Sentri's own colours.
+  Widget _segmented(BuildContext context, InboxList d) {
+    final t = widget.i18n.t;
+    final alertsCount = [for (final e in d.items) if (_isAlert(e)) e].length;
+    Widget seg(_InboxTab tab, String label, {int? badge}) {
+      final sel = _tab == tab;
+      return Expanded(
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => setState(() => _tab = tab),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            margin: const EdgeInsets.all(3),
+            padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 4),
+            decoration: BoxDecoration(
+              color: sel ? Brand.indigo : Colors.transparent,
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: sel ? Colors.white : Flat.muted(context)),
+                ),
+              ),
+              if (badge != null && badge > 0) ...[
+                const SizedBox(width: 5),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                  decoration: BoxDecoration(shape: BoxShape.circle, color: sel ? Colors.white.withValues(alpha: 0.25) : Flat.danger.withValues(alpha: 0.15)),
+                  child: Text(
+                    '$badge',
+                    style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: sel ? Colors.white : Flat.danger),
+                  ),
+                ),
+              ],
+            ]),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(color: Flat.hairline(context), borderRadius: BorderRadius.circular(999)),
+      child: Row(children: [
+        seg(_InboxTab.all, t('inbox.tab_all')),
+        seg(_InboxTab.alerts, t('inbox.tab_alerts'), badge: alertsCount),
+        seg(_InboxTab.offers, t('inbox.tab_offers')),
+        seg(_InboxTab.tips, t('inbox.tab_tips')),
+      ]),
+    );
+  }
+
+  /// The empty mailbox wears the 3D mailbox, so even "nothing yet" carries
+  /// the app's character.
+  Widget _empty(BuildContext context, String text) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 40),
+        child: Column(children: [
+          Image.memory(f3dmailboxBytes, width: 96, height: 96, filterQuality: FilterQuality.high),
+          const SizedBox(height: 12),
+          Text(text, textAlign: TextAlign.center, style: TextStyle(fontSize: 15, color: Flat.muted(context))),
+        ]),
+      );
+
+  Widget _allPage(BuildContext context, InboxList d) {
+    final inbox = widget.inbox;
+    final t = widget.i18n.t;
+    return Column(children: [
+      if (d.invites.isNotEmpty) ...[
+        FlatGroup(header: t('inbox.invites'), children: [
+          for (final i in d.invites)
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(t('inbox.invite_text', {'n': i.fromName ?? t('inbox.someone')}), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
+                const SizedBox(height: 12),
+                Row(children: [
+                  Expanded(child: FlatButton(label: t('inbox.decline'), quiet: true, danger: true, onPressed: () => unawaited(inbox.decide(i, accept: false)))),
+                  const SizedBox(width: 10),
+                  Expanded(child: FlatButton(label: t('inbox.accept'), onPressed: () => unawaited(inbox.decide(i, accept: true)))),
+                ]),
+              ]),
+            ),
+        ]),
+        const SizedBox(height: 22),
+      ],
+      if (d.items.isEmpty && !inbox.loading)
+        _empty(context, inbox.failed ? (inbox.failedAuth ? t('inbox.need_signin') : t('inbox.failed')) : t('inbox.none'))
+      else
+        // One rounded card per message, like the activity-feed reference:
+        // roomy discs, a time chip, a live chip - sleek, not a flat list.
+        Column(children: [for (final e in d.items) _tile(context, e)]),
+    ]);
+  }
+
+  Widget _alertsPage(BuildContext context, InboxList d) {
+    final alerts = [for (final e in d.items) if (_isAlert(e)) e];
+    if (alerts.isEmpty) return _empty(context, widget.i18n.t('inbox.none_alerts'));
+    return Column(children: [for (final e in alerts) _tile(context, e)]);
+  }
+
+  /// The Offers tab is honest, the way the reference apps never are: no fake
+  /// deals, no ads to sell your attention. One card that says so, and points
+  /// the person at the one thing worth doing - inviting their people.
+  Widget _offersPage(BuildContext context) {
+    final t = widget.i18n.t;
+    return Column(children: [
+      Card(
+        child: Padding(
+          padding: const EdgeInsets.all(18),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Image.memory(f3dmailboxBytes, width: 46, height: 46, filterQuality: FilterQuality.high),
+              const SizedBox(width: 12),
+              Expanded(child: Text(t('offers.title'), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700))),
+            ]),
+            const SizedBox(height: 12),
+            Text(t('offers.body'), style: TextStyle(fontSize: 14.5, height: 1.5, color: Flat.muted(context))),
+            const SizedBox(height: 12),
+            Text(t('offers.cta'), style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600, color: Brand.indigoHi)),
+          ]),
+        ),
+      ),
+    ]);
+  }
+
+  /// Everyday safety tips - short, concrete, and readable in one glance.
+  Widget _tipsPage(BuildContext context) {
+    final t = widget.i18n.t;
+    final icons = [Icons.shield_outlined, Icons.lock_outline, Icons.phone_in_talk_outlined, Icons.directions_walk, Icons.battery_charging_full];
+    const keys = ['tips.tip1', 'tips.tip2', 'tips.tip3', 'tips.tip4', 'tips.tip5'];
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(t('tips.title'), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+      const SizedBox(height: 10),
+      for (var i = 0; i < keys.length; i++) ...[
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(shape: BoxShape.circle, color: Brand.indigo.withValues(alpha: 0.10)),
+                child: Icon(icons[i], size: 18, color: Brand.indigo),
+              ),
+              const SizedBox(width: 12),
+              Expanded(child: Text(t(keys[i]), style: TextStyle(fontSize: 14.5, height: 1.45))),
+            ]),
+          ),
+        ),
+        const SizedBox(height: 8),
+      ],
+    ]);
   }
 
   Widget _tile(BuildContext context, InboxEntry e) {
@@ -148,8 +311,8 @@ class InboxScreen extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(20),
           onTap: () async {
-            await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => AlertDetailScreen(entry: e, api: api, i18n: i18n, police: police, settings: settings)));
-            unawaited(inbox.refresh());
+            await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => AlertDetailScreen(entry: e, api: widget.api, i18n: widget.i18n, police: widget.police, settings: widget.settings)));
+            unawaited(widget.inbox.refresh());
           },
           child: Padding(
             padding: const EdgeInsets.all(14),
@@ -189,7 +352,7 @@ class InboxScreen extends StatelessWidget {
                         child: Row(mainAxisSize: MainAxisSize.min, children: [
                           const LiveDot(size: 7),
                           const SizedBox(width: 5),
-                          Text(i18n.t('inbox.live'), style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Flat.live)),
+                          Text(widget.i18n.t('inbox.live'), style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Flat.live)),
                         ]),
                       ),
                       const SizedBox(width: 6),
@@ -200,7 +363,7 @@ class InboxScreen extends StatelessWidget {
                       child: Row(mainAxisSize: MainAxisSize.min, children: [
                         Icon(Icons.schedule, size: 12, color: Flat.muted(context)),
                         const SizedBox(width: 4),
-                        Text(_ago(e.at, i18n.t), style: TextStyle(fontSize: 11.5, color: Flat.muted(context), fontFeatures: const [FontFeature.tabularFigures()])),
+                        Text(_ago(e.at, widget.i18n.t), style: TextStyle(fontSize: 11.5, color: Flat.muted(context), fontFeatures: const [FontFeature.tabularFigures()])),
                       ]),
                     ),
                   ]),
@@ -261,6 +424,8 @@ class _TestAlertButtonState extends State<_TestAlertButton> {
 }
 
 /// One message. For a live alert or share it shows the map and refreshes the position.
+/// v41: a live share also draws its breadcrumb trail on the map and says how the
+/// person is travelling.
 class AlertDetailScreen extends StatefulWidget {
   const AlertDetailScreen({super.key, required this.entry, required this.api, required this.i18n, required this.police, this.settings});
   final Future<PoliceDirectory> police;
@@ -355,12 +520,37 @@ class _AlertDetailScreenState extends State<AlertDetailScreen> {
                 options: MapOptions(initialCenter: LatLng(d.lat!, d.lon!), initialZoom: 16, interactionOptions: const InteractionOptions(flags: InteractiveFlag.pinchZoom | InteractiveFlag.drag)),
                 children: [
                   for (final url in sentriBaseLayers(widget.settings?.mapType ?? 'hybrid').urls) TileLayer(urlTemplate: url, userAgentPackageName: 'ng.sentri.sentri'),
+                  // The breadcrumb trail of a live share: the path the person
+                  // took, drawn under their current dot (v41).
+                  if (d.path.length >= 2)
+                    PolylineLayer(
+                      polylines: [
+                        Polyline(
+                          points: [for (final p in d.path) LatLng(p[0], p[1])],
+                          strokeWidth: 4,
+                          color: urgent ? Flat.danger.withValues(alpha: 0.55) : Brand.indigo.withValues(alpha: 0.55),
+                        ),
+                      ],
+                    ),
                   MarkerLayer(markers: [Marker(point: LatLng(d.lat!, d.lon!), width: 28, height: 28, child: Container(decoration: BoxDecoration(shape: BoxShape.circle, color: urgent ? Flat.danger : Brand.indigo, border: Border.all(color: Colors.white, width: 3))))]),
                 ],
               ),
             ),
           ),
-          if (d.geoAt != null) Padding(padding: const EdgeInsets.only(top: 8, left: 4), child: Text(t('inbox.updated', {'t': clockTime(d.geoAt!)}), style: TextStyle(fontSize: 13, color: Flat.muted(context)))),
+          Padding(
+            padding: const EdgeInsets.only(top: 8, left: 4),
+            child: Row(children: [
+              if (d.geoAt != null)
+                Expanded(
+                  child: Text(t('inbox.updated', {'t': clockTime(d.geoAt!)}), style: TextStyle(fontSize: 13, color: Flat.muted(context), fontFeatures: const [FontFeature.tabularFigures()])),
+                ),
+              if (d.mode != null) ...[
+                Icon(_travelIcon(d.mode!), size: 14, color: Flat.muted(context)),
+                const SizedBox(width: 5),
+                Text(t('map.travel_${d.mode}'), style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Flat.muted(context))),
+              ],
+            ]),
+          ),
         ],
         if (d != null && urgent) ...[
           const SizedBox(height: 16),

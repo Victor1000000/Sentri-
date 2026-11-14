@@ -17,6 +17,7 @@ import '../location/location.dart';
 import '../location/place_lookup.dart';
 import '../police/nearest_police.dart';
 import '../police/police_directory.dart';
+import '../share/share_controller.dart';
 import 'nearby_places.dart';
 import 'step_voice.dart';
 
@@ -89,11 +90,16 @@ const _cartoNightUrl = 'https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png?k
 /// long-press the map to drop a point. Nearby named places are written on the map, the way
 /// Google Maps and Organic Maps show them.
 class MapScreen extends StatefulWidget {
-  const MapScreen({super.key, required this.location, required this.api, required this.i18n, this.placeLookup, this.onPlace, this.refresh = const Duration(seconds: 6), this.police, this.settings});
+  const MapScreen({super.key, required this.location, required this.api, required this.i18n, this.placeLookup, this.onPlace, this.refresh = const Duration(seconds: 6), this.police, this.settings, this.share});
   final LocationSource location;
   final SentriApi api;
   final I18n i18n;
   final AppSettings? settings;
+
+  /// The live location sharing, when the app shell has it: while a share runs,
+  /// the map draws its breadcrumb trail and says how the person is travelling
+  /// (v41). Null in tests.
+  final ShareController? share;
 
   /// The police commands, parsed once by the app shell. With no points picked, directions aim
   /// at the closest command's post. Null: the button then stays disabled.
@@ -238,7 +244,15 @@ class MapScreenState extends State<MapScreen> {
     unawaited(_update());
     _timer = Timer.periodic(widget.refresh, (_) => unawaited(_update()));
     _startRefinement();
+    // While a location share runs, every new breadcrumb repaints the trail.
+    _shareListener = widget.share == null ? null : () {
+      if (mounted) setState(() {});
+    };
+    if (_shareListener != null) widget.share!.addListener(_shareListener!);
   }
+
+  /// Kept so dispose can detach it again.
+  void Function()? _shareListener;
 
   /// The map's ring is only as honest as its newest reading. A live stream of
   /// fresh positions keeps tightening the dot and the ring within seconds of
@@ -263,6 +277,7 @@ class MapScreenState extends State<MapScreen> {
 
   @override
   void dispose() {
+    if (_shareListener != null) widget.share?.removeListener(_shareListener!);
     _timer?.cancel();
     _chatTimer?.cancel();
     unawaited(_posSub?.cancel());
@@ -1125,6 +1140,17 @@ class MapScreenState extends State<MapScreen> {
     return t('map.accuracy', {'m': '${m.round()}'});
   }
 
+  /// The icon that matches a travel mode (v41).
+  IconData _travelIcon(TravelMode m) => switch (m) {
+        TravelMode.walk => Icons.directions_walk,
+        TravelMode.run => Icons.directions_run,
+        TravelMode.ride => Icons.pedal_bike,
+        TravelMode.drive => Icons.directions_car,
+        TravelMode.train => Icons.train,
+        TravelMode.flight => Icons.flight,
+        TravelMode.still => Icons.my_location,
+      };
+
   Color _accuracyColor(BuildContext context, GeoFix? f) {
     final m = f?.accuracyM;
     final cs = Theme.of(context).colorScheme;
@@ -1143,6 +1169,11 @@ class MapScreenState extends State<MapScreen> {
     final here = f == null ? const LatLng(9.0820, 7.4730) : LatLng(f.lat, f.lon);
     final p = _place;
     final topPad = MediaQuery.paddingOf(context).top;
+    // A running location share draws its breadcrumb trail on this map too,
+    // the way the contacts' map does (v41).
+    final share = widget.share;
+    final trail = share != null && share.active != null ? share.liveTrail : const <List<double>>[];
+    final travel = share != null && share.active != null ? share.travelMode : null;
     return Scaffold(
       body: Stack(
         children: [
@@ -1160,6 +1191,16 @@ class MapScreenState extends State<MapScreen> {
                 if (f != null)
                   CircleLayer(circles: [
                     CircleMarker(point: here, radius: (f.accuracyM ?? 20), useRadiusInMeter: true, color: cs.primary.withValues(alpha: 0.15), borderColor: cs.primary.withValues(alpha: 0.4), borderStrokeWidth: 1),
+                  ]),
+                // The share's own path so far: the person sees exactly which
+                // way they have come, not just their dot (v41).
+                if (trail.length >= 2)
+                  PolylineLayer(polylines: [
+                    Polyline(
+                      points: [for (final q in trail) LatLng(q[0], q[1])],
+                      strokeWidth: 4,
+                      color: const Color(0xFF6A5FF0).withValues(alpha: 0.55),
+                    ),
                   ]),
                 // Nearby places written on the map, the way Google Maps and Organic Maps draw
                 // them: a small icon with the place's name right beside it.
@@ -1287,6 +1328,24 @@ class MapScreenState extends State<MapScreen> {
                   ),
                 ),
               ),
+              // How the person is travelling, while their share runs (v41).
+              if (travel != null) ...[
+                const SizedBox(height: 8),
+                Material(
+                  color: dark ? const Color(0xFF1B1D23) : Colors.white,
+                  borderRadius: BorderRadius.circular(30),
+                  elevation: 3,
+                  shadowColor: Colors.black26,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(_travelIcon(travel), size: 15, color: cs.primary),
+                      const SizedBox(width: 6),
+                      Text(t('map.travel_${travel.name}'), style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+                    ]),
+                  ),
+                ),
+              ],
               // The hint while a start/destination pick is waiting for a long-press.
               if (_pickMode != null) ...[
                 const SizedBox(height: 8),

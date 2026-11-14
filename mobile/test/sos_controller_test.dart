@@ -104,7 +104,7 @@ void main() {
       expect(saver.api.locations, hasLength(1)); // every 20 s
     });
 
-    test('a contact responding stops the alert and the phone shows it', () async {
+    test('a contact responding keeps the position flowing until "I\'m safe" (v41)', () async {
       final r = await Rig.create();
       await r.sos.trigger('shake');
       await r.timers.advance(const Duration(seconds: 5));
@@ -114,9 +114,27 @@ void main() {
 
       final sent = r.api.locations.length;
       await r.timers.advance(const Duration(minutes: 5));
-      expect(r.api.locations.length, sent); // tracking stopped
-      r.sos.dismiss();
+      expect(r.api.locations.length, greaterThan(sent)); // the path keeps updating after a contact responds
+
+      r.sos.dismiss(); // "I'm safe"
       expect(r.sos.phase, SosPhase.idle);
+      final afterDismiss = r.api.locations.length;
+      await r.timers.advance(const Duration(minutes: 5));
+      expect(r.api.locations.length, afterDismiss); // and only then does the sharing stop
+    });
+
+    test('a cancel PIN also ends the acknowledged phase', () async {
+      final r = await Rig.create();
+      await r.sos.trigger('shake');
+      await r.timers.advance(const Duration(seconds: 5));
+      r.api.locationState = 'acknowledged';
+      await r.timers.advance(const Duration(seconds: 10));
+      expect(r.sos.phase, SosPhase.acknowledged);
+      expect(await r.sos.submitPin('1234'), PinUiResult.cancelled);
+      expect(r.sos.phase, SosPhase.idle);
+      final afterCancel = r.api.locations.length;
+      await r.timers.advance(const Duration(minutes: 2));
+      expect(r.api.locations.length, afterCancel);
     });
 
     test('the server saying the alert is over (404) returns the phone to idle', () async {

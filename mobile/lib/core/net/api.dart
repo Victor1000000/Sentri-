@@ -170,7 +170,10 @@ abstract class SentriApi {
   Future<ShareStartResult> startShare(List<String> contactIds, {GeoFix? geo, double? hours});
 
   /// Throws [ApiHttpError] 404 when the share has ended or expired.
-  Future<void> updateShare(String id, GeoFix geo);
+  /// `path` carries the recent breadcrumb trail (thinned, oldest first) and `mode`
+  /// the travel mode read off that trail (v41); both are optional extras inside
+  /// the same PUT body.
+  Future<void> updateShare(String id, GeoFix geo, {List<List<double>> path = const [], String? mode});
   Future<void> stopShare(String id);
   Future<DateTime> extendShare(String id, double hours);
   Future<List<ShareInfo>> activeShares();
@@ -572,8 +575,11 @@ class HttpSentriApi implements SentriApi {
   }
 
   @override
-  Future<void> updateShare(String id, GeoFix geo) async {
-    await _call('PUT', '/v1/shares/${Uri.encodeComponent(id)}/location', body: geo.toJson(), patient: false);
+  Future<void> updateShare(String id, GeoFix geo, {List<List<double>> path = const [], String? mode}) async {
+    final body = geo.toJson();
+    if (path.isNotEmpty) body['path'] = [for (final p in path) [p[0], p[1]]];
+    if (mode != null) body['mode'] = mode;
+    await _call('PUT', '/v1/shares/${Uri.encodeComponent(id)}/location', body: body, patient: false);
   }
 
   @override

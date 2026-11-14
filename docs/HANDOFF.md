@@ -777,3 +777,88 @@ ten contacts, worldwide dial codes + emergency lines, French + Spanish.
   still concluded success because the build step does not gate on the test step). kindLabel
   deliberately passes shop values it has no friendlier word for straight through ('mall'), so
   the test now expects 'mall' with a comment saying why. v40's run must gate clean.
+
+## 25. Version 41 (this patch) — engineer's notes
+
+Vic's round four: breadcrumb trails on live shares, SOS location until "I'm safe",
+heart rate 20 s + newest-half fallback, international banner photos, per-country
+emergency lines end to end, Life360-style messages, travel detection, per-country
+languages, watches.
+
+- BREADCRUMB TRAILS: every position update of a running share now carries a
+  thinned recent path (max 120 points, oldest first; <=120 keeps the raw shape,
+  longer trails are evenly thinned with the newest point last) plus the travel
+  mode read off it, inside the same PUT body (`path`/`mode` inside `last_geo`).
+  ShareController keeps `liveTrail` (<=600 points, deduped ~10 m) and repaints on
+  every fix (`notifyListeners()` in `_record`). The contacts' alert map draws a
+  polyline under the dot, the person's own Map tab does the same while their
+  share runs (MapScreen gains a `share:` param + listener), and a small chip
+  under the address card says the mode. api.dart `updateShare(id, geo, {path,
+  mode})`; models.dart parses `path` (capped 200) and `mode` (validated set) from
+  the detail geo; the backend stores both inside lastGeo verbatim (zod: path
+  array <=120, mode enum - 'hovercraft' is refused with 400, test asserted).
+- TRAVEL DETECTION: TravelMode enum (still/walk/run/ride/drive/train/flight) +
+  classifySpeed bands (<=0.5 / 2.5 / 5.5 / 12 / 35 / 95 m/s) + metresBetween
+  haversine + speedBetween (accuracy <=50 m, dt >=1 s) + travelModeFromName, all
+  pure in location.dart with five unit tests in test_units.dart. TravelWatcher
+  needs THREE agreeing readings before the chip flips (hysteresis; a sliding
+  window means a stray sample cannot stick).
+- SOS UNTIL SAFE: `_tracking` is now `active || acknowledged` - after a contact
+  responds the position keeps flowing (the tick reschedules through the ack
+  phase) until dismiss() ("I'm safe") or a cancel PIN. `_onAcknowledged` is
+  idempotent (it fires on every subsequent update, so no per-tick churn and no
+  `_cancelTimers()`); `networkRestored` also reschedules when acknowledged. The
+  old ack-stops-tracking test was replaced with keeps-flowing-until-dismiss, and
+  a cancel-ends-acknowledged test joined it (16 -> 17 tests). The SOS screen says
+  honestly: location keeps updating until you cancel or tap "I'm safe".
+- HEART RATE, root of the v40 regression fixed: `secondsTarget` 15 -> 20 s, so
+  the halves are ~8.6 s each and keep the tight 15% agreement bar; and when the
+  halves STILL disagree the newest half's confident reading is accepted (the
+  most settled stretch of the take) instead of refusing the measurement. Full-
+  window read stays primary; refuse only when both halves are unusable.
+- INTERNATIONAL PHOTOS: share banner = "2023 - Venture key event SAM 7157" by
+  Web Summit (Flickr) via Wikimedia Commons, CC BY 2.0; contacts banner = "Group
+  hug+someon laughing, Beyoglu 7May23" by Mariam elr (own work), CC BY-SA 4.0.
+  Both resized to 1280 px (System.Drawing, q82; share 165,862 B, contacts
+  320,578 B) and re-encoded into the existing photo leaves; full credits are in
+  the file headers. Verification uses deep 88-char base64 lines - the first-48
+  header fragment is shared by every System.Drawing JPEG.
+- PER-COUNTRY EMERGENCY LINES, end to end: app.dart resolves the person's
+  country from the phone number they signed up with (top-level `_myCountry`,
+  countryByDial over lastPhone, device region as fallback) and hands it to the
+  Police tab, the SOS screen and (through it) PoliceCallCard. Nigeria - or an
+  unknown country - keeps the NPF banner + command directory exactly as before;
+  every other country gets ONLY the worldwide card: that country's police/fire/
+  ambulance numbers (from core/emergency.dart), each tappable, plus honest
+  notes (`police.world_note`, `police.global_note`). Never Nigerian numbers
+  abroad.
+- MESSAGES, Life360-style: four tabs (All / Alerts / Offers / Tips) in a
+  segmented pill bar with an alerts badge (alerts = urgent kinds + health_alert
+  + low_battery). Offers is the HONEST card - no fake deals, no ads, points at
+  inviting contacts instead. Tips carries five concrete everyday-safety cards.
+  The empty mailbox (and the Offers header) wear a NEW 3D Fluent Emoji render
+  ("Open mailbox with raised flag", appended to floating3d.dart, MIT).
+- PER-COUNTRY LANGUAGES: `languagesForCountry(iso, {current})` in i18n.dart -
+  NG -> en/pcm/ha/yo/ig; the fr-set (fr,sn,ci,cm,dz,ma,tn,cd,rw,be,ch) -> en/fr;
+  the es-set (es,mx,ar,cl,co,pe) -> en/es; else en. The current language is
+  always kept on the list. SentriTopBar gained `countryIso` (home resolves from
+  the sign-up number, onboarding from the device region before the number).
+- WATCHES: an honest screen (NEW leaf watch_screen.dart, entry card on the
+  Triggers page) explaining that a paired Wear OS watch mirrors the phone's
+  notifications automatically - no pairing code of our own to get wrong - with
+  a test ping (`showWatchTestNote`, channel sentri_watch) so the person can see
+  it arrive on the wrist.
+- i18n: 35 new keys x7 = 407 x7 (sos.share_until_safe; inbox.tab_* +
+  inbox.none_alerts; offers.*; tips.title + tips.tip1..5; map.travel_<mode>;
+  police.call_service {n}/{service}, police.world_note {name},
+  police.global_note; watch.*). i18ncheck34's newKeys list now has the 35 v41
+  keys; check-apk20 expects 407 x7 and carries the travel/watch/offers needles
+  in both the JSON and the libapp.so lists.
+- Gates & counts: expect 131 mobile tests (was 125: +1 SOS, +5 travel units) -
+  count HONESTLY, do not tune the expectation to the result. The backend share
+  test gained train-204 and hovercraft-400 assertions inside existing tests
+  (backend count unchanged).
+- Deferred (honest list for Vic): flight mode is read from GPS speed only
+  (no flight-number lookup); the watch test ping proves the mirror path, not a
+  native Wear OS app (none is installed); fr/es (and ha/yo/ig/pcm) translations
+  are machine-assisted - flagged in the delivery report.

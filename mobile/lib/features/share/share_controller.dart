@@ -22,6 +22,10 @@ enum ShareStartOutcome { started, noneReachable, offline, failed }
 /// local track, and when the share ends the track joins the history. The share screen draws it
 /// on a small map, the way a finished exercise session shows its route - the contacts who were
 /// invited can later see where the person actually passed.
+///
+/// v41 breadcrumbs: while the share runs, each position update also carries a thinned
+/// recent trail and the travel mode read off it, so the contacts' map shows the path the
+/// person has walked, driven or flown - not just their latest dot.
 class ShareController extends ChangeNotifier {
   ShareController({
     required this.api,
@@ -47,6 +51,9 @@ class ShareController extends ChangeNotifier {
   String? _stopping;
   int _epoch = 0;
   Cancelable? _tick, _stopRetry;
+  GeoFix? _prevFix;
+  bool _travelFed = false;
+  final TravelWatcher _travel = TravelWatcher();
 
   /// The route being drawn by the share that is running right now.
   List<List<double>> _track = const <List<double>>[];
@@ -56,6 +63,14 @@ class ShareController extends ChangeNotifier {
 
   /// True while a Stop is waiting for the server to confirm.
   bool get stopPending => _stopping != null;
+
+  /// The trail drawn so far by the running share, oldest first - the map
+  /// paints it live so the people invited see the path, not just the dot (v41).
+  List<List<double>> get liveTrail => _track;
+
+  /// How the person is travelling right now, read off the recent fixes with
+  /// hysteresis (v41). Still until trusted speeds say otherwise.
+  TravelMode get travelMode => _travel.mode;
 
   // ---- start ----
 
@@ -79,6 +94,9 @@ class ShareController extends ChangeNotifier {
     _active = s;
     _epoch++;
     _track = <List<double>>[]; // a fresh share draws a fresh line
+    _prevFix = null;
+    _travelFed = false;
+    _travel.reset();
     unawaited(_save());
     notifyListeners();
     _schedule(_epoch, const Duration(seconds: 5));
@@ -139,7 +157,12 @@ class ShareController extends ChangeNotifier {
     if (fix != null) {
       _record(fix);
       try {
-        await api.updateShare(a.id, fix);
+        await api.updateShare(
+          a.id,
+          fix,
+          path: _thinnedPath(),
+          mode: _travelFed ? _travel.mode.name : null,
+        );
       } on ApiHttpError catch (e) {
         if (e.status == 404) return _end(); // ended or expired on the server
       } catch (_) {
@@ -149,14 +172,36 @@ class ShareController extends ChangeNotifier {
     if (epoch == _epoch) _schedule(epoch, _interval(pct));
   }
 
+  /// The trail thinned for sending: at most 120 points spread evenly over what
+  /// was recorded (plus the newest point last), so even a day-long share fits
+  /// a small PUT body while the shape of the journey survives (v41).
+  List<List<double>> _thinnedPath() {
+    final t = _track;
+    if (t.length <= 120) return t;
+    final step = t.length / 120;
+    final out = <List<double>>[for (var i = 0; i < 120; i++) t[(i * step).floor()]];
+    out.add(t.last);
+    return out;
+  }
+
   /// One point on the story map. Points closer than about ten metres to the
   /// previous one are dropped, so a share spent sitting still stays a dot
   /// instead of a wall of points, and the line never grows past six hundred.
   void _record(GeoFix fix) {
+    final prev = _prevFix;
+    _prevFix = fix;
+    if (prev != null) {
+      final v = speedBetween(prev, fix);
+      if (v != null) {
+        _travelFed = true;
+        _travel.feed(v);
+      }
+    }
     final last = _track.isEmpty ? null : _track.last;
     if (last != null && (fix.lat - last[0]).abs() < 0.0001 && (fix.lon - last[1]).abs() < 0.0001) return;
     if (_track.length >= 600) return;
     _track.add([fix.lat, fix.lon]);
+    notifyListeners(); // the map paints the new breadcrumb at once (v41)
   }
 
   void _end() {

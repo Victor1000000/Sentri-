@@ -5,12 +5,14 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../core/i18n/i18n.dart';
+import '../../core/emergency.dart';
 import '../../core/profile.dart';
 import '../../core/widgets/brand.dart';
 import '../../core/platform/native_bridge.dart';
 import '../../core/settings.dart';
 import '../../core/net/api.dart';
 import '../contacts/contacts_screen.dart';
+import '../devices/watch_screen.dart';
 import '../health/exercise_controller.dart';
 import '../inbox/inbox_controller.dart';
 import '../police/police_directory.dart';
@@ -159,6 +161,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   SentriTopBar(
                     i18n: widget.i18n,
                     compact: true,
+                    // v41: the language sheet offers the languages of the country
+                    // the person signed up with; their device region as fallback.
+                    countryIso: countryByDial(dialCodeFromE164(widget.settings.lastPhone) ?? '')?.iso ?? countryForLocale(Platform.localeName)?.iso,
                     onLogoTap: () {
                       if (++_titleTaps >= 5) {
                         _titleTaps = 0;
@@ -651,6 +656,19 @@ class _ShortcutsPage extends StatelessWidget {
                       ],
                       SwitchListTile(title: Text(t('triggers.data_saver')), value: s.dataSaver, onChanged: (v) => unawaited(s.update(dataSaver: v))),
                     ]),
+                  ),
+                  const SizedBox(height: 16),
+                  // v41: watches. A paired Wear OS watch mirrors the phone's
+                  // notifications; this card opens the honest explanation and
+                  // a test ping the person can see arrive on the wrist.
+                  Card(
+                    child: ListTile(
+                      leading: Icon(Icons.watch_outlined, color: cs.primary),
+                      title: Text(t('watch.card')),
+                      subtitle: Text(t('watch.card_sub'), style: TextStyle(fontSize: 12, height: 1.3, color: cs.onSurface.withValues(alpha: 0.55))),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => WatchScreen(i18n: w.i18n))),
+                    ),
                   ),
                   const SizedBox(height: 16),
                   PermissionsPanel(bridge: w.bridge, i18n: w.i18n),

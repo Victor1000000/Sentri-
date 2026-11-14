@@ -2,6 +2,10 @@ export interface ShareGeo {
   lat: number;
   lon: number;
   accuracyM?: number;
+  /** v41: the recent breadcrumb trail, oldest first, thinned by the phone (at most 120 points). */
+  path?: { lat: number; lon: number }[];
+  /** v41: the travel mode read off that trail: still | walk | run | ride | drive | train | flight. */
+  mode?: string;
   at: number;
 }
 
@@ -17,7 +21,9 @@ export interface LocationShare {
   purgeAfter: number;
 }
 
-/** Only the latest position is stored, never a trail. */
+/** Only the latest position is stored, never a long trail history: the small breadcrumb
+ *  a share currently carries rides inside [LocationShare.lastGeo] and is replaced whole
+ *  on every update, so nothing grows without bound. */
 export interface ShareStore {
   create(s: LocationShare): Promise<void>;
   get(id: string): Promise<LocationShare | null>;

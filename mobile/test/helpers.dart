@@ -196,7 +196,7 @@ class FakeApi implements SentriApi {
   Future<TestAlertResult> sendTestAlert() async => const TestAlertResult(sent: 1, reachable: 1, total: 3);
 
   final List<String> shareCalls = [];
-  final List<({String id, GeoFix geo})> shareUpdates = [];
+  final List<({String id, GeoFix geo, List<List<double>> path, String? mode})> shareUpdates = [];
   ApiHttpError? shareUpdateError;
   String? noneReachable;
   @override
@@ -208,10 +208,10 @@ class FakeApi implements SentriApi {
   }
 
   @override
-  Future<void> updateShare(String id, GeoFix geo) async {
+  Future<void> updateShare(String id, GeoFix geo, {List<List<double>> path = const [], String? mode}) async {
     _check();
     if (shareUpdateError != null) throw shareUpdateError!;
-    shareUpdates.add((id: id, geo: geo));
+    shareUpdates.add((id: id, geo: geo, path: path, mode: mode));
   }
 
   @override

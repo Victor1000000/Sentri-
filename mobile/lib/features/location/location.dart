@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:geolocator/geolocator.dart';
 
@@ -35,6 +36,88 @@ LocationPlan locationPlan({required int batteryPct, required bool dataSaver}) {
 /// Movement tracking must only sum distances between fixes this good, otherwise
 /// drifting readings silently add hundreds of phantom metres.
 bool usableForDistance(GeoFix f, {double limitM = 30}) => (f.accuracyM ?? double.infinity) <= limitM;
+
+// ---- travel mode (v41) ----
+
+/// How the person is travelling, read off consecutive position fixes. The map
+/// chip, the share screen and the contacts' alert detail all say it in words:
+/// "moving on foot", "on a train", "in flight" - so the people watching can
+/// picture the journey without watching every fix.
+enum TravelMode { still, walk, run, ride, drive, train, flight }
+
+/// Pure classifier from a speed in metres per second to a travel mode. The
+/// bands are honest about what a phone can tell apart: walking and running
+/// separate around 5-6 m/s, a bike sits under ~12, cars and city traffic
+/// under ~35 (126 km/h), fast rail above that, and only true airspeed
+/// (342 km/h and up) reads as flight. Anything above is not walked!
+TravelMode classifySpeed(double mps) {
+  if (mps <= 0.5) return TravelMode.still;
+  if (mps <= 2.5) return TravelMode.walk;
+  if (mps <= 5.5) return TravelMode.run;
+  if (mps <= 12) return TravelMode.ride;
+  if (mps <= 35) return TravelMode.drive;
+  if (mps <= 95) return TravelMode.train;
+  return TravelMode.flight;
+}
+
+/// Metres between two coordinates (haversine). Pure, so tests can classify
+/// speeds with no location plumbing at all.
+double metresBetween(double lat1, double lon1, double lat2, double lon2) {
+  const r = 6371000.0;
+  double rad(double d) => d * 3.141592653589793 / 180.0;
+  final dLat = rad(lat2 - lat1);
+  final dLon = rad(lon2 - lon1);
+  final s1 = math.sin(dLat / 2);
+  final s2 = math.sin(dLon / 2);
+  final a = s1 * s1 + math.cos(rad(lat1)) * math.cos(rad(lat2)) * s2 * s2;
+  return 2 * r * math.asin(math.sqrt(a.clamp(0.0, 1.0)));
+}
+
+/// Speed between two fixes in metres per second, or null when it cannot be
+/// trusted: either fix is too rough for distance work, or there is no honest
+/// time gap between them. A looser accuracy bar than distance tracking uses -
+/// a 40 m fix over a 15-second hop still tells a car from a walker.
+double? speedBetween(GeoFix a, GeoFix b) {
+  if (!usableForDistance(a, limitM: 50) || !usableForDistance(b, limitM: 50)) return null;
+  final dt = b.at.difference(a.at).inMilliseconds / 1000.0;
+  if (dt < 1) return null;
+  return metresBetween(a.lat, a.lon, b.lat, b.lon) / dt;
+}
+
+/// Parses the mode name sent between phones ('walk', 'drive', ...). Unknown or
+/// absent stays null - the interface then simply shows no travel line.
+TravelMode? travelModeFromName(String? name) {
+  for (final m in TravelMode.values) {
+    if (m.name == name) return m;
+  }
+  return null;
+}
+
+/// Hysteresis around [classifySpeed]: one noisy fix must not flip the chip
+/// from "on foot" to "in flight". A mode only changes once the last three
+/// speed readings agree on the same band; until then the previous mode stands.
+class TravelWatcher {
+  TravelMode _mode = TravelMode.still;
+  final _recent = <TravelMode>[];
+  static const _agree = 3;
+
+  TravelMode get mode => _mode;
+
+  void reset() {
+    _mode = TravelMode.still;
+    _recent.clear();
+  }
+
+  /// Feed one speed reading (metres per second between two fixes).
+  void feed(double mps) {
+    final m = classifySpeed(mps);
+    if (_recent.length >= _agree) _recent.removeAt(0);
+    _recent.add(m);
+    if (_recent.length == _agree && _recent.every((x) => x == m) && m != _mode) {
+      _mode = m;
+    }
+  }
+}
 
 /// Where fixes come from. A fake implements this in tests.
 abstract class LocationSource {

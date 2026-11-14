@@ -23,6 +23,31 @@ const supportedLanguages = <AppLanguage>[
   AppLanguage('es', 'Español'),
 ];
 
+AppLanguage _lang(String code) => supportedLanguages.firstWhere((l) => l.code == code);
+
+/// v41, per country: the languages the language sheet offers. A Nigerian number
+/// opens the Nigerian set (English, Pidgin, Hausa, Yoruba, Igbo); the French and
+/// Spanish speaking countries get their language alongside English; everywhere
+/// else English alone. `current` is always included, so nobody can ever be
+/// switched into a list that hides the language they are reading.
+List<AppLanguage> languagesForCountry(String? iso, {String current = 'en'}) {
+  final set = switch (iso?.toLowerCase()) {
+    'ng' => ['en', 'pcm', 'ha', 'yo', 'ig'],
+    'fr' || 'sn' || 'ci' || 'cm' || 'dz' || 'ma' || 'tn' || 'cd' || 'rw' || 'be' || 'ch' => ['en', 'fr'],
+    'es' || 'mx' || 'ar' || 'cl' || 'co' || 'pe' => ['en', 'es'],
+    _ => ['en'],
+  };
+  final out = <AppLanguage>[];
+  for (final c in set) {
+    if (_hasLang(c)) out.add(_lang(c));
+  }
+  // The language the person is reading stays on the list, always.
+  if (current != 'en' && _hasLang(current) && !out.contains(_lang(current))) out.add(_lang(current));
+  return out;
+}
+
+bool _hasLang(String code) => supportedLanguages.any((l) => l.code == code);
+
 typedef AssetLoader = Future<String> Function(String path);
 
 /// Minimal translation lookup. Deliberately not tied to Flutter's `Locale`/Material localizations,
