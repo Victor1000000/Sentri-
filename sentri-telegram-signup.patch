@@ -1,0 +1,12 @@
+diff --git a/mobile/android/app/src/main/kotlin/ng/sentri/sentri/ProtectionService.kt b/mobile/android/app/src/main/kotlin/ng/sentri/sentri/ProtectionService.kt
+--- a/mobile/android/app/src/main/kotlin/ng/sentri/sentri/ProtectionService.kt
++++ b/mobile/android/app/src/main/kotlin/ng/sentri/sentri/ProtectionService.kt
+@@ -85,7 +85,7 @@
+         power?.unregister(this); power = null
+         // v44: the press count is the person's own choice (3..6), so the alert only goes off on
+         // the number of presses they decided on.
+-        if (p.power) power = ScreenToggleDetector(presses = p.powerPresses) { TriggerDispatcher.fire(this, "power") }.also { it.register(this) }
++        if (p.power) power = ScreenToggleDetector(onTrigger = { TriggerDispatcher.fire(this, "power") }, presses = p.powerPresses).also { it.register(this) }
+ 
+         if (p.floating) {
+             if (floating == null) floating = FloatingButton(this)
