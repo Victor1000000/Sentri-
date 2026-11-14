@@ -35,7 +35,10 @@ dependencies:
   image_picker: ^1.1.2
   # v42: Add contact picks numbers from the phone's own saved contacts
   # (READ_CONTACTS asked in the sheet, one tap fills the phone field).
-  flutter_contacts: 1.1.9
+  # v42: 1.1.9 (exact) ships with a broken android namespace
+  # (dev.fluttercommunity.plus.sensors - collides with sensors_plus, manifest
+  # merge fails). 1.1.9+2 is the same code with namespace co.quis.flutter_contacts.
+  flutter_contacts: 1.1.9+2
 
 dev_dependencies:
   flutter_test:

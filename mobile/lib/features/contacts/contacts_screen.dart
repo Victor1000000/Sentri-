@@ -59,7 +59,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
       }
       return;
     }
-    if (saved == null || !mounted) return;
+    if (!mounted) return;
     // A plain final local copy: the builder closure below must not receive the nullable.
     final List<ContactStatus> fresh = saved;
     await showModalBottomSheet<bool>(
@@ -373,11 +373,12 @@ class _AddSheetState extends State<_AddSheet> {
         if (mounted) setState(() => _error = t('contacts.perm_denied'));
         return;
       }
-      final picked = await FlutterContacts.selectContact();
+      // v42: the phone's own picker (flutter_contacts 1.1.9+2 openExternalPick).
+      // It already fetches the full record - id, name, phones - so there is no
+      // second query; the number lands straight in the field.
+      final picked = await FlutterContacts.openExternalPick();
       if (picked == null) return; // the person closed the picker: nothing happened
-      // selectContact returns a slim record; the phones live on the full one.
-      final full = await FlutterContacts.getContact(picked.id, withProperties: true);
-      final raw = full.phones.isEmpty ? null : full.phones.first.number;
+      final raw = picked.phones.isEmpty ? null : picked.phones.first.number;
       if (raw == null || raw.trim().isEmpty) {
         if (mounted) setState(() => _error = t('contacts.pick_no_number'));
         return;

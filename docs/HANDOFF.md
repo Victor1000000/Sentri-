@@ -950,3 +950,37 @@ pictures from different countries, per-country languages like Nigeria's, and a
   each country's own service; watch support remains notification mirroring, not
   a native Wear OS app; all non-en translations machine-assisted.
 
+### v42 CI round 2 (fixes after the first Build failed)
+
+The first v42 Build (run 43553328092, rewritten head 32134dae) failed; log at
+C:\Users\USER\ci-log42.txt, fetched with ci-log42.ps1 (jobs/*/logs endpoint).
+Three errors, all in new v42 code, plus one packaging trap:
+
+- travel_screen.dart used GeoFix without importing core/net/api.dart, where
+  GeoFix actually lives (features/location/location.dart only uses it). Added
+  the import. Lesson: a type used by a leaf file may come from a third file.
+- The picker used FlutterContacts.selectContact(), which does NOT exist in
+  flutter_contacts 1.x (it is 2.x/native-showPicker territory, and also the API
+  of other same-named packages). The real 1.1.x picker is
+  FlutterContacts.openExternalPick() -> Future<Contact?>, and it already
+  fetches withProperties (phones included) via getContact(id) defaults, so the
+  second getContact call was dropped. getContact is nullable (Future<Contact?>)
+  in 1.1.x - never dereference without a null check. Verified against the real
+  1.1.9+2 sources (pub archive fetched to Temp/opencode/fc192/src).
+- pubspec pinned flutter_contacts: 1.1.9 EXACTLY, and pub resolved exactly
+  1.1.9 - the release whose android build.gradle declares namespace
+  dev.fluttercommunity.plus.sensors, identical to sensors_plus 6.x, so the
+  manifest merger failed ("Namespace ... used in multiple modules"). The fix
+  shipped as 1.1.9+2 (namespace co.quis.flutter_contacts). Exact pins do not
+  match +build releases - pin flutter_contacts: 1.1.9+2. The dex needle
+  'flutter_contacts' still matches (co/quis/flutter_contacts/*).
+- Also removed a dead `saved == null` comparison in contacts_screen (listContacts
+  is non-nullable; was an unnecessary_null_comparison warning, non-fatal but
+  noise).
+- Pipeline state after the failed round: Apply SUCCEEDED (patch applied to main
+  and deleted), so main head is the rewritten 32134dae WITH the broken v42 code
+  committed. The next stage re-resolves main and diffs the leaves against it, so
+  the new patch carries only the deltas (smaller); PUT is CREATE again (patch
+  absent). verify-patch20/put20-prep/deploy20 are generic, unchanged.
+
+

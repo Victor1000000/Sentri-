@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../core/i18n/i18n.dart';
+import '../../core/net/api.dart'; // GeoFix
 import '../../core/widgets/flat.dart';
 import '../location/location.dart';
 
