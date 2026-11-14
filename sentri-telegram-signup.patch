@@ -1,0 +1,360 @@
+diff --git a/docs/HANDOFF.md b/docs/HANDOFF.md
+--- a/docs/HANDOFF.md
++++ b/docs/HANDOFF.md
+@@ -983,4 +983,43 @@
+   the new patch carries only the deltas (smaller); PUT is CREATE again (patch
+   absent). verify-patch20/put20-prep/deploy20 are generic, unchanged.
+ 
++### v42 mojibake repair (found during in-APK verification)
++
++check-apk20's `yo mojibake gone: False` was NOT a display artifact: the v41
++key appends into the 7 pre-existing tables (en/ha/ig/pcm/yo/fr/es, 35 keys
++each) were written double-encoded - proper UTF-8 bytes misread as CP1252 and
++re-saved. The APK's yo.json contained 350 U+00C3 chars, all in v41-added
++values. This shipped broken in v41 too; fixed in v42.
++
++- Diagnostics: mojiscan42.ps1 (C3/C2 flags), mojiscan2b.ps1 (strict-repair
++  candidates), mojiforen42.ps1 (codepoint dumps - the ground truth). Console
++  displays of non-ASCII are useless; classify by codepoints only.
++- Correct repair rule: value is mojibake iff (a) it contains U+00C3/U+00C2,
++  (b) every char has an EXACT CP1252 mapping (1252 encode->decode round-trip
++  reproduces the value byte-for-byte), (c) strict 1252->UTF-8 decode succeeds
++  and differs, (d) repaired is shorter and free of C3/C2/FFFD/'?'.
++- WRONG guards, both learned the hard way: (1) "all chars <= U+00FF" fails
++  because mojibake legitimately contains CP1252-only glyphs ABOVE U+00FF
++  (U+0152 OE, U+20AC euro, U+201E low-9 quote, U+201C) - pass 1 with that
++  guard repaired only 57/86. (2) bare "strict decode succeeds" corrupts
++  proper text: best-fit mapping turns proper Yoruba/Igbo chars (e1, 1ECD,
++  combining marks) into '?' (valid ASCII), so ig showed 307 false
++  "repairable" values. The exact-round-trip test is what separates them:
++  proper chars have no 1252 mapping, so the round-trip breaks.
++- v42-appended keys in yo (contacts.pick, travel.*, map.night_note,
++  health.water_first) were verified ALREADY proper (strict repair throws on
++  them) and were left untouched.
++- Scripts: mojifix42.ps1 (pass 1, 57 values) + mojifix2b42.ps1 (pass 2,
++  29 values) rebuilt the 7 tables pretty/LF/no-BOM with a custom JsonStr
++  escaper. Total 86 values repaired; post-repair gates all green
++  (19 x 418 parity, placeholder parity, LF). yo.json 32014->30419 bytes
++  (mojibake inflates char counts).
++- The v41-era keys repaired include police.call_service (en/ha/ig/pcm/yo/fr/es
++  now `Call {n} - {service}` with a proper middle dot), fr/es
++  sos.share_until_safe + offers.* + tips.* + police.world_note/global_note +
++  watch.*, and yo sos.share_until_safe + inbox.* + offers.cta + tips.* +
++  map.travel_* + police.*_note + watch.* (now real Yoruba with combining
++  marks, matching the file's existing NFC/NFD convention).
++
++
+ 
+diff --git a/mobile/assets/i18n/en.json b/mobile/assets/i18n/en.json
+--- a/mobile/assets/i18n/en.json
++++ b/mobile/assets/i18n/en.json
+@@ -393,7 +393,7 @@
+   "map.travel_drive": "Driving",
+   "map.travel_train": "On a train",
+   "map.travel_flight": "In flight",
+-  "police.call_service": "Call {n} Â· {service}",
++  "police.call_service": "Call {n} · {service}",
+   "police.world_note": "These are the emergency lines that answer in {name}. The Nigerian command list does not apply here.",
+   "police.global_note": "Sentri keeps the Nigerian Police directory for Nigeria only. Everywhere else, the lines above reach your country's emergency services.",
+   "watch.card": "Watches",
+diff --git a/mobile/assets/i18n/ha.json b/mobile/assets/i18n/ha.json
+--- a/mobile/assets/i18n/ha.json
++++ b/mobile/assets/i18n/ha.json
+@@ -393,7 +393,7 @@
+   "map.travel_drive": "A cikin mota",
+   "map.travel_train": "A jirgin Æ™asa",
+   "map.travel_flight": "A jirgin sama",
+-  "police.call_service": "Kira {n} Â· {service}",
++  "police.call_service": "Kira {n} · {service}",
+   "police.world_note": "WaÉ—annan layukan gaggawa ne waÉ—anda ke ba da amsa a {name}. Jerin umarnin 'yan sandan Najeriya bai shafi nan ba.",
+   "police.global_note": "Sentri tana riÆ™e da jerin 'yan sandan Najeriya ga Najeriya kaÉ—ai. A waje, layukan da ke sama su na kaiwa ga sabis na gaggawar kasarka.",
+   "watch.card": "Agogon hannu",
+diff --git a/mobile/assets/i18n/ig.json b/mobile/assets/i18n/ig.json
+--- a/mobile/assets/i18n/ig.json
++++ b/mobile/assets/i18n/ig.json
+@@ -62,9 +62,9 @@
+   "sos.contacts_busy": "Ịdọ aka nke mbụ ka na-agba ọsọ. E donedo ndị njikere gi n'ekwentị a, ha ga-adakọ onwe ha - i nwere ike gaa n'ihu.",
+   "tabs.home": "Ụlọ",
+   "tabs.map": "Maapụ",
+-  "tabs.health": "Ahá»¥ ike",
++  "tabs.health": "Ahụ ike",
+   "health.allow": "Aha gị",
+-  "health.heart": "Mkpá»¥ obi",
++  "health.heart": "Mkpụ obi",
+   "health.heart_none": "Ọ dịghị isi iyi ụtụ obi na ekwentị a ugbu a. Jikọọ app ahụike ma ọ bụ band na Health Connect.",
+   "health.heart_perm": "Foto gị nọ na fọn a. Naanị aha gị ka a na-eziga na ozi.",
+   "health.heart_base": "Ụtụ obi gi mgbe ị na-izu ike: {n} bpm. Ana m elele uwe ọ bụla ọzọ.",
+@@ -78,7 +78,7 @@
+   "health.water_1": "Awa 1",
+   "health.water_2": "Awa 2",
+   "health.water_3": "Awa 3",
+-  "health.water_title": "Oge maka iná»¥ mmiri",
++  "health.water_title": "Oge maka inụ mmiri",
+   "health.water_body": "I ná»¥ mmiri nta nta ugbu a ga-enye gá»‹ ike n'á»¥bá»chá»‹.",
+   "health.water_ok": "Edobere ya: oge ọ bụla {n} ekwentị a ga-ekwu okwu. Wepu Sentri n'ichebe batiri.",
+   "health.water_broken": "Ọ nwere ike ọ gaghị ekwu okwu ebe a. Họrọ oge ọzọ, nyekwa ikike, wepu Sentri n'ichebe batiri.",
+@@ -87,7 +87,7 @@
+   "health.hosp_none": "Enwetụbeghị ụlọ ọgwụ dị nso na mapụ.",
+   "health.hosp_no_phone": "Enweghá»‹ ná»mba ekwentá»‹ edekwa na mapá»¥ ahá»¥",
+   "health.hosp_km": "á»Œ ná» n'ogologo {n} km",
+-  "health.call": "Kpá»á»",
++  "health.call": "Kpọọ",
+   "health.heart_cam": "Tinye mkpịsị aka gi nwayọọ na igwefoto ihu, pie n'okpuru. Ọ dịghị app ahụike mkpa.",
+   "health.measure_nofeed": "Kyamarọ ahụ ezitereghị foto ọ bụla. Lee na ekranị gbara ọkụ, ị nọghị n'oku ekwentị, gbalịa ọzọ.",
+   "health.measure": "Gụọ mkpụ obi gị na kyamarọ",
+@@ -375,7 +375,7 @@
+   "inbox.tab_all": "Ihe niile",
+   "inbox.tab_alerts": "á»Šdá» aka",
+   "inbox.tab_offers": "Onyinye",
+-  "inbox.tab_tips": "Ndá»¥má»dá»¥",
++  "inbox.tab_tips": "Ndụmọdụ",
+   "inbox.none_alerts": "á»Œ dá»‹ghá»‹ á»‹dá» aka ugbu a. Nke a bá»¥ ozi á»ma.",
+   "offers.title": "Enweghá»‹ onyinye. Mgbe á» bá»¥la.",
+   "offers.body": "Sentri enweghá»‹ azá»¥mahá»‹a, mgbasa ozi ma á» bá»¥ nka á» ga-eji ree uche gá»‹. Ihe kachasá»‹ mkpa ebe a bá»¥ mmadá»¥.",
+@@ -387,13 +387,13 @@
+   "tips.tip4": "á»Š na-alaghachi á»¥lá»? Ná»gide ekwentá»‹ gá»‹ n'akpa á»‹ nwere ike rute ya ka á»‹ na-aga, á» bá»¥ghá»‹ nke á»‹ ga-akwá»¥sá»‹ chá»á».",
+   "tips.tip5": "Tupu njem, tá»ghará»‹a batrá»‹. á»Šdá» aka batrá»‹ dá»‹ ala ka na-eru ndá»‹ enyi gá»‹, ma batrá»‹ dá»‹ ike na-edobe ebe á»‹ ná» á»há»¥rá»¥.",
+   "map.travel_still": "á»Œ ná»ghá»‹ n'agaghará»‹",
+-  "map.travel_walk": "Na á»¥kwá»¥",
+-  "map.travel_run": "Na á»sá»",
++  "map.travel_walk": "Na ụkwụ",
++  "map.travel_run": "Na ọsọ",
+   "map.travel_ride": "Na igwe",
+-  "map.travel_drive": "Na á»¥gbá» ala",
+-  "map.travel_train": "Na á»¥gbá» okporo á»¥zá»",
+-  "map.travel_flight": "Na á»¥gbá» elu",
+-  "police.call_service": "Kpá»á» {n} Â· {service}",
++  "map.travel_drive": "Na ụgbọ ala",
++  "map.travel_train": "Na ụgbọ okporo ụzọ",
++  "map.travel_flight": "Na ụgbọ elu",
++  "police.call_service": "Kpọọ {n} · {service}",
+   "police.world_note": "Ndá»‹ a bá»¥ ahá»‹rá»‹ mberede na-anabata na {name}. Ndepá»¥ta ndá»‹ uwe ojii Naijá»‹a anaghá»‹ emetá»¥ta ebe a.",
+   "police.global_note": "Sentri na-edebe ndepá»¥ta ndá»‹ uwe ojii Naijá»‹a maka Naijá»‹a naaná»‹. Na mpá»¥ga, ahá»‹rá»‹ dá»‹ n'elu na-eru á»rá»¥ mberede mba gá»‹.",
+   "watch.card": "Elekere aka",
+@@ -402,7 +402,7 @@
+   "watch.paired": "á»Œ na-ará»¥ á»rá»¥ na elekere jiká»tara",
+   "watch.intro": "Jiká»á» elekere gá»‹ na ekwentá»‹ gá»‹ site na app elekere (Wear OS na á»tá»¥tá»¥ elekere smart na-agbanwe ndezi ekwentá»‹). á»Œ dá»‹ghá»‹ ihe á»zá» á»‹chá» ma á» bá»¥ banye.",
+   "watch.works": "Mgbe á» jiká»tara, ihe niile Sentri na-egosi gá»‹ na ekwentá»‹ na-ada elekere gá»‹kwa - á»‹dá» aka SOS, ozi ebe na nzaghachi.",
+-  "watch.test_btn": "Zipá»¥ ozi ule na elekere m",
++  "watch.test_btn": "Zipụ ozi ule na elekere m",
+   "watch.test_title": "Ule Sentri",
+   "watch.test_body": "Nke a bá»¥ ka á»‹dá» aka si dá»‹ na elekere gá»‹.",
+   "watch.test_sent": "Ezipá»¥la. Lelee aka gá»‹ - á» ga-ama nso. Gbalaga ka ndezi Sentri ná» na-akwá»¥do.",
+diff --git a/mobile/assets/i18n/pcm.json b/mobile/assets/i18n/pcm.json
+--- a/mobile/assets/i18n/pcm.json
++++ b/mobile/assets/i18n/pcm.json
+@@ -393,7 +393,7 @@
+   "map.travel_drive": "Dey drive",
+   "map.travel_train": "Train",
+   "map.travel_flight": "Flight",
+-  "police.call_service": "Call {n} Â· {service}",
++  "police.call_service": "Call {n} · {service}",
+   "police.world_note": "Na these emergency lines dey answer for {name}. Nigeria police command list no concern here.",
+   "police.global_note": "Sentri keep Nigeria police directory for Nigeria alone. Outside, the lines above na your country own emergency service.",
+   "watch.card": "Wristwatch",
+diff --git a/mobile/assets/i18n/yo.json b/mobile/assets/i18n/yo.json
+--- a/mobile/assets/i18n/yo.json
++++ b/mobile/assets/i18n/yo.json
+@@ -371,41 +371,41 @@
+   "emergency.fire": "Iṣẹ́ ìpamọ́ iná",
+   "emergency.ambulance": "Ọkọ̀ ìtọ́jú",
+   "emergency.note": "Àwọn líne osìlẹ̀ lè yí padà. 112 gbé ẹ̀tọ̀ pàjáwìrí dé orílẹ̀-èdè pọ̀.",
+-  "sos.share_until_safe": "ÃŒpÃ² ráº¹Ì€ Å„ táº¹Ì€sÃ­wÃ¡jÃº lÃ¡ti tÃºn má»Ì tÃ­ o fi bÃ  jáº¹Ì tÃ bÃ­ o fá»Ì€rá»Ì€ 'Mo wÃ  lÃ¡Ã rÃ¡', kÃ­ Ã wá»n á»Ì€ráº¹Ì ráº¹Ì€ lÃ¨ táº¹Ì€lÃ© á»Ì€nÃ  ráº¹Ì€.",
++  "sos.share_until_safe": "Ìpò rẹ̀ ń tẹ̀síwájú láti tún mọ́ tí o fi bà jẹ́ tàbí o fọ̀rọ̀ 'Mo wà láàrá', kí àwọn ọ̀rẹ́ rẹ̀ lè tẹ̀lé ọ̀nà rẹ̀.",
+   "inbox.tab_all": "Gbogbo ráº¹Ì€",
+-  "inbox.tab_alerts": "ÃŒkÃ¬lá»Ì€",
+-  "inbox.tab_offers": "Ã€Ç¹fÃ Ã nÃ­",
+-  "inbox.tab_tips": "ÃŒmá»Ì€rÃ n",
+-  "inbox.none_alerts": "KÃ² sÃ­ Ã¬kÃ¬lá»Ì€ bÃ¡yÃ¬Ã­. ÃˆyÃ­ Ã¬rÃ²yÃ¬n rere ni.",
+-  "offers.title": "KÃ² sÃ­ Ã¬fipamá»Ì. LÃ¡Ã©lÃ¡Ã©.",
+-  "offers.body": "Sentri kÃ² nÃ­ Ã¬rÃ­rÃ , Ã¬polongo tÃ bÃ­ oye lÃ¡ti tÃ  owÃ³ ráº¹ padÃ . Ohun tÃ³ nÃ­yÃ¬ jÃ¹ ni Ã¨nÃ¬yÃ n.",
+-  "offers.cta": "á¹¢Ã­ Ã¬kÃ nsÃ­ Ã wá»n á»Ì€ráº¹Ì kÃ­ o pÃ¨ Ã wá»n Ã¨nÃ¬yÃ n ráº¹Ì€ - á»Ì€ráº¹Ì á»Ì€kan á¹£Ã­á¹£u jáº¹Ì áº¹nÃ¬kan mÃ¬Ã­rÃ n tÃ³ lÃ¨ fÃ¨sÃ¬.",
+-  "tips.title": "ÃŒmá»Ì€rÃ n Ã Ã bÃ² ojoojÃºmá»Ì",
+-  "tips.tip1": "á¹¢Ã Ã¡jÃº Ã¬rÃ¬n-Ã jÃ² Ã²ru, pÃ­n Ã¬pÃ² ráº¹Ì€ páº¹Ì€lÃº Ã¨nÃ¬yÃ n mÃ©jÃ¬ tÃ³ o gbÃ©raga - wÃ³n Å„ táº¹Ì€lÃ© á»Ì€nÃ  ráº¹Ì€ bÃ­ o á¹£e Å„ lá».",
+-  "tips.tip2": "Yan PIN ráº¹Ì€ páº¹Ì€lÃº á»gbá»Ìn: PIN Ã¬fagilÃ© ni kÃ­ o sá» fÃºn ara ráº¹Ì€ nÃ¬kan, kÃ­ o sÃ¬ lÃ¨ táº¹Ì áº¹Ì yÃ¡ra.",
+-  "tips.tip3": "TÃ­ áº¹nÃ¬kan bÃ¡ fáº¹Ì fi agbÃ¡ra gba PIN ráº¹Ì€, PIN Ã¬pÃ Ã rá»Ì€ dÃ  bÃ­ Ã¬fagilÃ© á¹£Ã¹gbá»Ìn Ã³ Å„ jáº¹Ì kÃ­ Ã wá»n á»Ì€ráº¹Ì ráº¹Ì€ má» nÃ­ Ã¬ká»Ì€ká»Ì€.",
+-  "tips.tip4": "TÃ­ o bÃ¡ Å„ padÃ  sÃ­lÃ©, gbÃ© fá»ÌnrÃ¡n ráº¹Ì€ sÃ­ Ã pÃ² tÃ³ o lÃ¨ dÃ©áº¹Ì ká»Ì€á»Ìká»Ì, kÃ­ o mÃ¡ á¹£e dÃºrÃ³ wÃ¡ á»Ì.",
+-  "tips.tip5": "Caji á¹£Ã Ã¡jÃº Ã¬rÃ¬n-Ã jÃ². ÃŒkÃ¬lá»Ì€ bÃ¡tÃ¨Ã©rÃ© tÃ­ Ã³ dÃ­n tÃºn Å„ dÃ© Ã wá»n á»Ì€ráº¹Ì ráº¹Ì€, á¹£Ã¹gbá»Ìn bÃ¡tÃ¨Ã©rÃ© tÃ­ Ã³ dÃ¡ra Å„ mÃº Ã¬pÃ² ráº¹Ì€ dáº¹Ì€rÃ¹.",
+-  "map.travel_still": "KÃ² Ã­ lÃ­lo",
+-  "map.travel_walk": "NÃ­ áº¹sáº¹Ì€",
+-  "map.travel_run": "Ã“ Å„ sÃ¡rÃ©",
+-  "map.travel_ride": "NÃ­ kÃ¨kÃ¨",
+-  "map.travel_drive": "NÃ­ á»ká»Ì€",
+-  "map.travel_train": "NÃ­ á»ká»Ì€ ojÃº-irin",
+-  "map.travel_flight": "NÃ­ á»ká»Ì€ Ã²furufÃº",
+-  "police.call_service": "PÃ¨ {n} Â· {service}",
+-  "police.world_note": "ÃŒwá»Ì€nyÃ­ ni Ã wá»n lÃ­ne Ã¬pÃ jÃ¡wÃ¬rÃ­ tÃ­ Å„ fÃ¨sÃ¬ nÃ­ {name}. Ã€kÃ³já» Ã wá»n á»lá»ÌpÃ Ã¡ NÃ Ã¬jÃ­rÃ­Ã  kÃ² bÃ¡ Ã¨yÃ­ mÃº.",
+-  "police.global_note": "Sentri Å„ pamá»Ì Ã kÃ³já» á»lá»ÌpÃ Ã¡ NÃ Ã¬jÃ­rÃ­Ã  fÃºn NÃ Ã¬jÃ­rÃ­Ã  nÃ¬kan. NitÃ²sÃ­, Ã wá»n lÃ­ne Ã³kÃ¨ sÃ­ Å„ mÃº iá¹£áº¹Ì Ã¬pÃ jÃ¡wÃ¬rÃ­ orÃ­láº¹Ì€-Ã¨dÃ¨ ráº¹Ì€ wÃ¡.",
+-  "watch.card": "Aá¹£á»á»Ì á»wá»Ì",
+-  "watch.card_sub": "RÃ­ Ã¬kÃ¬lá»Ì€ Sentri nÃ­ aá¹£á»á»Ì ráº¹ tÃ­ o ti so má»Ì á»Ì.",
+-  "watch.title": "Aá¹£á»á»Ì á»wá»Ì",
+-  "watch.paired": "Ã“ Å„ á¹£iá¹£áº¹Ì páº¹Ì€lÃº aá¹£á»á»Ì tÃ­ o so má»Ì á»Ì",
+-  "watch.intro": "So aá¹£á»á»Ì ráº¹ má»Ì fá»ÌnrÃ¡n ráº¹ páº¹Ì€lÃº app aá¹£á»á»Ì ráº¹ (Wear OS Ã ti á»Ì€pá»Ì€lá»pá»Ì€ aá¹£á»á»Ì á»gbá»Ìn Å„ dÃ  fá»ÌnrÃ¡n ráº¹ láº¹ÌyÃ¬n ara wá»n). KÃ² sÃ­ ohun mÃ­Ã¬ lÃ¡ti fi sÃ­ orÃ­ tÃ bÃ­ lÃ¡ti wá»lÃ©.",
+-  "watch.works": "NÃ­gbÃ  tÃ­ o ti so má»Ì á»Ì, ohun gbogbo tÃ­ Sentri Å„ fihÃ n fÃºn á»Ì nÃ­ fá»ÌnrÃ¡n yÃ³Ã² dÃ© aá¹£á»á»Ì ráº¹ nÃ¡Ã  - Ã¬kÃ¬lá»Ì€ SOS, Ã¬rÃ²yÃ¬n Ã¬pÃ² Ã ti Ã¬fÃ¨sÃ¬.",
+-  "watch.test_btn": "Fi Ã¬dÃ¡nwÃ² rÃ¡ná¹£áº¹Ì sÃ­ aá¹£á»á»Ì mi",
+-  "watch.test_title": "ÃŒdÃ¡nwÃ² Sentri",
+-  "watch.test_body": "ÃŒwá»Ì€nyÃ­ ni bÃ­ Ã¬kÃ¬lá»Ì€ á¹£e yÃ³Ã² dÃ  nÃ­ aá¹£á»á»Ì ráº¹.",
+-  "watch.test_sent": "A rÃ¡ná¹£áº¹Ì. Wo á»wá»Ì ráº¹ - yÃ³Ã² mÃº áº¹Ì lÃ¡Ã¬páº¹Ì. Jáº¹Ì kÃ­ Ã¬mÃºlÃ² Ã¬kÃ¬lá»Ì€ Sentri wÃ  nÃ­ Ã¬wá»Ì€n.",
++  "inbox.tab_alerts": "Ìkìlọ̀",
++  "inbox.tab_offers": "Àǹfààní",
++  "inbox.tab_tips": "Ìmọ̀ràn",
++  "inbox.none_alerts": "Kò sí ìkìlọ̀ báyìí. Èyí ìròyìn rere ni.",
++  "offers.title": "Kò sí ìfipamọ́. Láéláé.",
++  "offers.body": "Sentri kò ní ìrírà, ìpolongo tàbí oye láti tà owó rẹ padà. Ohun tó níyì jù ni ènìyàn.",
++  "offers.cta": "Ṣí ìkànsí àwọn ọ̀rẹ́ kí o pè àwọn ènìyàn rẹ̀ - ọ̀rẹ́ ọ̀kan ṣíṣu jẹ́ ẹnìkan mìíràn tó lè fèsì.",
++  "tips.title": "Ìmọ̀ràn ààbò ojoojúmọ́",
++  "tips.tip1": "Ṣàájú ìrìn-àjò òru, pín ìpò rẹ̀ pẹ̀lú ènìyàn méjì tó o gbéraga - wón ń tẹ̀lé ọ̀nà rẹ̀ bí o ṣe ń lọ.",
++  "tips.tip2": "Yan PIN rẹ̀ pẹ̀lú ọgbọ́n: PIN ìfagilé ni kí o sọ fún ara rẹ̀ nìkan, kí o sì lè tẹ́ ẹ́ yára.",
++  "tips.tip3": "Tí ẹnìkan bá fẹ́ fi agbára gba PIN rẹ̀, PIN ìpààrọ̀ dà bí ìfagilé ṣùgbọ́n ó ń jẹ́ kí àwọn ọ̀rẹ́ rẹ̀ mọ ní ìkọ̀kọ̀.",
++  "tips.tip4": "Tí o bá ń padà sílé, gbé fọ́nrán rẹ̀ sí àpò tó o lè déẹ́ kọ̀ọ́kọ́, kí o má ṣe dúró wá ọ́.",
++  "tips.tip5": "Caji ṣàájú ìrìn-àjò. Ìkìlọ̀ bátèéré tí ó dín tún ń dé àwọn ọ̀rẹ́ rẹ̀, ṣùgbọ́n bátèéré tí ó dára ń mú ìpò rẹ̀ dẹ̀rù.",
++  "map.travel_still": "Kò í lílo",
++  "map.travel_walk": "Ní ẹsẹ̀",
++  "map.travel_run": "Ó ń sáré",
++  "map.travel_ride": "Ní kèkè",
++  "map.travel_drive": "Ní ọkọ̀",
++  "map.travel_train": "Ní ọkọ̀ ojú-irin",
++  "map.travel_flight": "Ní ọkọ̀ òfurufú",
++  "police.call_service": "Pè {n} · {service}",
++  "police.world_note": "Ìwọ̀nyí ni àwọn líne ìpàjáwìrí tí ń fèsì ní {name}. Àkójọ àwọn ọlọ́pàá Nàìjíríà kò bá èyí mú.",
++  "police.global_note": "Sentri ń pamọ́ àkójọ ọlọ́pàá Nàìjíríà fún Nàìjíríà nìkan. Nitòsí, àwọn líne ókè sí ń mú iṣẹ́ ìpàjáwìrí orílẹ̀-èdè rẹ̀ wá.",
++  "watch.card": "Aṣọọ́ ọwọ́",
++  "watch.card_sub": "Rí ìkìlọ̀ Sentri ní aṣọọ́ rẹ tí o ti so mọ́ ọ́.",
++  "watch.title": "Aṣọọ́ ọwọ́",
++  "watch.paired": "Ó ń ṣiṣẹ́ pẹ̀lú aṣọọ́ tí o so mọ́ ọ́",
++  "watch.intro": "So aṣọọ́ rẹ mọ́ fọ́nrán rẹ pẹ̀lú app aṣọọ́ rẹ (Wear OS àti ọ̀pọ̀lọpọ̀ aṣọọ́ ọgbọ́n ń dà fọ́nrán rẹ lẹ́yìn ara wọn). Kò sí ohun míì láti fi sí orí tàbí láti wọlé.",
++  "watch.works": "Nígbà tí o ti so mọ́ ọ́, ohun gbogbo tí Sentri ń fihàn fún ọ́ ní fọ́nrán yóò dé aṣọọ́ rẹ náà - ìkìlọ̀ SOS, ìròyìn ìpò àti ìfèsì.",
++  "watch.test_btn": "Fi ìdánwò ránṣẹ́ sí aṣọọ́ mi",
++  "watch.test_title": "Ìdánwò Sentri",
++  "watch.test_body": "Ìwọ̀nyí ni bí ìkìlọ̀ ṣe yóò dà ní aṣọọ́ rẹ.",
++  "watch.test_sent": "A ránṣẹ́. Wo ọwọ́ rẹ - yóò mú ẹ́ láìpẹ́. Jẹ́ kí ìmúlò ìkìlọ̀ Sentri wà ní ìwọ̀n.",
+   "contacts.pick": "Yàn nínú àwọn olùbáṣepọ̀ rẹ",
+   "contacts.perm_denied": "Ìfúnní àṣẹ lórí àwọn olùbáṣepọ̀ ti wà pa. Jẹ́ kí o fúnní àṣẹ nínú ètò fọ́n rẹ, lẹ́yìn náà gbìyànjú lẹ́ẹ̀kansi.",
+   "contacts.pick_failed": "Kò ṣe é ṣí àkójọ àwọn olùbáṣepọ̀. Gbìyànjú lẹ́ẹ̀kansi.",
+diff --git a/mobile/assets/i18n/fr.json b/mobile/assets/i18n/fr.json
+--- a/mobile/assets/i18n/fr.json
++++ b/mobile/assets/i18n/fr.json
+@@ -371,41 +371,41 @@
+   "emergency.fire": "Pompiers",
+   "emergency.ambulance": "Ambulance",
+   "emergency.note": "Les numéros officiels peuvent changer. Le 112 joint les urgences dans de nombreux pays.",
+-  "sos.share_until_safe": "Votre position continue d'Ãªtre mise Ã  jour jusqu'Ã  ce que vous annuliez ou appuyiez sur Â« Je suis en sÃ©curitÃ© Â», pour que vos contacts puissent suivre votre trajet.",
++  "sos.share_until_safe": "Votre position continue d'être mise à jour jusqu'à ce que vous annuliez ou appuyiez sur « Je suis en sécurité », pour que vos contacts puissent suivre votre trajet.",
+   "inbox.tab_all": "Tout",
+   "inbox.tab_alerts": "Alertes",
+   "inbox.tab_offers": "Offres",
+   "inbox.tab_tips": "Astuces",
+   "inbox.none_alerts": "Aucune alerte pour l'instant. C'est une bonne nouvelle.",
+   "offers.title": "Aucune offre. Jamais.",
+-  "offers.body": "Sentri n'a ni promotions, ni publicitÃ©s, ni points Ã  vous revendre votre attention. La seule chose qui compte ici, ce sont les personnes.",
+-  "offers.cta": "Ouvrez l'onglet Contacts et invitez vos proches - chaque ami de plus, c'est quelqu'un de plus qui peut rÃ©pondre.",
+-  "tips.title": "Astuces de sÃ©curitÃ© au quotidien",
+-  "tips.tip1": "Avant un trajet de nuit, partagez votre position en direct avec deux personnes de confiance - elles suivent votre trajet en temps rÃ©el.",
+-  "tips.tip2": "Choisissez vos PIN avec soin : le PIN d'annulation doit Ãªtre rapide Ã  taper, et gardÃ© pour vous seul.",
+-  "tips.tip3": "Si quelqu'un vous force Ã  donner votre PIN, le PIN anti-contrainte ressemble Ã  une annulation mais prÃ©vient vos contacts en secret.",
+-  "tips.tip4": "En rentrant chez vous ? Gardez le tÃ©lÃ©phone dans une poche accessible en marchant, pas une oÃ¹ il faut s'arrÃªter pour chercher.",
+-  "tips.tip5": "Rechargez avant de partir. Les alertes de batterie faible atteignent quand mÃªme vos contacts, mais une batterie pleine garde votre position Ã  jour.",
+-  "map.travel_still": "Ã€ l'arrÃªt",
+-  "map.travel_walk": "Ã€ pied",
++  "offers.body": "Sentri n'a ni promotions, ni publicités, ni points à vous revendre votre attention. La seule chose qui compte ici, ce sont les personnes.",
++  "offers.cta": "Ouvrez l'onglet Contacts et invitez vos proches - chaque ami de plus, c'est quelqu'un de plus qui peut répondre.",
++  "tips.title": "Astuces de sécurité au quotidien",
++  "tips.tip1": "Avant un trajet de nuit, partagez votre position en direct avec deux personnes de confiance - elles suivent votre trajet en temps réel.",
++  "tips.tip2": "Choisissez vos PIN avec soin : le PIN d'annulation doit être rapide à taper, et gardé pour vous seul.",
++  "tips.tip3": "Si quelqu'un vous force à donner votre PIN, le PIN anti-contrainte ressemble à une annulation mais prévient vos contacts en secret.",
++  "tips.tip4": "En rentrant chez vous ? Gardez le téléphone dans une poche accessible en marchant, pas une où il faut s'arrêter pour chercher.",
++  "tips.tip5": "Rechargez avant de partir. Les alertes de batterie faible atteignent quand même vos contacts, mais une batterie pleine garde votre position à jour.",
++  "map.travel_still": "À l'arrêt",
++  "map.travel_walk": "À pied",
+   "map.travel_run": "En course",
+-  "map.travel_ride": "Ã€ vÃ©lo",
++  "map.travel_ride": "À vélo",
+   "map.travel_drive": "Au volant",
+   "map.travel_train": "En train",
+   "map.travel_flight": "En vol",
+-  "police.call_service": "Appeler {n} Â· {service}",
+-  "police.world_note": "Voici les numÃ©ros d'urgence qui rÃ©pondent en {name}. La liste des commandements de la police nigÃ©riane ne s'applique pas ici.",
+-  "police.global_note": "Sentri garde l'annuaire de la police nigÃ©riane pour le NigÃ©ria uniquement. Ailleurs, les numÃ©ros ci-dessus rejoignent les urgences de votre pays.",
++  "police.call_service": "Appeler {n} · {service}",
++  "police.world_note": "Voici les numéros d'urgence qui répondent en {name}. La liste des commandements de la police nigériane ne s'applique pas ici.",
++  "police.global_note": "Sentri garde l'annuaire de la police nigériane pour le Nigéria uniquement. Ailleurs, les numéros ci-dessus rejoignent les urgences de votre pays.",
+   "watch.card": "Montres",
+-  "watch.card_sub": "Voyez les alertes Sentri sur votre montre jumelÃ©e.",
++  "watch.card_sub": "Voyez les alertes Sentri sur votre montre jumelée.",
+   "watch.title": "Montres",
+-  "watch.paired": "Fonctionne avec votre montre jumelÃ©e",
+-  "watch.intro": "Jumelez votre montre Ã  ce tÃ©lÃ©phone avec l'application de la montre (Wear OS et la plupart des montres connectÃ©es reflÃ¨tent les notifications du tÃ©lÃ©phone). Rien Ã  installer ni Ã  connecter en plus.",
+-  "watch.works": "Une fois jumelÃ©e, tout ce que Sentri vous montre sur le tÃ©lÃ©phone arrive aussi sur votre montre - sonneries SOS, mises Ã  jour de position et rÃ©ponses.",
+-  "watch.test_btn": "Envoyer un ping test Ã  ma montre",
++  "watch.paired": "Fonctionne avec votre montre jumelée",
++  "watch.intro": "Jumelez votre montre à ce téléphone avec l'application de la montre (Wear OS et la plupart des montres connectées reflètent les notifications du téléphone). Rien à installer ni à connecter en plus.",
++  "watch.works": "Une fois jumelée, tout ce que Sentri vous montre sur le téléphone arrive aussi sur votre montre - sonneries SOS, mises à jour de position et réponses.",
++  "watch.test_btn": "Envoyer un ping test à ma montre",
+   "watch.test_title": "Ping test Sentri",
+-  "watch.test_body": "Voici Ã  quoi ressemblera une alerte sur votre montre.",
+-  "watch.test_sent": "Ping envoyÃ©. Regardez votre poignet - il devrait vibrer d'un moment Ã  l'autre. Gardez les notifications de Sentri autorisÃ©es.",
++  "watch.test_body": "Voici à quoi ressemblera une alerte sur votre montre.",
++  "watch.test_sent": "Ping envoyé. Regardez votre poignet - il devrait vibrer d'un moment à l'autre. Gardez les notifications de Sentri autorisées.",
+   "contacts.pick": "Choisir dans les contacts",
+   "contacts.perm_denied": "L'autorisation Contacts est désactivée. Autorisez-la dans les réglages du téléphone, puis réessayez.",
+   "contacts.pick_failed": "Impossible d'ouvrir la liste des contacts. Réessayez.",
+diff --git a/mobile/assets/i18n/es.json b/mobile/assets/i18n/es.json
+--- a/mobile/assets/i18n/es.json
++++ b/mobile/assets/i18n/es.json
+@@ -371,21 +371,21 @@
+   "emergency.fire": "Bomberos",
+   "emergency.ambulance": "Ambulancia",
+   "emergency.note": "Las líneas oficiales pueden cambiar. El 112 llega a los servicios de emergencia en muchos países.",
+-  "sos.share_until_safe": "Tu ubicaciÃ³n sigue actualizÃ¡ndose hasta que canceles o pulses Â«Estoy a salvoÂ», para que tus contactos puedan seguir tu ruta.",
++  "sos.share_until_safe": "Tu ubicación sigue actualizándose hasta que canceles o pulses «Estoy a salvo», para que tus contactos puedan seguir tu ruta.",
+   "inbox.tab_all": "Todo",
+   "inbox.tab_alerts": "Alertas",
+   "inbox.tab_offers": "Ofertas",
+   "inbox.tab_tips": "Consejos",
+   "inbox.none_alerts": "Ninguna alerta por ahora. Es una buena noticia.",
+   "offers.title": "Ninguna oferta. Nunca.",
+-  "offers.body": "Sentri no tiene ofertas, anuncios ni puntos a cambio de tu atenciÃ³n. Lo Ãºnico que vale la pena reunir aquÃ­ son personas.",
+-  "offers.cta": "Abre la pestaÃ±a Contactos e invita a tu gente - cada amigo mÃ¡s, es una persona mÃ¡s que puede responder.",
++  "offers.body": "Sentri no tiene ofertas, anuncios ni puntos a cambio de tu atención. Lo único que vale la pena reunir aquí son personas.",
++  "offers.cta": "Abre la pestaña Contactos e invita a tu gente - cada amigo más, es una persona más que puede responder.",
+   "tips.title": "Consejos de seguridad diarios",
+-  "tips.tip1": "Antes de un viaje nocturno, comparte tu ubicaciÃ³n en directo con dos personas de confianza - siguen tu ruta mientras avanzas.",
+-  "tips.tip2": "Elige bien tus PIN: el PIN de cancelaciÃ³n debe escribirse rÃ¡pido, y guÃ¡rdalo solo para ti.",
+-  "tips.tip3": "Si alguien te obliga a dar tu PIN, el PIN de coacciÃ³n parece una cancelaciÃ³n pero avisa a tus contactos en secreto.",
+-  "tips.tip4": "Â¿Vuelves a casa? Lleva el telÃ©fono en un bolsillo al que llegues caminando, no en uno que te obligue a detenerte a buscar.",
+-  "tips.tip5": "Carga antes de salir. Las alertas de baterÃ­a baja igual llegan a tus contactos, pero una baterÃ­a llena mantiene tu ubicaciÃ³n fresca.",
++  "tips.tip1": "Antes de un viaje nocturno, comparte tu ubicación en directo con dos personas de confianza - siguen tu ruta mientras avanzas.",
++  "tips.tip2": "Elige bien tus PIN: el PIN de cancelación debe escribirse rápido, y guárdalo solo para ti.",
++  "tips.tip3": "Si alguien te obliga a dar tu PIN, el PIN de coacción parece una cancelación pero avisa a tus contactos en secreto.",
++  "tips.tip4": "¿Vuelves a casa? Lleva el teléfono en un bolsillo al que llegues caminando, no en uno que te obligue a detenerte a buscar.",
++  "tips.tip5": "Carga antes de salir. Las alertas de batería baja igual llegan a tus contactos, pero una batería llena mantiene tu ubicación fresca.",
+   "map.travel_still": "En reposo",
+   "map.travel_walk": "A pie",
+   "map.travel_run": "Corriendo",
+@@ -393,19 +393,19 @@
+   "map.travel_drive": "Conduciendo",
+   "map.travel_train": "En tren",
+   "map.travel_flight": "En vuelo",
+-  "police.call_service": "Llamar al {n} Â· {service}",
+-  "police.world_note": "Estas son las lÃ­neas de emergencia que responden en {name}. El directorio de la policÃ­a nigeriana no aplica aquÃ­.",
+-  "police.global_note": "Sentri guarda el directorio de la policÃ­a nigeriana solo para Nigeria. En el resto, las lÃ­neas de arriba alcanzan los servicios de emergencia de tu paÃ­s.",
++  "police.call_service": "Llamar al {n} · {service}",
++  "police.world_note": "Estas son las líneas de emergencia que responden en {name}. El directorio de la policía nigeriana no aplica aquí.",
++  "police.global_note": "Sentri guarda el directorio de la policía nigeriana solo para Nigeria. En el resto, las líneas de arriba alcanzan los servicios de emergencia de tu país.",
+   "watch.card": "Relojes",
+   "watch.card_sub": "Ve las alertas de Sentri en tu reloj emparejado.",
+   "watch.title": "Relojes",
+   "watch.paired": "Funciona con tu reloj emparejado",
+-  "watch.intro": "Empareja tu reloj con este telÃ©fono con la propia app del reloj (Wear OS y la mayorÃ­a de relojes inteligentes reflejan las notificaciones del telÃ©fono). Nada extra que instalar ni cuentas.",
+-  "watch.works": "Una vez emparejado, todo lo que Sentri te muestra en el telÃ©fono llega tambiÃ©n a tu reloj - timbres de SOS, avisos de ubicaciÃ³n y respuestas.",
++  "watch.intro": "Empareja tu reloj con este teléfono con la propia app del reloj (Wear OS y la mayoría de relojes inteligentes reflejan las notificaciones del teléfono). Nada extra que instalar ni cuentas.",
++  "watch.works": "Una vez emparejado, todo lo que Sentri te muestra en el teléfono llega también a tu reloj - timbres de SOS, avisos de ubicación y respuestas.",
+   "watch.test_btn": "Enviar un ping de prueba a mi reloj",
+   "watch.test_title": "Ping de prueba de Sentri",
+-  "watch.test_body": "AsÃ­ se verÃ¡ una alerta en tu reloj.",
+-  "watch.test_sent": "Ping enviado. Mira tu muÃ±eca - deberÃ­a vibrar enseguida. MantÃ©n las notificaciones de Sentri permitidas.",
++  "watch.test_body": "Así se verá una alerta en tu reloj.",
++  "watch.test_sent": "Ping enviado. Mira tu muñeca - debería vibrar enseguida. Mantén las notificaciones de Sentri permitidas.",
+   "contacts.pick": "Elegir de los contactos",
+   "contacts.perm_denied": "El permiso de contactos está desactivado. Actívalo en los ajustes del teléfono y vuelve a intentarlo.",
+   "contacts.pick_failed": "No se pudo abrir la lista de contactos. Inténtalo de nuevo.",
