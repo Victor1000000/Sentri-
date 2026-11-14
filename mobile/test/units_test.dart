@@ -205,7 +205,7 @@ void main() {
       expect(d, greaterThan(5400));
       expect(d, lessThan(6600));
       // A degree of latitude is close enough to 111 km anywhere.
-      expect(metresBetween(0, 0, 1, 0), closeTo(111_195, 300));
+      expect(metresBetween(0, 0, 1, 0), closeTo(111195, 300));
       // Zero distance for the same point, whatever the order.
       expect(metresBetween(6.5, 3.4, 6.5, 3.4), 0);
       expect(metresBetween(6.5, 3.4, 6.45, 3.40), d);

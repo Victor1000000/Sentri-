@@ -300,12 +300,11 @@ Future<void> showWatchTestNote(String title, String body) async {
   try {
     final android = _local.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
     await android?.createNotificationChannel(
-      const AndroidNotificationDetails(
+      AndroidNotificationChannel(
         'sentri_watch',
         'Watches',
-        channelDescription: 'The test ping from the Watches screen, so you can see it arrive on your paired watch.',
+        description: 'The test ping from the Watches screen, so you can see it arrive on your paired watch.',
         importance: Importance.defaultImportance,
-        priority: Priority.defaultPriority,
       ),
     );
     final enabled = await android?.areNotificationsEnabled() ?? true;
