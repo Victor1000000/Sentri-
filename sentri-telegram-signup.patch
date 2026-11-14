@@ -8493,7 +8493,14 @@ diff --git a/backend/src/modules/share/routes.ts b/backend/src/modules/share/rou
 diff --git a/backend/test/share.test.ts b/backend/test/share.test.ts
 --- a/backend/test/share.test.ts
 +++ b/backend/test/share.test.ts
-@@ -63,13 +63,15 @@
+@@ -1,5 +1,6 @@
+ import { describe, expect, it } from 'vitest';
+ import Fastify from 'fastify';
++import { z } from 'zod';
+ import { FixedWindowLimiter } from '../src/lib/rate-limit.js';
+ import { createPinPair } from '../src/lib/pin.js';
+ import { MemoryInbox } from '../src/modules/inbox/memory-inbox.js';
+@@ -63,13 +64,15 @@
    it('the contact follows the latest position while sharing, and nobody else can update it', async () => {
      const r = await rig();
      const s = (await r.svc.start('u1', ['c1'], { lat: 1, lon: 1, at: 1 })) as { id: string };
@@ -8511,7 +8518,37 @@ diff --git a/backend/test/share.test.ts b/backend/test/share.test.ts
      expect(d.canRespond).toBe(false);
      expect(await r.inboxSvc.respond('uc1', item.id)).toBe('not_allowed');
    });
-@@ -213,6 +215,9 @@
+@@ -160,6 +163,14 @@
+   it('the history route returns each past share once', async () => {
+     const r = await rig();
+     const a = Fastify();
++    // The production app maps a schema refusal to 400 (app.ts setErrorHandler); the
++    // bare rig needs the same mapping now that the share geo schema refuses junk (v41).
++    a.setErrorHandler((err, _req, reply) => {
++      if (err instanceof z.ZodError) return reply.code(400).send({ error: 'bad_request' });
++      const e = err as { statusCode?: number };
++      if (e.statusCode && e.statusCode < 500) return reply.code(e.statusCode).send({ error: 'bad_request' });
++      return reply.code(500).send({ error: 'internal' });
++    });
+     registerShareRoutes(a, {
+       service: r.svc,
+       authenticate: async (req) => (req.headers['x-user'] as string | undefined) ?? null,
+@@ -191,6 +202,14 @@
+   async function app() {
+     const r = await rig();
+     const a = Fastify();
++    // The production app maps a schema refusal to 400 (app.ts setErrorHandler); the
++    // bare rig needs the same mapping now that the share geo schema refuses junk (v41).
++    a.setErrorHandler((err, _req, reply) => {
++      if (err instanceof z.ZodError) return reply.code(400).send({ error: 'bad_request' });
++      const e = err as { statusCode?: number };
++      if (e.statusCode && e.statusCode < 500) return reply.code(e.statusCode).send({ error: 'bad_request' });
++      return reply.code(500).send({ error: 'internal' });
++    });
+     registerShareRoutes(a, {
+       service: r.svc,
+       authenticate: async (req) => (req.headers['x-user'] as string | undefined) ?? null,
+@@ -213,6 +232,9 @@
      expect(st.statusCode).toBe(201);
      const { id } = st.json();
      expect((await a.inject({ method: 'PUT', url: `/v1/shares/${id}/location`, headers: h, payload: { lat: 6.6, lon: 3.4 } })).statusCode).toBe(204);
