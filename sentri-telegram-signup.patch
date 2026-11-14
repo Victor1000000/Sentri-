@@ -13095,7 +13095,15 @@ diff --git a/backend/src/modules/inbox/service.ts b/backend/src/modules/inbox/se
    /** Not offered for a duress alert: the person may be under watch, and a call could put them at risk. */
    callPhone: string | null;
    canRespond: boolean;
-@@ -152,7 +153,7 @@
+@@ -145,14 +146,14 @@
+     if (!i) return null;
+     await this.inbox.markRead(userId, id, this.o.clock());
+     const state = await this.live(i);
+-    let geo = i.geo ?? null;
++    let geo: { lat: number; lon: number; at: number; path?: { lat: number; lon: number }[]; mode?: string } | null = i.geo ?? null;
+     if (i.sosId && state !== 'ended') {
+       const v = await this.engine.alertView(i.sosId);
+       if (v !== 'invalid' && v !== 'ended' && v.geo) geo = v.geo;
      }
      if (i.kind === 'share_start' && i.shareId && state !== 'ended' && this.o.shares) {
        const g = (await this.o.shares.get(i.shareId))?.lastGeo;
