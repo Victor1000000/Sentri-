@@ -983,4 +983,43 @@ Three errors, all in new v42 code, plus one packaging trap:
   the new patch carries only the deltas (smaller); PUT is CREATE again (patch
   absent). verify-patch20/put20-prep/deploy20 are generic, unchanged.
 
+### v42 mojibake repair (found during in-APK verification)
+
+check-apk20's `yo mojibake gone: False` was NOT a display artifact: the v41
+key appends into the 7 pre-existing tables (en/ha/ig/pcm/yo/fr/es, 35 keys
+each) were written double-encoded - proper UTF-8 bytes misread as CP1252 and
+re-saved. The APK's yo.json contained 350 U+00C3 chars, all in v41-added
+values. This shipped broken in v41 too; fixed in v42.
+
+- Diagnostics: mojiscan42.ps1 (C3/C2 flags), mojiscan2b.ps1 (strict-repair
+  candidates), mojiforen42.ps1 (codepoint dumps - the ground truth). Console
+  displays of non-ASCII are useless; classify by codepoints only.
+- Correct repair rule: value is mojibake iff (a) it contains U+00C3/U+00C2,
+  (b) every char has an EXACT CP1252 mapping (1252 encode->decode round-trip
+  reproduces the value byte-for-byte), (c) strict 1252->UTF-8 decode succeeds
+  and differs, (d) repaired is shorter and free of C3/C2/FFFD/'?'.
+- WRONG guards, both learned the hard way: (1) "all chars <= U+00FF" fails
+  because mojibake legitimately contains CP1252-only glyphs ABOVE U+00FF
+  (U+0152 OE, U+20AC euro, U+201E low-9 quote, U+201C) - pass 1 with that
+  guard repaired only 57/86. (2) bare "strict decode succeeds" corrupts
+  proper text: best-fit mapping turns proper Yoruba/Igbo chars (e1, 1ECD,
+  combining marks) into '?' (valid ASCII), so ig showed 307 false
+  "repairable" values. The exact-round-trip test is what separates them:
+  proper chars have no 1252 mapping, so the round-trip breaks.
+- v42-appended keys in yo (contacts.pick, travel.*, map.night_note,
+  health.water_first) were verified ALREADY proper (strict repair throws on
+  them) and were left untouched.
+- Scripts: mojifix42.ps1 (pass 1, 57 values) + mojifix2b42.ps1 (pass 2,
+  29 values) rebuilt the 7 tables pretty/LF/no-BOM with a custom JsonStr
+  escaper. Total 86 values repaired; post-repair gates all green
+  (19 x 418 parity, placeholder parity, LF). yo.json 32014->30419 bytes
+  (mojibake inflates char counts).
+- The v41-era keys repaired include police.call_service (en/ha/ig/pcm/yo/fr/es
+  now `Call {n} - {service}` with a proper middle dot), fr/es
+  sos.share_until_safe + offers.* + tips.* + police.world_note/global_note +
+  watch.*, and yo sos.share_until_safe + inbox.* + offers.cta + tips.* +
+  map.travel_* + police.*_note + watch.* (now real Yoruba with combining
+  marks, matching the file's existing NFC/NFD convention).
+
+
 

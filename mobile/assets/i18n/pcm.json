@@ -393,7 +393,7 @@
   "map.travel_drive": "Dey drive",
   "map.travel_train": "Train",
   "map.travel_flight": "Flight",
-  "police.call_service": "Call {n} Â· {service}",
+  "police.call_service": "Call {n} · {service}",
   "police.world_note": "Na these emergency lines dey answer for {name}. Nigeria police command list no concern here.",
   "police.global_note": "Sentri keep Nigeria police directory for Nigeria alone. Outside, the lines above na your country own emergency service.",
   "watch.card": "Wristwatch",

@@ -393,7 +393,7 @@
   "map.travel_drive": "Driving",
   "map.travel_train": "On a train",
   "map.travel_flight": "In flight",
-  "police.call_service": "Call {n} Â· {service}",
+  "police.call_service": "Call {n} · {service}",
   "police.world_note": "These are the emergency lines that answer in {name}. The Nigerian command list does not apply here.",
   "police.global_note": "Sentri keeps the Nigerian Police directory for Nigeria only. Everywhere else, the lines above reach your country's emergency services.",
   "watch.card": "Watches",
