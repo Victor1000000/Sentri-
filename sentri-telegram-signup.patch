@@ -1,0 +1,30 @@
+diff --git a/mobile/test/units_test.dart b/mobile/test/units_test.dart
+--- a/mobile/test/units_test.dart
++++ b/mobile/test/units_test.dart
+@@ -205,7 +205,7 @@
+       expect(d, greaterThan(5400));
+       expect(d, lessThan(6600));
+       // A degree of latitude is close enough to 111 km anywhere.
+-      expect(metresBetween(0, 0, 1, 0), closeTo(111_195, 300));
++      expect(metresBetween(0, 0, 1, 0), closeTo(111195, 300));
+       // Zero distance for the same point, whatever the order.
+       expect(metresBetween(6.5, 3.4, 6.5, 3.4), 0);
+       expect(metresBetween(6.5, 3.4, 6.45, 3.40), d);
+diff --git a/mobile/lib/features/push/push_service.dart b/mobile/lib/features/push/push_service.dart
+--- a/mobile/lib/features/push/push_service.dart
++++ b/mobile/lib/features/push/push_service.dart
+@@ -300,12 +300,11 @@
+   try {
+     final android = _local.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+     await android?.createNotificationChannel(
+-      const AndroidNotificationDetails(
++      AndroidNotificationChannel(
+         'sentri_watch',
+         'Watches',
+-        channelDescription: 'The test ping from the Watches screen, so you can see it arrive on your paired watch.',
++        description: 'The test ping from the Watches screen, so you can see it arrive on your paired watch.',
+         importance: Importance.defaultImportance,
+-        priority: Priority.defaultPriority,
+       ),
+     );
+     final enabled = await android?.areNotificationsEnabled() ?? true;
