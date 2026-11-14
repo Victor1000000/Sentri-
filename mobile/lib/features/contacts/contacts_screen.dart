@@ -3,6 +3,8 @@ import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_contacts/flutter_contacts.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../core/emergency.dart';
@@ -344,6 +346,7 @@ class _AddSheetState extends State<_AddSheet> {
   final _phone = TextEditingController();
   String? _error;
   bool _busy = false;
+  bool _picking = false;
 
   String t(String k, [Map<String, String> a = const {}]) => widget.i18n.t(k, a);
 
@@ -351,6 +354,40 @@ class _AddSheetState extends State<_AddSheet> {
   void dispose() {
     _phone.dispose();
     super.dispose();
+  }
+
+  /// v42: pick a number from the phone's own saved contacts, the thing Vic asked
+  /// for so nobody has to type an 11-digit number by hand. Sentri asks for the
+  /// phone's contacts permission explicitly, the system's own picker opens, and
+  /// ONLY the one contact the person tapped comes back into the app - nothing
+  /// else about the phone book is read, kept or sent anywhere. The number lands
+  /// in the field, where the person can still correct it before saving.
+  Future<void> _pickContact() async {
+    if (_picking) return;
+    setState(() {
+      _picking = true;
+      _error = null;
+    });
+    try {
+      if (!await Permission.contacts.request().isGranted) {
+        if (mounted) setState(() => _error = t('contacts.perm_denied'));
+        return;
+      }
+      final picked = await FlutterContacts.selectContact();
+      if (picked == null) return; // the person closed the picker: nothing happened
+      // selectContact returns a slim record; the phones live on the full one.
+      final full = await FlutterContacts.getContact(picked.id, withProperties: true);
+      final raw = full.phones.isEmpty ? null : full.phones.first.number;
+      if (raw == null || raw.trim().isEmpty) {
+        if (mounted) setState(() => _error = t('contacts.pick_no_number'));
+        return;
+      }
+      if (mounted) setState(() => _phone.text = raw.trim());
+    } catch (_) {
+      if (mounted) setState(() => _error = t('contacts.pick_failed'));
+    } finally {
+      if (mounted) setState(() => _picking = false);
+    }
   }
 
   Future<void> _save() async {
@@ -396,7 +433,7 @@ class _AddSheetState extends State<_AddSheet> {
     return Padding(
       padding: EdgeInsets.fromLTRB(0, 12, 0, pad),
       child: SizedBox(
-        height: 330,
+        height: 400,
         child: Column(children: [
           Container(width: 44, height: 4, decoration: BoxDecoration(color: cs.onSurface.withValues(alpha: 0.25), borderRadius: BorderRadius.circular(2))),
           const SizedBox(height: 14),
@@ -407,13 +444,23 @@ class _AddSheetState extends State<_AddSheet> {
               children: [
                 Text(t('contacts.add'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
                 const SizedBox(height: 14),
+                // v42: "choose from contacts" rides above the field - the natural
+                // order is pick first, type only when the number is not saved.
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(44)),
+                  onPressed: _picking ? null : () => unawaited(_pickContact()),
+                  icon: _picking
+                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.contacts_outlined, size: 20),
+                  label: Text(t('contacts.pick')),
+                ),
+                const SizedBox(height: 12),
                 TextField(
                   controller: _phone,
                   keyboardType: TextInputType.phone,
                   autofillHints: const [AutofillHints.telephoneNumber],
                   decoration: InputDecoration(hintText: t('contacts.phone_hint'), isDense: true, counterText: ''),
                   maxLength: 20,
-                  autofocus: true,
                   onChanged: (_) {
                     if (_error != null) setState(() => _error = null);
                   },

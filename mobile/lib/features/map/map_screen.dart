@@ -56,8 +56,10 @@ bool _sameWord(String a, String b) => a.trim().toLowerCase() == b.trim().toLower
 // and Hybrid use Google's worldwide imagery (it covers every country
 // deeply, unlike regional servers that grey out with "map data not yet available"
 // when you zoom in); Hybrid draws place names and roads on top of the imagery.
-// Night is CARTO's dark map, made for riding after dark; the layer key is the
-// same one the standard voyager tiles already use in AppConfig.tileUrl.
+// Night is the night-vision layer (v42): the same CARTO dark map, with the
+// person's own movement painted on top as green-to-yellow heat (see the night
+// layer in MapScreenState); the layer key is the same one the standard voyager
+// tiles already use in AppConfig.tileUrl.
 const _cartoKey = 'cb1_50g5_1_3ee8841be5e9f8c4341efbe3';
 const _googleSatelliteUrl = 'https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}';
 const _googleHybridUrl = 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}';
@@ -143,6 +145,26 @@ class MapScreenState extends State<MapScreen> {
   /// Without a settings object (tests) the map just stays Standard.
   String get _mapType => widget.settings?.mapType ?? 'hybrid';
 
+  // -- the night-vision heat layer (v42) --
+  // The old "Night" layer was a plain dark map. What Vic actually wanted is the
+  // night-vision look: a dark map where the person's own movement glows. So on
+  // the night layer the map keeps every point the phone has actually stood at
+  // while it is open (plus the running share's breadcrumb trail) and paints it
+  // as soft green-to-yellow heat blobs, denser movement glowing hotter, like a
+  // thermal scope. The heat is the person's OWN tracked routes - no crime or
+  // "danger" data is invented anywhere.
+  final _heat = <LatLng>[];
+
+  /// Adds one point to the heat history if it is far enough from the previous
+  /// one to mean real movement (about 4 m), never letting the list grow past
+  /// [max] points.
+  void _addHeat(LatLng p) {
+    if (_heat.isNotEmpty && const Distance()(_heat.last, p) <= 4) return;
+    _heat.add(p);
+    const max = 600;
+    if (_heat.length > max) _heat.removeRange(0, _heat.length - max);
+  }
+
   /// Switches the base layer, remembers the choice, repaints the map.
   void _setMapType(String type) {
     unawaited(widget.settings?.update(mapType: type));
@@ -158,7 +180,7 @@ class MapScreenState extends State<MapScreen> {
       ('standard', Icons.map_outlined, const Color(0xFF4CC98A)),
       ('satellite', Icons.satellite_outlined, const Color(0xFF5F8D4E)),
       ('hybrid', Icons.layers_outlined, const Color(0xFF3D8BF0)),
-      ('night', Icons.dark_mode_outlined, const Color(0xFF2B2B3A)),
+      ('night', Icons.local_fire_department_outlined, const Color(0xFF243A2B)),
     ];
     showModalBottomSheet<void>(
       context: context,
@@ -191,6 +213,10 @@ class MapScreenState extends State<MapScreen> {
                   _setMapType(r.$1);
                 },
               ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 6, 4, 0),
+              child: Text(t('map.night_note'), style: TextStyle(fontSize: 12, height: 1.4, color: cs.onSurface.withValues(alpha: 0.6))),
+            ),
           ]),
         ),
       ),
@@ -244,9 +270,16 @@ class MapScreenState extends State<MapScreen> {
     unawaited(_update());
     _timer = Timer.periodic(widget.refresh, (_) => unawaited(_update()));
     _startRefinement();
-    // While a location share runs, every new breadcrumb repaints the trail.
+    // While a location share runs, every new breadcrumb repaints the trail -
+    // and feeds the night layer's heat (v42).
     _shareListener = widget.share == null ? null : () {
-      if (mounted) setState(() {});
+      if (!mounted) return;
+      final share = widget.share;
+      if (share != null && share.active != null && share.liveTrail.isNotEmpty) {
+        final last = share.liveTrail.last;
+        _addHeat(LatLng(last[0], last[1]));
+      }
+      setState(() {});
     };
     if (_shareListener != null) widget.share!.addListener(_shareListener!);
   }
@@ -316,6 +349,8 @@ class MapScreenState extends State<MapScreen> {
       _fix = f;
       _denied = false;
     });
+    // The night layer's heat grows from every accepted fix too.
+    _addHeat(LatLng(f.lat, f.lon));
     final here = LatLng(f.lat, f.lon);
     try {
       _map.move(here, _map.camera.zoom < 15 ? 17 : _map.camera.zoom);
@@ -1188,6 +1223,31 @@ class MapScreenState extends State<MapScreen> {
               children: [
                 for (final url in sentriBaseLayers(_mapType).urls)
                   TileLayer(urlTemplate: url, userAgentPackageName: 'ng.sentri.sentri'),
+                // v42: the night layer wears the night-vision heat - every point
+                // this phone has actually stood at while the map is open (and the
+                // running share's trail) glows as a soft green-to-yellow blob,
+                // denser movement reading hotter, like a thermal scope.
+                if (_mapType == 'night' && _heat.isNotEmpty)
+                  MarkerLayer(markers: [
+                    for (final q in _heat)
+                      Marker(
+                        point: q,
+                        width: 96,
+                        height: 96,
+                        child: IgnorePointer(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              gradient: RadialGradient(colors: [
+                                const Color(0x5CFFE082),
+                                const Color(0x3CAED581),
+                                const Color(0x00AED581),
+                              ], stops: const [0.0, 0.55, 1.0]),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ]),
                 if (f != null)
                   CircleLayer(circles: [
                     CircleMarker(point: here, radius: (f.accuracyM ?? 20), useRadiusInMeter: true, color: cs.primary.withValues(alpha: 0.15), borderColor: cs.primary.withValues(alpha: 0.4), borderStrokeWidth: 1),

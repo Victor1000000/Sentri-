@@ -354,7 +354,7 @@
   "map.layer_title": "Zuwan taswira",
   "route.done": "Yi amfani da wannan hanyar",
   "route.build": "Ka gina hanyarka",
-  "map.layer_night": "Dare",
+  "map.layer_night": "Hasken zafi na dare",
   "route.undo": "Dawo da baya",
   "route.busy": "Ana zana hanyarka…",
   "map.layer_satellite": "Satellite",
@@ -405,5 +405,16 @@
   "watch.test_btn": "Aika sanarwar gwaji zuwa agogona",
   "watch.test_title": "Gwajin Sentri",
   "watch.test_body": "Ga yadda gargadi zai yi kama a agogonka.",
-  "watch.test_sent": "An aiko. Duba hannunka - ya kamata ya buga nan ba da jimawa ba. Ka bar sanarwar Sentri ke aiki."
+  "watch.test_sent": "An aiko. Duba hannunka - ya kamata ya buga nan ba da jimawa ba. Ka bar sanarwar Sentri ke aiki.",
+  "contacts.pick": "Zaɓi daga cikin lambobin waya",
+  "contacts.perm_denied": "Izinin lambobin waya bai a ba da shi ba. Ka ba da izini a cikin saitunan wayarka, sannan ka sake gwadawa.",
+  "contacts.pick_failed": "Ba a iya buɗe jerin lambobin waya. Ka sake gwadawa.",
+  "contacts.pick_no_number": "Wannan lamba ba ta da lambar waya da aka ajiye.",
+  "health.water_first": "An saita tunatar da ruwa: kowane {n}. Wannan sauti shi ne tabbacin sanarwa tana aiki.",
+  "travel.title": "Tafiya",
+  "travel.note": "Wayarka na karanta yadda kake motsi — a ƙafa, da keke, da mota, da jirgin ƙasa ko jirgin sama. Lokacin da ka aika gargadi ko ka raba wurinka kai tsaye, haka ma zai kai wa abokanka. Babu abin da ake raba daga wannan allo.",
+  "travel.waiting": "Ana ƙoƙarin ganin yadda kake tafiya da sauri...",
+  "travel.speed": "Kusan {n} km/h",
+  "travel.stream_failed": "Ba a iya karanta wurinka yanzu. Ka tabbatar an ba da izinin wuri, sannan ka sake buɗewa.",
+  "map.night_note": "Ganuwar dare: faifai duhu na haskaka inda ka wuce. Yana zana hanyoyinka da aka bi — babu wata wasu bayanai."
 }

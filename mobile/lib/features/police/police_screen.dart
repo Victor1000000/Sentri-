@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/emergency.dart';
 import '../../core/i18n/i18n.dart';
 import '../photos/photo_police.dart';
+import '../photos24/photo_police_world.dart';
 import 'police_directory.dart';
 
 /// Digits only (plus a leading +), so a copied line with spaces dials correctly.
@@ -128,7 +129,50 @@ class _ParallaxListState extends State<_ParallaxList> {
           ],
           // The world's lines for this phone's country: police, fire and ambulance,
           // each one tappable, no copy-paste. Only shown when a country is known.
+          // v42: the country also gets its region's police and firefighter
+          // photos, so the tab opens on real faces from the person's part of the
+          // world, not only Nigerian ones. Photos decode once and are cached.
           if (country != null) ...[
+            if (policePhotoForCountry(country.iso) case final policePhoto?) ...[
+              ClipRRect(
+                borderRadius: BorderRadius.circular(24),
+                child: SizedBox(
+                  height: 150,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Transform.translate(
+                        offset: Offset(0, (-_offset * 0.35).clamp(-60.0, 60.0)),
+                        child: Image.memory(policePhoto, fit: BoxFit.cover, gaplessPlayback: true),
+                      ),
+                      Align(
+                        alignment: Alignment.bottomCenter,
+                        child: Container(
+                          decoration: const BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.bottomCenter,
+                              end: Alignment.topCenter,
+                              colors: [Color(0x66000000), Color(0x00000000)],
+                            ),
+                          ),
+                        ),
+                      ),
+                      Align(
+                        alignment: Alignment.bottomLeft,
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                          child: Text(
+                            '${country.flag}  ${country.name}',
+                            style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700, shadows: [Shadow(color: Color(0x99000000), blurRadius: 8, offset: Offset(0, 1))]),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+            ],
             Card(
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -160,6 +204,33 @@ class _ParallaxListState extends State<_ParallaxList> {
                 ]),
               ),
             ),
+            // v42: the region's firefighters, right under the lines. Labelled
+            // with the same words the card uses, so nothing new has to be read.
+            if (firePhotoForCountry(country.iso) case final firePhoto?) ...[
+              const SizedBox(height: 14),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(20),
+                child: SizedBox(
+                  height: 120,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Image.memory(firePhoto, fit: BoxFit.cover, gaplessPlayback: true),
+                      Align(
+                        alignment: Alignment.bottomLeft,
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+                          child: Text(
+                            '${country.flag}  ${t('emergency.fire')}',
+                            style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700, shadows: [Shadow(color: Color(0x99000000), blurRadius: 8, offset: Offset(0, 1))]),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 20),
           ],
           if (ngLayout) ...[

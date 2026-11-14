@@ -354,7 +354,7 @@
   "map.layer_title": "Map layers",
   "route.done": "Use this route",
   "route.build": "Build your route",
-  "map.layer_night": "Night",
+  "map.layer_night": "Night vision heat",
   "route.undo": "Undo",
   "route.busy": "Drawing your route…",
   "map.layer_satellite": "Satellite",
@@ -405,5 +405,16 @@
   "watch.test_btn": "Send a test ping to my watch",
   "watch.test_title": "Sentri test ping",
   "watch.test_body": "This is what an alert will look like on your watch.",
-  "watch.test_sent": "Ping sent. Check your wrist - it should buzz in a moment. Keep notifications allowed for Sentri."
+  "watch.test_sent": "Ping sent. Check your wrist - it should buzz in a moment. Keep notifications allowed for Sentri.",
+  "contacts.pick": "Choose from contacts",
+  "contacts.perm_denied": "Contacts permission is off. Allow it in the phone's settings, then try again.",
+  "contacts.pick_failed": "Couldn't open the contacts list. Try again.",
+  "contacts.pick_no_number": "That contact has no phone number saved.",
+  "health.water_first": "Water reminder set: every {n}. This chime is your proof that notifications work.",
+  "travel.title": "Travel",
+  "travel.note": "Your phone reads how you're moving — on foot, by bike, car, train or plane. When you send an alert or share live, that is shared with your contacts too. Nothing is shared from this screen.",
+  "travel.waiting": "Finding how fast you're moving...",
+  "travel.speed": "About {n} km/h",
+  "travel.stream_failed": "Can't read your location right now. Make sure location is allowed, then reopen.",
+  "map.night_note": "Night vision: the dark map glows where you have moved. It paints your own tracked routes — no other data."
 }

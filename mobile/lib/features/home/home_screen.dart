@@ -15,10 +15,12 @@ import '../contacts/contacts_screen.dart';
 import '../devices/watch_screen.dart';
 import '../health/exercise_controller.dart';
 import '../inbox/inbox_controller.dart';
+import '../location/location.dart';
 import '../police/police_directory.dart';
 import '../inbox/inbox_screen.dart';
 import '../share/share_controller.dart';
 import '../share/share_screen.dart';
+import '../location/travel_screen.dart';
 import '../../core/widgets/flat.dart';
 import '../../core/widgets/avatar_icons.dart';
 import '../onboarding/floating3d.dart';
@@ -36,7 +38,7 @@ import '../sos/sos_controller.dart';
 /// alarm red and the face smirks, not frowns. The face blinks every two seconds
 /// so it feels alive; the shared painter lives in flat.dart.
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key, required this.sos, required this.settings, required this.i18n, required this.bridge, required this.api, required this.inbox, required this.share, required this.checkin, required this.police, required this.people, required this.profile, required this.exercise});
+  const HomeScreen({super.key, required this.sos, required this.settings, required this.i18n, required this.bridge, required this.api, required this.inbox, required this.share, required this.checkin, required this.police, required this.people, required this.profile, required this.exercise, required this.location});
   final SentriApi api;
   final InboxController inbox;
   final ShareController share;
@@ -48,6 +50,7 @@ class HomeScreen extends StatefulWidget {
   final NativeBridge bridge;
   final Profile profile;
   final ExerciseController exercise;
+  final LocationSource location;
 
   /// Names and drawn characters for the emergency contacts.
   final ContactPeople people;
@@ -275,10 +278,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   // The home functions as circles, the way the flat reference
                   // boards draw them: icon in a card circle, its name right
                   // underneath. A green LiveDot rides the share circle while a
-                  // share is running.
+                  // share is running. v42 adds the fourth circle, Travel, right
+                  // beside "Ways to call for help": the plane/train reading the
+                  // app already makes during shares, with a screen of its own.
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(22, 0, 22, 16),
-                    // Each circle gets an equal third of the row, so long names
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    // Each circle gets an equal quarter of the row, so long names
                     // like "Ways to call for help" wrap inside their own space
                     // instead of running off the screen edge.
                     child: Row(children: [
@@ -302,6 +307,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           label: t('triggers.title'),
                           icon: Icons.campaign_rounded,
                           onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => _ShortcutsPage(home: this))),
+                        ),
+                      ),
+                      Expanded(
+                        child: _CircleTile(
+                          label: t('travel.title'),
+                          icon: Icons.flight_takeoff_rounded,
+                          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => TravelScreen(location: widget.location, i18n: widget.i18n))),
                         ),
                       ),
                     ]),
@@ -336,7 +348,12 @@ class _Avatar extends StatelessWidget {
     final letter = name.isNotEmpty ? name.characters.first.toUpperCase() : '?';
     Widget inner;
     if (bytes != null) {
-      inner = Image.memory(bytes, fit: BoxFit.cover, gaplessPlayback: true);
+      // v42: errorBuilder - corrupt or unreadable photo bytes fall back to the
+      // letter avatar instead of taking the home screen's build down with them.
+      inner = Image.memory(bytes, fit: BoxFit.cover, gaplessPlayback: true, errorBuilder: (_, __, ___) {
+        final fallbackLetter = name.isNotEmpty ? name.characters.first.toUpperCase() : '?';
+        return Center(child: fallbackLetter != '?' ? Text(fallbackLetter, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)) : const Icon(Icons.person, size: 24));
+      });
     } else if (iconIdx != null) {
       inner = SentriAvatar(index: iconIdx, size: 46);
     } else {
@@ -396,8 +413,17 @@ class _ProfileSheetState extends State<_ProfileSheet> {
   }
 
   Future<void> _save() async {
-    await widget.profile.setName(_name.text, syncToServer: (n) => widget.api.saveProfile(name: n));
-    if (mounted) Navigator.of(context).pop();
+    // v42: setName now resolves as soon as the name is safe on the phone (the
+    // server mirror runs in the background), and this whole path is wrapped: no
+    // storage hiccup can ever leave the sheet stuck or take the app down. The
+    // sheet always closes.
+    try {
+      await widget.profile.setName(_name.text, syncToServer: (n) => widget.api.saveProfile(name: n));
+    } catch (_) {}
+    if (mounted) {
+      final nav = Navigator.of(context);
+      if (nav.canPop()) nav.pop();
+    }
   }
 
   @override

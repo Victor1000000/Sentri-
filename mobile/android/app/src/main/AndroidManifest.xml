@@ -21,6 +21,15 @@
          so a schedule survives doze and battery saving. Dropped schedules are re-armed
          inside the app on every open (see scheduleWaterReminder). -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- v42: on Android 14+ SCHEDULE_EXACT_ALARM is denied by default for newly installed
+         apps, and the inexact fallback can be pushed around by doze. USE_EXACT_ALARM is
+         granted automatically and honestly fits: the whole app is an alarm-keeper
+         (emergency gestures, water reminders). -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <!-- v42: Add contact can open the phone's own saved contacts list, so a number
+         does not have to be typed by hand. Shown to the person as an explicit
+         permission, asked in the add-contact sheet, never used in the background. -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
     <!-- Health Connect: the accurate heart-rate source on the phone. Read-only, one data type. -->
     <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
     <!-- The hardware step counter used by the exercise section (walk/run steps). -->

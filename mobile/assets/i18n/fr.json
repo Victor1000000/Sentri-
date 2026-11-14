@@ -354,7 +354,7 @@
   "map.layer_title": "Calques de la carte",
   "route.done": "Utiliser cet itinéraire",
   "route.build": "Prépare ton itinéraire",
-  "map.layer_night": "Nuit",
+  "map.layer_night": "Vision nocturne thermique",
   "route.undo": "Annuler",
   "route.busy": "Tracé de ton itinéraire…",
   "map.layer_satellite": "Satellite",
@@ -405,5 +405,16 @@
   "watch.test_btn": "Envoyer un ping test Ã  ma montre",
   "watch.test_title": "Ping test Sentri",
   "watch.test_body": "Voici Ã  quoi ressemblera une alerte sur votre montre.",
-  "watch.test_sent": "Ping envoyÃ©. Regardez votre poignet - il devrait vibrer d'un moment Ã  l'autre. Gardez les notifications de Sentri autorisÃ©es."
+  "watch.test_sent": "Ping envoyÃ©. Regardez votre poignet - il devrait vibrer d'un moment Ã  l'autre. Gardez les notifications de Sentri autorisÃ©es.",
+  "contacts.pick": "Choisir dans les contacts",
+  "contacts.perm_denied": "L'autorisation Contacts est désactivée. Autorisez-la dans les réglages du téléphone, puis réessayez.",
+  "contacts.pick_failed": "Impossible d'ouvrir la liste des contacts. Réessayez.",
+  "contacts.pick_no_number": "Ce contact n'a pas de numéro de téléphone enregistré.",
+  "health.water_first": "Rappel d'eau réglé : toutes les {n}. Ce carillon prouve que les notifications marchent.",
+  "travel.title": "Déplacements",
+  "travel.note": "Votre téléphone lit comment vous vous déplacez — à pied, à vélo, en voiture, en train ou en avion. Quand vous envoyez une alerte ou partagez en direct, vos contacts le voient aussi. Rien n'est partagé depuis cet écran.",
+  "travel.waiting": "Recherche de votre vitesse...",
+  "travel.speed": "Environ {n} km/h",
+  "travel.stream_failed": "Impossible de lire votre position pour le moment. Vérifiez que la localisation est autorisée, puis rouvrez.",
+  "map.night_note": "Vision nocturne : la carte sombre brille où vous êtes passé. Elle dessine vos propres trajets enregistrés — aucune autre donnée."
 }

@@ -73,6 +73,7 @@ enum WaterStatus { off, ok, noPermission, notScheduled }
 /// [scheduleWaterReminder]), so "still pending" means the phone really has the alarms.
 Future<WaterStatus> waterReminderStatus(int minutes) async {
   if (minutes <= 0) return WaterStatus.off;
+  await _ensureLocal();
   try {
     final android = _local.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
     var enabled = true;
@@ -107,6 +108,13 @@ Future<WaterStatus> waterReminderStatus(int minutes) async {
 /// language) live in every link's payload as a fingerprint; the pending list is read
 /// back from the phone itself, so a chain with a different pace or language is torn
 /// down and rebuilt, and a healthy chain is left strictly alone.
+///
+/// v42: the plugin is initialized HERE, on the water path, not only inside
+/// PushService.start. That start bails out early when Firebase is not configured -
+/// and a build where the Firebase config files were missing used to leave the
+/// local-notifications plugin uninitialized for the whole session, so no scheduled
+/// reminder could ever ring even with the chain dutifully laid. Scheduling no longer
+/// depends on push being set up at all.
 const _waterPayloadPrefix = 'water:';
 
 /// The chain's fixed id range - 48 slots, far from the emergency and health-note ids.
@@ -122,7 +130,26 @@ void _initTz() {
   _tzReady = true;
 }
 
+bool _localReady = false;
+
+/// Initializes the local-notifications plugin once, no matter which path got here.
+/// Idempotent in effect: initialize() is safe to call again (PushService.start calls
+/// it too), it just re-registers the same callbacks.
+Future<void> _ensureLocal() async {
+  if (_localReady) return;
+  _localReady = true;
+  try {
+    await _local.initialize(const InitializationSettings(
+      android: AndroidInitializationSettings('@drawable/ic_stat_sentri'),
+      iOS: DarwinInitializationSettings(),
+    ));
+  } catch (_) {
+    // Nothing about this may break scheduling; the plugin can still be usable.
+  }
+}
+
 Future<void> scheduleWaterReminder(int minutes, String title, String body) async {
+  await _ensureLocal();
   const details = NotificationDetails(
     android: AndroidNotificationDetails(
       'sentri_health',
@@ -255,6 +282,7 @@ Future<void> scheduleWaterReminder(int minutes, String title, String body) async
 /// A one-off health note (for example a heart-rate warning): same channel as the water
 /// reminder, noticeable but calm, and it replaces the previous note instead of piling up.
 Future<void> showHealthNote(String title, String body) async {
+  await _ensureLocal();
   try {
     final android = _local.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
     await android?.createNotificationChannel(_healthChannel);

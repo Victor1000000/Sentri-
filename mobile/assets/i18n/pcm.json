@@ -354,7 +354,7 @@
   "map.layer_title": "Map type dem",
   "route.done": "Use this route",
   "route.build": "Build your route",
-  "map.layer_night": "Night",
+  "map.layer_night": "Night vision heat",
   "route.undo": "Undo",
   "route.busy": "We dey draw your route…",
   "map.layer_satellite": "Satellite",
@@ -405,5 +405,16 @@
   "watch.test_btn": "Send test ping to my watch",
   "watch.test_title": "Sentri test ping",
   "watch.test_body": "Na so alert go look for your watch.",
-  "watch.test_sent": "Ping don go. Check your hand - e suppose buzz soon. Make notification dey allow for Sentri."
+  "watch.test_sent": "Ping don go. Check your hand - e suppose buzz soon. Make notification dey allow for Sentri.",
+  "contacts.pick": "Choose from your phone contacts",
+  "contacts.perm_denied": "Contacts permission no dey on. Allow am inside phone settings, then try again.",
+  "contacts.pick_failed": "E no fit open the contact list. Try again.",
+  "contacts.pick_no_number": "That contact no get phone number inside.",
+  "health.water_first": "Water reminder set: every {n}. This sound na proof say notification dey work.",
+  "travel.title": "Journey",
+  "travel.note": "Your phone dey read how you dey move — foot, bike, car, train or plane. When you send alert or share live, your contacts go see am too. Nothing dey share from this screen.",
+  "travel.waiting": "E dey find how fast you dey move...",
+  "travel.speed": "About {n} km/h",
+  "travel.stream_failed": "E no fit read your location now. Make sure location dey allow, then open am again.",
+  "map.night_note": "Night vision: the dark map dey glow where you don pass. E dey show your own route wey dem don track — no other data."
 }

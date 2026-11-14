@@ -354,7 +354,7 @@
   "map.layer_title": "Udi maapụ",
   "route.done": "Jiri ụzọ a",
   "route.build": "Wuo ụzọ gị",
-  "map.layer_night": "Abalị",
+  "map.layer_night": "Abalị ọkụ",
   "route.undo": "Wepụ nke ikpeazụ",
   "route.busy": "Na-ese ụzọ gị…",
   "map.layer_satellite": "Satellite",
@@ -405,5 +405,16 @@
   "watch.test_btn": "Zipá»¥ ozi ule na elekere m",
   "watch.test_title": "Ule Sentri",
   "watch.test_body": "Nke a bá»¥ ka á»‹dá» aka si dá»‹ na elekere gá»‹.",
-  "watch.test_sent": "Ezipá»¥la. Lelee aka gá»‹ - á» ga-ama nso. Gbalaga ka ndezi Sentri ná» na-akwá»¥do."
+  "watch.test_sent": "Ezipá»¥la. Lelee aka gá»‹ - á» ga-ama nso. Gbalaga ka ndezi Sentri ná» na-akwá»¥do.",
+  "contacts.pick": "Họrọ site na ndekọ ndị mmadụ gị",
+  "contacts.perm_denied": "Ikwu ekwe ndekọ ndị mmadụ adịghị orụ. Nyekwa ikwu na ntọala ekwentị gị, mgbe ahụ gbalịa ọzọ.",
+  "contacts.pick_failed": "O nweghị ike imeghe ndekọ ndị mmadụ. Gbalịa ọzọ.",
+  "contacts.pick_no_number": "Onye ahụ enweghị nọmba ekwentị edebanyere.",
+  "health.water_first": "E hoputara ncheta ịṅụ mmiri: kwa {n}. Ọnụ ọma a bụ ihe aka na-egosi na ọzi na-arụ ọrụ.",
+  "travel.title": "Njem",
+  "travel.note": "Ekwentị gị na-agụ ka ị na-agagharị — n'ụkwụ, ịnyịnya ígwè, ụgbọala, ụgbọ oloko ma ọ bụ ụgbọ elu. Mgbe ị zipu ọdọ ma ọ bụ kesaa ebe gị, ndị gị na-akpachapụ anya ga ahụkwa ya. Ọ dịghị ihe a na-ekesa site na ihuenyo a.",
+  "travel.waiting": "Ọ na-achọ ịma ọsọ ị na-agagharị...",
+  "travel.speed": "Nkeji {n} km/h",
+  "travel.stream_failed": "O nweghị ike ịgụ ebe ị nọ ugbu a. Gbaa mbọ hụ na a nyere ikwu ebe, mgbe ahụ meghee ọzọ.",
+  "map.night_note": "Ọhụ abalị: map gbara ọchịchịrị na-awụnwa okporo ụzọ ị gafere. Ọ na-ese ụzọ gị edebere — ọ dịghị data ọzọ."
 }

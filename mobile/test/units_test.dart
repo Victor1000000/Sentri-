@@ -266,6 +266,54 @@ void main() {
     });
   });
 
+  group('per-country languages (v42)', () {
+    List<String> codes(String? iso, {String current = 'en'}) =>
+        languagesForCountry(iso, current: current).map((l) => l.code).toList();
+
+    test('Nigerian numbers get the Nigerian set, unchanged', () {
+      expect(codes('ng'), ['en', 'pcm', 'ha', 'yo', 'ig']);
+      expect(codes('NG'), ['en', 'pcm', 'ha', 'yo', 'ig']); // case-insensitive
+    });
+
+    test('each region gets its language next to English', () {
+      expect(codes('ke'), ['en', 'sw']);
+      expect(codes('tz'), ['en', 'sw']);
+      expect(codes('et'), ['en', 'am']);
+      expect(codes('br'), ['en', 'pt']);
+      expect(codes('de'), ['en', 'de']);
+      expect(codes('it'), ['en', 'it']);
+      expect(codes('fr'), ['en', 'fr']);
+      expect(codes('mx'), ['en', 'es']);
+      expect(codes('eg'), ['en', 'ar']);
+      expect(codes('tr'), ['en', 'tr']);
+      expect(codes('id'), ['en', 'id']);
+      expect(codes('in'), ['en', 'hi']);
+      expect(codes('jp'), ['en', 'ja']);
+      expect(codes('kr'), ['en', 'ko']);
+      expect(codes('ru'), ['en', 'ru']);
+    });
+
+    test('Switzerland lists all four shipped languages', () {
+      expect(codes('ch'), ['en', 'de', 'fr', 'it']);
+    });
+
+    test('unknown countries get English alone', () {
+      expect(codes(null), ['en']);
+      expect(codes(''), ['en']);
+      expect(codes('xx'), ['en']);
+      expect(codes('us'), ['en']);
+    });
+
+    test('the language being read is always on the list', () {
+      // A person reading Swahili whose number is Nigerian still sees Swahili.
+      expect(codes('ng', current: 'sw'), ['en', 'pcm', 'ha', 'yo', 'ig', 'sw']);
+      // Reading French in Germany: French stays available.
+      expect(codes('de', current: 'fr'), ['en', 'de', 'fr']);
+      // English is the default list everywhere, so nothing changes for it.
+      expect(codes('de', current: 'en'), ['en', 'de']);
+    });
+  });
+
   group('translations', () {
     Future<I18n> load(String code) async {
       final i = I18n(loader: (p) => File(p).readAsString());

@@ -354,7 +354,7 @@
   "map.layer_title": "Àwọn irí àwòkọ́ṣe",
   "route.done": "Lò òna yìí",
   "route.build": "Kọ òna rẹ",
-  "map.layer_night": "Òru",
+  "map.layer_night": "Ìfihàn oorú òru",
   "route.undo": "Fọwọ́sí",
   "route.busy": "A ń ya òna rẹ…",
   "map.layer_satellite": "Satellite",
@@ -405,5 +405,16 @@
   "watch.test_btn": "Fi Ã¬dÃ¡nwÃ² rÃ¡ná¹£áº¹Ì sÃ­ aá¹£á»á»Ì mi",
   "watch.test_title": "ÃŒdÃ¡nwÃ² Sentri",
   "watch.test_body": "ÃŒwá»Ì€nyÃ­ ni bÃ­ Ã¬kÃ¬lá»Ì€ á¹£e yÃ³Ã² dÃ  nÃ­ aá¹£á»á»Ì ráº¹.",
-  "watch.test_sent": "A rÃ¡ná¹£áº¹Ì. Wo á»wá»Ì ráº¹ - yÃ³Ã² mÃº áº¹Ì lÃ¡Ã¬páº¹Ì. Jáº¹Ì kÃ­ Ã¬mÃºlÃ² Ã¬kÃ¬lá»Ì€ Sentri wÃ  nÃ­ Ã¬wá»Ì€n."
+  "watch.test_sent": "A rÃ¡ná¹£áº¹Ì. Wo á»wá»Ì ráº¹ - yÃ³Ã² mÃº áº¹Ì lÃ¡Ã¬páº¹Ì. Jáº¹Ì kÃ­ Ã¬mÃºlÃ² Ã¬kÃ¬lá»Ì€ Sentri wÃ  nÃ­ Ã¬wá»Ì€n.",
+  "contacts.pick": "Yàn nínú àwọn olùbáṣepọ̀ rẹ",
+  "contacts.perm_denied": "Ìfúnní àṣẹ lórí àwọn olùbáṣepọ̀ ti wà pa. Jẹ́ kí o fúnní àṣẹ nínú ètò fọ́n rẹ, lẹ́yìn náà gbìyànjú lẹ́ẹ̀kansi.",
+  "contacts.pick_failed": "Kò ṣe é ṣí àkójọ àwọn olùbáṣepọ̀. Gbìyànjú lẹ́ẹ̀kansi.",
+  "contacts.pick_no_number": "Olùbáṣepọ̀ yẹn kò ní nọ́mbà fọ́n tí a fipamọ́.",
+  "health.water_first": "Ìkìlọ̀ mímu omi ti wà: gbogbo {n}. Fòón yẹn ni ẹ̀rí wípé ìkìlọ̀ ń ṣiṣẹ́.",
+  "travel.title": "Ìrìnkèrindò",
+  "travel.note": "Fọ́n rẹ ń ka bí o ṣe ń gbera — láti ẹsẹ̀, kèkè, mọ́tọ, ọ̀kọ̀ ìrín tàbí ọ̀kọ̀ ìfurufú. Nígbà tí o bá fi ìkìlọ̀ ránṣẹ́ tàbí pín ipò rẹ, àwọn olùbáṣepọ̀ rẹ náà yóò ríi. Kò sí ohun tí a ń pín láti inú ìwò yìí.",
+  "travel.waiting": "Ó ń wá bí o ṣe ń tàjárá...",
+  "travel.speed": "Ní ọ̀nà {n} km/h",
+  "travel.stream_failed": "Kò lè ka ipò rẹ báyìí. Ríi dájú wípé wọ́n fúnní àṣẹ lórí ipò, lẹ́yìn náà ṣí mọ́.",
+  "map.night_note": "Ìfihàn òru: àpòtẹ òru ń tán níbi tí o ti kọjá. Ó ń fihàn ọ̀nà rẹ tí a rí télẹ̀ — kò sí àmì míràn."
 }

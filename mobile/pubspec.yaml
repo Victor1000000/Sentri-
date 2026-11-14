@@ -33,6 +33,9 @@ dependencies:
   camera: 0.11.4
   pedometer: ^4.1.1
   image_picker: ^1.1.2
+  # v42: Add contact picks numbers from the phone's own saved contacts
+  # (READ_CONTACTS asked in the sheet, one tap fills the phone field).
+  flutter_contacts: 1.1.9
 
 dev_dependencies:
   flutter_test:

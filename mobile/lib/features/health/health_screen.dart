@@ -24,6 +24,7 @@ import 'exercise_controller.dart';
 import 'health_controller.dart';
 import 'route_builder.dart';
 import 'workout_screen.dart';
+import '../devices/watch_screen.dart';
 import '../map/map_screen.dart' show sentriBaseLayers;
 
 /// The Health tab: heart-rate readings taken by the app itself - fingertip over the
@@ -145,6 +146,21 @@ class _HealthScreenState extends State<HealthScreen> {
             const SizedBox(height: 20),
             _section('WATER', t('health.water'), Icons.water_drop_outlined),
             _waterCard(context),
+            const SizedBox(height: 20),
+            // v42: the connect-device card Vic asked for, in the Health section
+            // where he looked for it: opens the honest Watches screen (a paired
+            // Wear OS watch mirrors the phone's notifications; the screen has a
+            // test ping so he can see it arrive).
+            _section('CONNECT DEVICE', t('watch.card'), Icons.watch_outlined),
+            Card(
+              child: ListTile(
+                leading: Icon(Icons.watch_outlined, color: cs.primary),
+                title: Text(t('watch.card')),
+                subtitle: Text(t('watch.card_sub'), style: TextStyle(fontSize: 12, height: 1.3, color: cs.onSurface.withValues(alpha: 0.55))),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => WatchScreen(i18n: widget.health.i18n))),
+              ),
+            ),
             const SizedBox(height: 20),
             _section('EXERCISE', t('exercise.title'), Icons.directions_run),
             _exerciseCard(context, cs),
@@ -436,7 +452,15 @@ class _HealthScreenState extends State<HealthScreen> {
                     selected: s.waterMinutes == m,
                     child: GestureDetector(
                       onTap: () async {
+                        final wasOff = s.waterMinutes == 0;
                         await s.update(waterMinutes: m);
+                        // v42: turning the reminder ON rings one notice right away -
+                        // the person sees within seconds that notifications really do
+                        // arrive from Sentri, instead of waiting a full pace to find
+                        // out. The chain's first scheduled link still comes one pace later.
+                        if (wasOff && m > 0) {
+                          await showHealthNote(t('health.water_title'), t('health.water_first', {'n': label(m)}));
+                        }
                         // After every pace change, the honest state is read back.
                         await h.refreshWaterStatus();
                       },

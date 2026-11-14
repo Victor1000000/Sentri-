@@ -21,6 +21,22 @@ const supportedLanguages = <AppLanguage>[
   // English table carries is translated, and test_units.dart enforces that.
   AppLanguage('fr', 'Français'),
   AppLanguage('es', 'Español'),
+  // v42, world: the countries outside Nigeria speak more than English, so the
+  // language sheet now offers the major language of each region too. Each one
+  // ships as a full translation of every English key, and the parity test
+  // covers them automatically. The translations are machine-assisted.
+  AppLanguage('sw', 'Kiswahili'),
+  AppLanguage('am', 'አማርኛ'),
+  AppLanguage('pt', 'Português'),
+  AppLanguage('de', 'Deutsch'),
+  AppLanguage('it', 'Italiano'),
+  AppLanguage('ar', 'العربية'),
+  AppLanguage('tr', 'Türkçe'),
+  AppLanguage('id', 'Bahasa Indonesia'),
+  AppLanguage('hi', 'हिन्दी'),
+  AppLanguage('ja', '日本語'),
+  AppLanguage('ko', '한국어'),
+  AppLanguage('ru', 'Русский'),
 ];
 
 AppLanguage _lang(String code) => supportedLanguages.firstWhere((l) => l.code == code);
@@ -30,11 +46,31 @@ AppLanguage _lang(String code) => supportedLanguages.firstWhere((l) => l.code ==
 /// Spanish speaking countries get their language alongside English; everywhere
 /// else English alone. `current` is always included, so nobody can ever be
 /// switched into a list that hides the language they are reading.
+///
+/// v42, world: each region's major language joins the sheet for that region's
+/// countries, next to English (or French/Spanish where those are the regional
+/// second language). English always stays on every list, so any country whose
+/// language is not shipped yet still reads it - nothing here can lock a person
+/// out of the app's words.
 List<AppLanguage> languagesForCountry(String? iso, {String current = 'en'}) {
   final set = switch (iso?.toLowerCase()) {
     'ng' => ['en', 'pcm', 'ha', 'yo', 'ig'],
-    'fr' || 'sn' || 'ci' || 'cm' || 'dz' || 'ma' || 'tn' || 'cd' || 'rw' || 'be' || 'ch' => ['en', 'fr'],
+    // v42: the wider world, language by language.
+    'ke' || 'tz' || 'ug' => ['en', 'sw'],
+    'et' => ['en', 'am'],
+    'pt' || 'br' || 'ao' || 'mz' => ['en', 'pt'],
+    'de' || 'at' => ['en', 'de'],
+    'ch' => ['en', 'de', 'fr', 'it'],
+    'it' => ['en', 'it'],
+    'fr' || 'sn' || 'ci' || 'cm' || 'dz' || 'ma' || 'tn' || 'cd' || 'rw' || 'be' => ['en', 'fr'],
     'es' || 'mx' || 'ar' || 'cl' || 'co' || 'pe' => ['en', 'es'],
+    'eg' || 'sa' || 'ae' => ['en', 'ar'],
+    'tr' => ['en', 'tr'],
+    'id' => ['en', 'id'],
+    'in' => ['en', 'hi'],
+    'jp' => ['en', 'ja'],
+    'kr' => ['en', 'ko'],
+    'ru' => ['en', 'ru'],
     _ => ['en'],
   };
   final out = <AppLanguage>[];

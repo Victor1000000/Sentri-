@@ -354,7 +354,7 @@
   "map.layer_title": "Capas del mapa",
   "route.done": "Usar esta ruta",
   "route.build": "Prepara tu ruta",
-  "map.layer_night": "Noche",
+  "map.layer_night": "Visión nocturna térmica",
   "route.undo": "Deshacer",
   "route.busy": "Trazando tu ruta…",
   "map.layer_satellite": "Satélite",
@@ -405,5 +405,16 @@
   "watch.test_btn": "Enviar un ping de prueba a mi reloj",
   "watch.test_title": "Ping de prueba de Sentri",
   "watch.test_body": "AsÃ­ se verÃ¡ una alerta en tu reloj.",
-  "watch.test_sent": "Ping enviado. Mira tu muÃ±eca - deberÃ­a vibrar enseguida. MantÃ©n las notificaciones de Sentri permitidas."
+  "watch.test_sent": "Ping enviado. Mira tu muÃ±eca - deberÃ­a vibrar enseguida. MantÃ©n las notificaciones de Sentri permitidas.",
+  "contacts.pick": "Elegir de los contactos",
+  "contacts.perm_denied": "El permiso de contactos está desactivado. Actívalo en los ajustes del teléfono y vuelve a intentarlo.",
+  "contacts.pick_failed": "No se pudo abrir la lista de contactos. Inténtalo de nuevo.",
+  "contacts.pick_no_number": "Ese contacto no tiene número de teléfono guardado.",
+  "health.water_first": "Recordatorio de agua programado: cada {n}. Este aviso es tu prueba de que las notificaciones funcionan.",
+  "travel.title": "Viajes",
+  "travel.note": "Tu teléfono lee cómo te desplazas — a pie, en bici, coche, tren o avión. Cuando envías una alerta o compartes en vivo, tus contactos también lo ven. Nada se comparte desde esta pantalla.",
+  "travel.waiting": "Buscando tu velocidad...",
+  "travel.speed": "Unos {n} km/h",
+  "travel.stream_failed": "No se puede leer tu ubicación ahora. Asegúrate de que la ubicación está permitida y vuelve a abrir.",
+  "map.night_note": "Visión nocturna: el mapa oscuro brilla por donde pasaste. Dibuja solo tus propias rutas registradas — ningún otro dato."
 }

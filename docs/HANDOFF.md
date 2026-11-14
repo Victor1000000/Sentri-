@@ -862,3 +862,91 @@ languages, watches.
   (no flight-number lookup); the watch test ping proves the mirror path, not a
   native Wear OS app (none is installed); fr/es (and ha/yo/ig/pcm) translations
   are machine-assisted - flagged in the delivery report.
+
+## 26. Version 42 (this patch) — engineer's notes
+
+Vic's round five: nine asks off his screenshots - profile save crash, heart-rate
+countdown back to 30 s, drink-water notifications, add contacts from the phone,
+a travel icon on the home screen, night mode as a heat map, police/firefighter
+pictures from different countries, per-country languages like Nigeria's, and a
+"connect device" card in the Health section.
+
+- PROFILE SAVE CRASH: every Profile `_store` call now runs through try/catch'd
+  `_read/_write/_delete` helpers (a storage failure shows a message instead of
+  crashing); `setName` resolves after the local write and mirrors to the server
+  fire-and-forget (`unawaited`); `home_screen._save` is fully guarded and always
+  pops via `canPop()`; the avatar picker caps at 512 px q78; `Image.memory` in
+  `_Avatar` got an `errorBuilder` fallback so a bad byte can never brick the tab.
+- HEART RATE: `secondsTarget` back to 30 s (15 s broke in v39, 20 s still failed
+  on Vic's device in v41). All v40/v41 hardening is kept (window split, 15%
+  agreement bar, newest-half fallback). Honest caveat: 30 s + the fallback is
+  the on-device bet, camera coverage and lighting still matter.
+- DRINK-WATER: root cause was `_local.initialize` only running inside
+  `PushService.start`. `push_service.dart` now has `_ensureLocal()` (idempotent,
+  `_localReady` flag) called from `scheduleWaterReminder`, `waterReminderStatus`
+  and `showHealthNote`, so a pace set before any push ever started still
+  schedules. Turning a pace 0 -> n fires an instant `showHealthNote` - the sound
+  the person hears proves notifications work (`health.water_first`). The
+  manifest gains `USE_EXACT_ALARM` (48 one-shot alarms 7300..7347 must fire even
+  when `SCHEDULE_EXACT_ALARM` is not granted) and `READ_CONTACTS`.
+- CONTACTS FROM THE PHONE: `flutter_contacts: 1.1.9` (pinned). The add-contact
+  sheet gains "pick from contacts": `Permission.contacts.request()` ->
+  `FlutterContacts.selectContact()` -> `getContact(picked.id, withProperties:
+  true)` -> first phone into `_phone`. Sheet height 330 -> 400, autofocus
+  removed (it re-opened the keyboard over the picker return). New keys:
+  contacts.pick/perm_denied/pick_failed/pick_no_number.
+- TRAVEL TILE: a fourth home `_CircleTile` (Icons.flight_takeoff_rounded,
+  t('travel.title')) opens travel_screen.dart (NEW LEAF). TravelWatcher is fed
+  by `location.positions(distanceFilterM: 8)` and shows still/walk/run/bike/
+  car/train/flight with the live speed. Honest: nothing is shared from this
+  screen; the mode rides with alerts and live shares only.
+- NIGHT-VISION HEAT MAP: the 'night' map layer is now the CARTO dark base plus
+  `_heat` blobs (cap 600 points, >=4 m spacing) drawn as 96 px radial-gradient
+  green->yellow circles in the MarkerLayer, fed from `_apply()` fixes and the
+  share listener's `liveTrail`. Honest note in the layers sheet
+  (`map.night_note`): it lights up only where the person themselves has been.
+- REGIONAL POLICE & FIRE PHOTOS: photos24/photo_police_world.dart (NEW LEAF,
+  ~4.09 MB, 12 base64 consts) serves `policePhotoForCountry(iso)`/
+  `firePhotoForCountry(iso)` by region: police - west_africa Nigeria FPU (CC0,
+  AMISOM), east_africa Emily Onyango (CC BY-SA 4.0), south_africa Cape Town
+  Metro (CC BY-SA 4.0), europe Met officer (CC BY 2.0), americas NYPD (CC BY
+  2.0), mena Dubai Police (CC BY 2.0), south_asia Delhi Tourist Police (PD),
+  east_asia Kuala Lumpur traffic (CC BY-SA 3.0); fire - europe FFW
+  Hebertshausen (CC BY-SA 3.0), americas FDNY (CC BY 2.0), africa
+  StevenTerblanche (CC BY-SA 4.0), asia Singapore SCDF (CC BY-SA 4.0). The
+  world card on the Police tab shows a 150 px police banner (flag + country
+  overlay) above the card and a 120 px fire banner below; Nigeria keeps its own
+  NPF banner. Decode-once cache; a country not in the maps shows no photo.
+- PER-COUNTRY LANGUAGES: 12 new FULL languages (sw, am, pt, de, it, ar, tr,
+  id, hi, ja, ko, ru) - every one of the 418 keys, test-enforced (the parity
+  test iterates supportedLanguages, so the new files are covered automatically).
+  `languagesForCountry` now maps ke/tz/ug -> sw, et -> am, pt/br/ao/mz -> pt,
+  de/at -> de, ch -> [en,de,fr,it], it -> it, the fr-set -> fr, the es-set ->
+  es, eg/sa/ae -> ar, tr -> tr, id -> id, in -> hi, jp -> ja, kr -> ko, ru ->
+  ru, else en; English stays on every list. Five new languagesForCountry tests
+  in test_units.dart (NG unchanged, ke/sw, ch, unknown->en, current always
+  kept). Machine-assisted - flagged in the delivery report.
+- CONNECT DEVICE: a Watches card sits in the Health section (where Vic looked
+  for it) and opens the honest v41 Watches screen (Wear OS notification
+  mirroring + test ping).
+- i18n: 11 new keys x7 existing tables (contacts.pick/perm_denied/
+  pick_failed/pick_no_number, health.water_first, travel.title/note/waiting/
+  speed/stream_failed, map.night_note; map.layer_night reworded in all seven)
+  + 12 new full tables = 418 x19. i18ncheck42.ps1 (new) parses every table,
+  checks key-set + placeholder parity vs en and catches duplicate keys (found
+  and fixed a stray duplicate perm.title in pt). verify-i18n42.ps1 = 19 x 418.
+- Gates & counts: expect 136 mobile tests (was 131: +5 languagesForCountry) -
+  count HONESTLY, do not tune the expectation to the result. Backend unchanged
+  (no backend tests added or moved). check-apk20 expects 418 x19, carries the
+  v42 JSON/.so needles (contacts.pick, travel.*, map.night_note,
+  health.water_first, watch.card, TravelScreen, policePhotoForCountry), the
+  flutter_contacts dex check, USE_EXACT_ALARM + READ_CONTACTS in the binary
+  manifest, and twelve deep 88-char Latin-1 b64 needles for the world photos
+  (chunk 200 of each const - the JPEG header is shared by every
+  System.Drawing re-encode, the v41 lesson; chunk 200 verified unique inside
+  the leaf).
+- Deferred (honest list for Vic): the heart heat map shows the person's OWN
+  tracked routes only; the regional photos are a regional representative, not
+  each country's own service; watch support remains notification mirroring, not
+  a native Wear OS app; all non-en translations machine-assisted.
+
